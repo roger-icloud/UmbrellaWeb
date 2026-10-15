@@ -157,6 +157,14 @@
     const MODES = ['FORCE', 'VELOCITY', 'STEER'];
     let steerMode = 0;
 
+    // Many Android devices report the motion axes with the opposite sign
+    // convention to iOS. Auto-flip on Android; ?tilt=normal / ?tilt=invert
+    // in the URL forces either way for testing.
+    const qs = new URLSearchParams(location.search);
+    const AXIS_FLIP = qs.get('tilt') === 'invert' ? true
+      : qs.get('tilt') === 'normal' ? false
+        : /android/i.test(navigator.userAgent);
+
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
     const ctx = cv.getContext('2d');
@@ -234,7 +242,9 @@
     window.addEventListener('devicemotion', (e) => {
       const g = e.accelerationIncludingGravity;
       if (!g || g.x === null) return;
-      rawX = g.x; rawY = g.y; rawZ = g.z;
+      rawX = AXIS_FLIP ? -g.x : g.x;
+      rawY = AXIS_FLIP ? -g.y : g.y;
+      rawZ = g.z;
       smX += (rawX - smX) * SMOOTHING;
       smY += (rawY - smY) * SMOOTHING;
       motionCount++;
@@ -376,7 +386,7 @@
         '\nsteer ' + MODES[steerMode] + '  (button top-right cycles)' +
         '\nraw  x ' + rawX.toFixed(2) + '  y ' + rawY.toFixed(2) + '  z ' + rawZ.toFixed(2) +
         '\nsmth x ' + smX.toFixed(2) + '  y ' + smY.toFixed(2) +
-        '\nmotion events ' + motionHz + '/s' +
+        '\nmotion events ' + motionHz + '/s' + (AXIS_FLIP ? '  tilt-flip' : '') +
         '\nball ' + Math.round(Math.hypot(ball.vx, ball.vy)) + ' px/s';
     }
 

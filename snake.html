@@ -157,6 +157,14 @@
     const TAP_PAD = 10;     // extra tap tolerance around numerals, px
     const MANUAL_TILT = 1.5;    // tilt magnitude that cancels tap-autopilot
 
+    // Many Android devices report the motion axes with the opposite sign
+    // convention to iOS — tilt arrives inverted. Auto-flip on Android;
+    // append ?tilt=normal or ?tilt=invert to the URL to force either way.
+    const qs = new URLSearchParams(location.search);
+    const AXIS_FLIP = qs.get('tilt') === 'invert' ? true
+      : qs.get('tilt') === 'normal' ? false
+        : /android/i.test(navigator.userAgent);
+
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
     const ctx = cv.getContext('2d');
@@ -290,8 +298,10 @@
     window.addEventListener('devicemotion', (e) => {
       const g = e.accelerationIncludingGravity;
       if (!g || g.x === null) return;
-      smX += (g.x - smX) * SMOOTHING;
-      smY += (g.y - smY) * SMOOTHING;
+      const gx = AXIS_FLIP ? -g.x : g.x;
+      const gy = AXIS_FLIP ? -g.y : g.y;
+      smX += (gx - smX) * SMOOTHING;
+      smY += (gy - smY) * SMOOTHING;
       tiltOn = true;
       motionCount++;
     });
@@ -509,7 +519,7 @@
         const got = nextIdx;
         hud.textContent = '×' + table + '   ' + got + '/12' +
           (got < 12 ? '   next ' + table * (got + 1) : '') +
-          '\nmotion ' + motionHz + '/s';
+          '\nmotion ' + motionHz + '/s' + (AXIS_FLIP ? '  tilt-flip' : '');
       } else {
         hud.textContent = '';
       }

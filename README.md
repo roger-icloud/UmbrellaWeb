@@ -1,61 +1,53 @@
-# UmbrellaWeb — tilt probe
+# UmbrellaWeb — standalone web activities
 
-Created 2026-09-26. A single-file web probe (`index.html`) to answer:
-is device tilt usable for steering in a browser, and how does it compare
-with touch?
+Static site, no build step. Live at
+**https://roger-icloud.github.io/UmbrellaWeb/** (GitHub Pages, auto-rebuilds
+~1 min after each push to `main`).
 
-## What it is
+## Pages
 
-- One canvas ball, three steering modes (button, top-right):
-  - **FORCE** — tilt applies acceleration; glide + bounce. Feels elastic.
-  - **VELOCITY** — tilt sets speed directly; level = stop. Isolates sensor lag.
-  - **STEER** — tilt picks a heading, ball turns toward it at a capped rate.
-    Closest stand-in for snake heading-control.
-- Touch-drag / mouse-drag steers in every mode — the comparison control,
-  and also means the page is fully usable on a desktop Mac.
-- HUD (top-left text panel): input mode, raw + smoothed gravity,
-  motion events per second, ball speed. `motion events` is the key
-  diagnostic — ~60/s feels near-native; low or steppy = browser tax.
-- Orientation handling: after the enabling tap it requests JS fullscreen
-  (`requestFullscreen`, best-effort — iPhone support is recent and
-  WKWebView browsers may refuse) then attempts
-  `screen.orientation.lock('portrait')`, which has better odds inside
-  fullscreen. Detect-and-warn fallback remains: rotating to landscape
-  pauses the sim under a "Rotate back" notice (verified stable on
-  resumption, incl. DuckDuckGo iOS).
-- Standalone mode: `apple-mobile-web-app-capable` is set, so iOS
-  "Add to Home Screen" launches it chromeless like an app.
-- `visibilitychange` resets smoothed motion state on return (stale
-  gravity after lock/tab-switch would lurch the ball).
-- Tunables are constants at the top of `index.html`.
+- `index.html` — landing/intro page. Roger's introduction sits between
+  clearly-marked HTML comments; edit the text in any editor and push.
+- `snake.html` — Table Snake. Tilt- or touch-steered snake collects the
+  twelve multiples of a chosen table **in order**; each becomes a numbered
+  tail segment. Wrong-order contact = amber refusal flash, no penalty.
+  Extras: tap the next numeral to autopilot toward it; idle-time hint
+  system (stronger target pulse, then a pointing arrow — all tunable).
+- `ball.html` — the original bare tilt probe (three steering modes, HUD
+  diagnostics). Development tool, not a game.
+- `feedback.html` — adult-facing feedback form → email via formsubmit.co.
+  Set `FEEDBACK_EMAIL` in the page's script (one constant, top of script);
+  first submission sends a one-time activation link to that address.
+- `nav.js` — shared burger menu (top-left). Edit `ITEMS` there and every
+  page updates together. Includes a fullscreen toggle (works on
+  Android/iPad; silently no-ops where iOS refuses element fullscreen).
 
-## Serve it
+## Conventions
+
+- One file per page, tunables as constants at the top of each script.
+- Portrait assumed for tilt games; landscape = pause + "Rotate back"
+  (web pages can't force-lock orientation on iOS — the guard is the
+  ceiling; Android accepts the real lock).
+- Telemetry: snake.html keeps an in-memory `events` array with an
+  ephemeral per-load session id — wiring a POST endpoint is a future
+  step, deliberately anonymous (no cookies, no storage, no identity).
+
+## Local serving (for testing unpushed edits)
 
 ```bash
 cd ~/Developer/UmbrellaWeb
-python3 -m http.server 8000        # terminal 1 (or Simple Web Server)
-cloudflared tunnel --url http://localhost:8000   # terminal 2
+python3 -m http.server 8000        # terminal 1
+cloudflared tunnel --url http://localhost:8000   # terminal 2 → temp HTTPS URL
 ```
 
-cloudflared prints a `https://…trycloudflare.com` URL — real cert, no
-account, works on any device/network. URL changes each run; Ctrl-C stops.
-(`brew install cloudflared` if missing; `brew install qrencode` +
-`qrencode -t UTF8 "<url>"` to show a QR instead of typing it.)
-
-On the device: open the URL in Safari, tap the button — iOS requires a
-user-gesture `DeviceMotionEvent.requestPermission()` before motion data
-flows.
+On the device: open the URL in Safari/Chrome, tap the button — iOS
+requires a user-gesture `DeviceMotionEvent.requestPermission()` before
+motion data flows; Android needs no prompt.
 
 ## Status / open questions
 
-- Verified working on iPhone 8 via cloudflared tunnel (2026-09-26):
-  permission flow + tilt steering functional. "Feels bouncy/elastic" in
-  FORCE mode — expected: force+low friction reads springy; VELOCITY/STEER
-  added to separate sensor lag from physics model.
-- Physics feel on Mac via mouse-drag rated "more physical than a sprite"
-  — second-order control (input→force→velocity→position) doing its job.
-- **Not yet reported:** actual `motion events`/s on device — the number
-  that decides whether browser tilt is a path or a curiosity.
-- Motion math assumes portrait; no axis remap on rotation (probe only).
-- Relevance: parked Umbrella "password-free web prototype" objective —
-  this is its feasibility probe.
+- Verified on iPhone 8 (snake + probe) via HTTPS. Android untested —
+  expect sensor-feel tuning (`TILT_DEAD`, `SMOOTHING`) rather than bugs.
+- Actual `motion events`/s on device still unmeasured (HUD shows it).
+- Parked Umbrella objective "password-free web prototype" — this repo is
+  its realisation.

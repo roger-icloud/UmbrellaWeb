@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Feedback — Umbrella</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background: #101418;
+      color: #cfd8e0;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+
+    main {
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 72px 24px 48px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin: 0 0 10px;
+    }
+
+    .note {
+      font-size: 13px;
+      color: #8a97a3;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      color: #8a97a3;
+      margin: 18px 0 6px;
+    }
+
+    select,
+    textarea,
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px 14px;
+      font-size: 16px;
+      font-family: inherit;
+      color: #cfd8e0;
+      background: #1a2430;
+      border: 1px solid #2c3e50;
+      border-radius: 10px;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    input {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    button.send {
+      margin-top: 22px;
+      width: 100%;
+      padding: 16px;
+      font-size: 17px;
+      border: none;
+      border-radius: 12px;
+      background: #4da3ff;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    #thanks {
+      font-size: 17px;
+      color: #7fe0b8;
+      margin-top: 20px;
+    }
+
+    .alt {
+      font-size: 13px;
+      color: #5f6e7c;
+      margin-top: 26px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Feedback</h1>
+    <p class="note">
+      These are experimental activities — what children do with them, and what
+      adults observe, is what steers the design. A sentence or two is plenty:
+      what was tried, what was surprising, where interest was lost.
+    </p>
+
+    <form id="fb">
+      <label for="which">Which activity?</label>
+      <select id="which" name="activity">
+        <option>Table Snake</option>
+        <option>Tilt Ball</option>
+        <option>The site in general</option>
+      </select>
+
+      <label for="role">You are a… (optional)</label>
+      <select id="role" name="role">
+        <option value="">—</option>
+        <option>Teacher</option>
+        <option>Parent</option>
+        <option>Child</option>
+        <option>Other</option>
+      </select>
+
+      <label for="msg">Your message</label>
+      <textarea id="msg" name="message" required
+        placeholder="e.g. My class tried the snake…"></textarea>
+
+      <label for="em">Email — only if you'd like a reply (optional)</label>
+      <input id="em" name="email" type="email" autocomplete="off">
+
+      <button class="send" type="submit">Send</button>
+      <div id="thanks"></div>
+    </form>
+
+    <p class="alt">
+      No accounts, no cookies, no tracking — your message goes straight to the
+      developer's inbox and nothing is stored on this site.
+    </p>
+  </main>
+
+  <script>
+    'use strict';
+
+    /* ---------- configuration ---------- */
+    // The address feedback is delivered to. Set once, works forever.
+    // First submission triggers a one-time activation email from
+    // formsubmit.co — click its confirm link once and it's live.
+    const FEEDBACK_EMAIL = '';   // e.g. 'you@example.com'
+
+    const form = document.getElementById('fb');
+    const thanks = document.getElementById('thanks');
+
+    if (!FEEDBACK_EMAIL) {
+      thanks.textContent = 'Feedback address is being configured — please check back soon.';
+      thanks.style.color = '#8a97a3';
+      form.querySelector('.send').style.display = 'none';
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!FEEDBACK_EMAIL) return;
+      const data = Object.fromEntries(new FormData(form).entries());
+      try {
+        const res = await fetch('https://formsubmit.co/ajax/' + encodeURIComponent(FEEDBACK_EMAIL), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ _subject: 'Umbrella feedback — ' + data.activity, ...data }),
+        });
+        if (!res.ok) throw new Error(res.status);
+        form.reset();
+        thanks.textContent = 'Thank you — received.';
+      } catch (err) {
+        thanks.style.color = '#e0a53a';
+        thanks.innerHTML = 'Could not send automatically — ' +
+          '<a style="color:#4da3ff" href="mailto:' + FEEDBACK_EMAIL +
+          '?subject=Umbrella feedback&body=' +
+          encodeURIComponent('Activity: ' + data.activity + '\nRole: ' + (data.role || '—') +
+            '\n\n' + data.message) + '">send it by email instead</a>.';
+      }
+    });
+  </script>
+
+  <script src="nav.js"></script>
+</body>
+
+</html>

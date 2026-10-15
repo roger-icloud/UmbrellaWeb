@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Tilt Ball — motion probe</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, ui-monospace, Menlo, monospace;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #hud {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 8px) + 46px);
+      left: 8px;
+      color: #7f9bb0;
+      font-size: 11px;
+      line-height: 1.5;
+      background: rgba(10, 14, 18, .55);
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      white-space: pre;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .85);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    #overlay button {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    #overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    #rotOverlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .85);
+      color: #cfd8e0;
+      z-index: 9;
+      text-align: center;
+      padding: 24px;
+    }
+
+    #rotOverlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    #modeBtn {
+      position: fixed;
+      top: env(safe-area-inset-top, 8px);
+      right: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid #3a4a58;
+      background: rgba(20, 28, 36, .8);
+      color: #b9c8d4;
+      z-index: 5;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="hud">waiting…</div>
+  <button id="modeBtn">FORCE</button>
+
+  <div id="rotOverlay" class="hidden">
+    <div style="font-size:22px">Rotate back</div>
+    <div class="sub">Tilt maths assumes portrait — paused until you're upright again.</div>
+  </div>
+
+  <div id="overlay">
+    <div style="font-size:22px">Tilt Ball</div>
+    <div class="sub">A probe for how usable device tilt is in a browser.
+      Tilt steers the ball. Dragging a finger steers it too —
+      that's the control condition for comparison.</div>
+    <button id="go">Tap to enable tilt</button>
+    <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const SMOOTHING = 0.18;   // low-pass on gravity input (0=none … 1=frozen)
+    const TILT_ACCEL = 900;    // px/s² per unit of gravity (FORCE mode)
+    const VEL_SPEED = 150;    // px/s per unit of gravity (VELOCITY mode)
+    const VEL_RESPOND = 10;     // how fast actual velocity chases target, /s
+    const STEER_SPEED = 500;    // px/s at full tilt (STEER mode)
+    const STEER_RATE = 7;      // rad/s the heading may turn
+    const STEER_DEAD = 0.5;    // tilt magnitude below which heading holds
+    const TOUCH_ACCEL = 1400;   // px/s² toward the finger when dragging
+    const FRICTION = 0.35;   // velocity damping per second (FORCE mode)
+    const RESTITUTION = 0.55;   // wall bounciness 0..1
+    const BALL_R = 26;
+    const MAX_SPEED = 2600;   // safety cap
+
+    // FORCE    tilt = push, glides on        (what you just tried)
+    // VELOCITY tilt = speed, stops on level  (isolates sensor lag)
+    // STEER    tilt = direction of travel    (snake-like heading control)
+    const MODES = ['FORCE', 'VELOCITY', 'STEER'];
+    let steerMode = 0;
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      W = window.innerWidth; H = window.innerHeight;
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    /* ---------- state ---------- */
+    const ball = { x: W / 2, y: H / 2, vx: 0, vy: 0 };
+    let smX = 0, smY = 0;            // smoothed gravity
+    let rawX = 0, rawY = 0, rawZ = 0;
+    let tiltOn = false;
+    let touch = null;                // {x,y} while dragging
+    let motionHz = 0, motionCount = 0, lastHzT = performance.now();
+    let mode = 'none';
+    let heading = -Math.PI / 2;      // STEER mode: direction of travel
+    let paused = false;              // true while rotated out of portrait
+
+    /* ---------- motion permission (iOS 13+) ---------- */
+    const overlay = document.getElementById('overlay');
+    const whyEl = document.getElementById('why');
+
+    function motionNeedsPermission() {
+      return typeof DeviceMotionEvent !== 'undefined'
+        && typeof DeviceMotionEvent.requestPermission === 'function';
+    }
+
+    document.getElementById('go').addEventListener('click', async () => {
+      try {
+        if (motionNeedsPermission()) {
+          const res = await DeviceMotionEvent.requestPermission();
+          if (res !== 'granted') {
+            whyEl.textContent = 'Permission was "' + res +
+              '" — tilt unavailable. Touch-drag still works; close this overlay?';
+            document.getElementById('go').textContent = 'Continue without tilt';
+            motionNeedsPermission.always = true;
+            document.getElementById('go').onclick = () => overlay.classList.add('hidden');
+            return;
+          }
+        }
+        overlay.classList.add('hidden');
+        tiltOn = true;
+        // keep screen awake while probing (best-effort)
+        if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => { });
+        // try JS fullscreen (needs this user gesture); orientation lock has
+        // better odds inside fullscreen, so attempt it after — both may be
+        // refused, and the detect-and-warn guard copes either way
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        Promise.resolve(req ? req.call(el) : null)
+          .catch(() => { })
+          .then(() => {
+            if (screen.orientation && screen.orientation.lock)
+              screen.orientation.lock('portrait').catch(() => { });
+          });
+      } catch (e) {
+        whyEl.textContent = 'Motion request failed: ' + e.message;
+      }
+    });
+
+    // Non-iOS browsers expose no requestPermission; still offer the button as an OK.
+    if (!motionNeedsPermission()) {
+      document.getElementById('go').textContent = 'Start';
+      whyEl.textContent = 'This browser does not gate motion behind a permission prompt.';
+    }
+
+    window.addEventListener('devicemotion', (e) => {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.x === null) return;
+      rawX = g.x; rawY = g.y; rawZ = g.z;
+      smX += (rawX - smX) * SMOOTHING;
+      smY += (rawY - smY) * SMOOTHING;
+      motionCount++;
+    });
+
+    /* ---------- touch steering ---------- */
+    function setTouch(t) { touch = { x: t.clientX, y: t.clientY }; }
+    cv.addEventListener('pointerdown', setTouch);
+    cv.addEventListener('pointermove', (t) => { if (t.buttons) setTouch(t); });
+    window.addEventListener('pointerup', () => touch = null);
+    window.addEventListener('pointercancel', () => touch = null);
+    cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
+
+    /* ---------- steering mode toggle ---------- */
+    const modeBtn = document.getElementById('modeBtn');
+    modeBtn.addEventListener('click', () => {
+      steerMode = (steerMode + 1) % MODES.length;
+      modeBtn.textContent = MODES[steerMode];
+      if (Math.hypot(ball.vx, ball.vy) > 10)
+        heading = Math.atan2(ball.vy, ball.vx);
+    });
+
+    /* ---------- orientation guard ---------- */
+    const rotOverlay = document.getElementById('rotOverlay');
+    function checkOrientation() {
+      const portrait = screen.orientation && screen.orientation.type
+        ? screen.orientation.type.startsWith('portrait')
+        : matchMedia('(orientation: portrait)').matches;
+      paused = !portrait;
+      rotOverlay.classList.toggle('hidden', portrait);
+    }
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+
+    // returning from lock/tab-switch: motion values can be stale —
+    // drop the smoothed state so the ball doesn't lurch on resume
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { smX = smY = 0; lastT = performance.now(); }
+    });
+
+    /* ---------- physics ---------- */
+    let lastT = performance.now();
+
+    function step(dt) {
+      if (paused) return;
+      if (touch) {
+        const dx = touch.x - ball.x, dy = touch.y - ball.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const pull = Math.min(d / 120, 1);          // ease off near the finger
+        ball.vx += (dx / d) * TOUCH_ACCEL * pull * dt;
+        ball.vy += (dy / d) * TOUCH_ACCEL * pull * dt;
+      }
+
+      if (tiltOn && !touch) {
+        // portrait assumption: gravity.x → screen right, gravity.y → up-screen,
+        // so tilt top-of-device away → ball should roll down-screen ⇒ use -y
+        const m = MODES[steerMode];
+
+        if (m === 'FORCE') {
+          ball.vx += smX * TILT_ACCEL * dt;
+          ball.vy += -smY * TILT_ACCEL * dt;
+          const damp = Math.exp(-FRICTION * dt);
+          ball.vx *= damp; ball.vy *= damp;
+
+        } else if (m === 'VELOCITY') {
+          const tx = smX * VEL_SPEED, ty = -smY * VEL_SPEED;
+          const k = Math.min(1, VEL_RESPOND * dt);
+          ball.vx += (tx - ball.vx) * k;
+          ball.vy += (ty - ball.vy) * k;
+
+        } else if (m === 'STEER') {
+          const mag = Math.hypot(smX, smY);
+          if (mag > STEER_DEAD) {
+            const target = Math.atan2(-smY, smX);
+            let d = target - heading;
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            heading += Math.max(-STEER_RATE * dt, Math.min(STEER_RATE * dt, d));
+          }
+          const spd = Math.max(0, Math.min(mag / 9.8, 1)) * STEER_SPEED;
+          if (mag > STEER_DEAD * 0.6) {
+            ball.vx = Math.cos(heading) * spd;
+            ball.vy = Math.sin(heading) * spd;
+          } else {
+            const fade = Math.exp(-4 * dt);   // ease to a stop when near level
+            ball.vx *= fade; ball.vy *= fade;
+          }
+        }
+      } else {
+        const damp = Math.exp(-FRICTION * dt);
+        ball.vx *= damp; ball.vy *= damp;
+      }
+
+      const sp = Math.hypot(ball.vx, ball.vy);
+      if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
+
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      if (ball.x < BALL_R) { ball.x = BALL_R; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.x > W - BALL_R) { ball.x = W - BALL_R; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.y < BALL_R) { ball.y = BALL_R; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
+      if (ball.y > H - BALL_R) { ball.y = H - BALL_R; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
+    }
+
+    /* ---------- draw + HUD ---------- */
+    const hud = document.getElementById('hud');
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+
+      // faint target cross at centre, handy for "hold level" judgement
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - 20, H / 2); ctx.lineTo(W / 2 + 20, H / 2);
+      ctx.moveTo(W / 2, H / 2 - 20); ctx.lineTo(W / 2, H / 2 + 20);
+      ctx.stroke();
+
+      const grd = ctx.createRadialGradient(
+        ball.x - BALL_R * 0.35, ball.y - BALL_R * 0.35, BALL_R * 0.2,
+        ball.x, ball.y, BALL_R);
+      grd.addColorStop(0, '#8ec9ff');
+      grd.addColorStop(1, '#1660c8');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function hudUpdate(now) {
+      if (now - lastHzT >= 500) {
+        motionHz = Math.round(motionCount * 1000 / (now - lastHzT));
+        motionCount = 0; lastHzT = now;
+      }
+      mode = touch ? 'TOUCH' : (tiltOn ? 'TILT' : 'none');
+      hud.textContent =
+        'mode ' + mode +
+        '\nsteer ' + MODES[steerMode] + '  (button top-right cycles)' +
+        '\nraw  x ' + rawX.toFixed(2) + '  y ' + rawY.toFixed(2) + '  z ' + rawZ.toFixed(2) +
+        '\nsmth x ' + smX.toFixed(2) + '  y ' + smY.toFixed(2) +
+        '\nmotion events ' + motionHz + '/s' +
+        '\nball ' + Math.round(Math.hypot(ball.vx, ball.vy)) + ' px/s';
+    }
+
+    function frame(now) {
+      const dt = Math.min((now - lastT) / 1000, 0.05);
+      lastT = now;
+      step(dt);
+      draw();
+      hudUpdate(now);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js"></script>
+</body>
+
+</html>

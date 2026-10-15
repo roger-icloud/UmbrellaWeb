@@ -30,7 +30,7 @@
 
     #hud {
       position: fixed;
-      top: env(safe-area-inset-top, 8px);
+      top: calc(env(safe-area-inset-top, 8px) + 46px);
       left: 8px;
       color: #7f9bb0;
       font-size: 12px;
@@ -115,7 +115,8 @@
   <div id="tableOverlay" class="overlay">
     <div class="title">Table Snake</div>
     <div class="sub">Choose a table. Steer the snake to collect its multiples
-      <b>in order</b> — each one becomes a tail segment.</div>
+      <b>in order</b> — each one becomes a tail segment.
+    </div>
     <div id="tableRow"></div>
   </div>
 
@@ -149,6 +150,12 @@
     const FLASH_SECS = 0.6;   // refusal ring duration
     const EAT_DIST = HEAD_R + NUM_R - 4;
     const TARGET_GLOW = true; // soft pulse on the next numeral to collect
+    const HINT_AFTER = 10;     // s idle before the target pulses harder
+    const HINT_ARROW_AFTER = 25;   // s idle before a direction arrow appears
+    const HINT_INTERVAL = 6;      // s between arrow flashes
+    const HINT_ARROW_SECS = 2.5;   // how long each arrow flash lasts
+    const TAP_PAD = 10;     // extra tap tolerance around numerals, px
+    const MANUAL_TILT = 1.5;    // tilt magnitude that cancels tap-autopilot
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
@@ -173,6 +180,8 @@
     let nums = [];               // {v, x, y, flashUntil}
     let nextIdx = 0;             // next multiple ordinal to collect
     let startT = 0, doneMs = 0;
+    let autoTarget = null;       // numeral the snake is being steered to by tap
+    let lastCollectT = 0;        // performance.now() of last collection / start
 
     // telemetry stub — event list kept in memory; a fetch() POST to a
     // serverless endpoint can be wired in here later (anon session id only)
@@ -266,6 +275,7 @@
     function startPlay() {
       state = 'play';
       startT = performance.now();
+      lastCollectT = performance.now();
       logEvent('start', { table });
     }
 
@@ -287,7 +297,19 @@
     });
 
     let touch = null;
-    cv.addEventListener('pointerdown', (t) => touch = { x: t.clientX, y: t.clientY });
+    cv.addEventListener('pointerdown', (t) => {
+      // a tap on the next numeral sends the snake straight to it;
+      // a tap on any other numeral is a refusal, not a steer
+      const i = nums.findIndex(n => !n.collected &&
+        Math.hypot(n.x - t.clientX, n.y - t.clientY) < NUM_R + TAP_PAD);
+      if (i >= 0) {
+        if (i === nextIdx) autoTarget = nums[i];
+        else if (performance.now() > nums[i].flashUntil)
+          nums[i].flashUntil = performance.now() + FLASH_SECS * 1000;
+        return;
+      }
+      touch = { x: t.clientX, y: t.clientY };
+    });
     cv.addEventListener('pointermove', (t) => { if (t.buttons) touch = { x: t.clientX, y: t.clientY }; });
     window.addEventListener('pointerup', () => touch = null);
     window.addEventListener('pointercancel', () => touch = null);
@@ -324,7 +346,12 @@
 
       let target = null;
       if (touch) {
+        autoTarget = null;
         target = Math.atan2(touch.y - head.y, touch.x - head.x);
+      } else if (autoTarget) {
+        // firm manual tilt overrides the tap-autopilot
+        if (tiltOn && Math.hypot(smX, smY) > MANUAL_TILT) autoTarget = null;
+        else target = Math.atan2(autoTarget.y - head.y, autoTarget.x - head.x);
       } else if (tiltOn) {
         const mag = Math.hypot(smX, smY);
         if (mag > TILT_DEAD) target = Math.atan2(-smY, smX);
@@ -359,6 +386,8 @@
         if (Math.hypot(n.x - head.x, n.y - head.y) < EAT_DIST) {
           if (i === nextIdx) {
             n.collected = true;
+            autoTarget = null;
+            lastCollectT = now;
             segs.unshift({ x: lead.x, y: lead.y, v: n.v });
             nextIdx++;
             logEvent('collect', { v: n.v, ord: nextIdx });
@@ -382,7 +411,7 @@
     /* ---------- draw ---------- */
     const hud = document.getElementById('hud');
 
-    function drawNum(n, isTarget) {
+    function drawNum(n, isTarget, hot) {
       const flash = n.flashUntil > performance.now();
       ctx.beginPath();
       ctx.arc(n.x, n.y, NUM_R, 0, Math.PI * 2);
@@ -393,9 +422,10 @@
       ctx.stroke();
       if (isTarget && TARGET_GLOW) {
         ctx.beginPath();
-        ctx.arc(n.x, n.y, NUM_R + 5 + Math.sin(performance.now() / 300) * 3, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(77,163,255,0.35)';
-        ctx.lineWidth = 2;
+        ctx.arc(n.x, n.y, NUM_R + (hot ? 9 : 5)
+          + Math.sin(performance.now() / (hot ? 160 : 300)) * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = hot ? 'rgba(77,163,255,0.7)' : 'rgba(77,163,255,0.35)';
+        ctx.lineWidth = hot ? 3 : 2;
         ctx.stroke();
       }
       ctx.fillStyle = flash ? '#e0a53a' : '#cfd8e0';
@@ -408,7 +438,32 @@
     function draw() {
       ctx.clearRect(0, 0, W, H);
 
-      nums.forEach((n, i) => { if (!n.collected) drawNum(n, i === nextIdx); });
+      const idle = (state === 'play' && lastCollectT)
+        ? (performance.now() - lastCollectT) / 1000 : 0;
+      nums.forEach((n, i) => {
+        if (!n.collected) drawNum(n, i === nextIdx, i === nextIdx && idle > HINT_AFTER);
+      });
+
+      // escalating hint: a faint arrow from the head toward the target
+      if (state === 'play' && nextIdx < 12 && idle > HINT_ARROW_AFTER
+        && idle % HINT_INTERVAL < HINT_ARROW_SECS) {
+        const n = nums[nextIdx];
+        const a = Math.atan2(n.y - head.y, n.x - head.x);
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const x1 = head.x + ca * (HEAD_R + 10), y1 = head.y + sa * (HEAD_R + 10);
+        const x2 = head.x + ca * (HEAD_R + 44), y2 = head.y + sa * (HEAD_R + 44);
+        ctx.strokeStyle = 'rgba(77,163,255,0.6)';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - Math.cos(a - 0.5) * 9, y2 - Math.sin(a - 0.5) * 9);
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - Math.cos(a + 0.5) * 9, y2 - Math.sin(a + 0.5) * 9);
+        ctx.stroke();
+      }
 
       // tail, drawn back-to-front
       for (let i = segs.length - 1; i >= 0; i--) {
@@ -473,6 +528,8 @@
     }
     requestAnimationFrame(frame);
   </script>
+
+  <script src="nav.js"></script>
 </body>
 
 </html>

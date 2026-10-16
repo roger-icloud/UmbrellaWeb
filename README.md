@@ -8,19 +8,33 @@ Static site, no build step. Live at
 
 - `index.html` — landing/intro page. Roger's introduction sits between
   clearly-marked HTML comments; edit the text in any editor and push.
-- `snake.html` — Table Snake. Tilt- or touch-steered snake collects the
-  twelve multiples of a chosen table **in order**; each becomes a numbered
-  tail segment. Wrong-order contact = amber refusal flash, no penalty.
-  Extras: tap the next numeral to autopilot toward it; idle-time hint
-  system (stronger target pulse, then a pointing arrow — all tunable).
-- `ball.html` — the original bare tilt probe (three steering modes, HUD
-  diagnostics). Development tool, not a game.
-- `feedback.html` — adult-facing feedback form → email via formsubmit.co.
-  Set `FEEDBACK_EMAIL` in the page's script (one constant, top of script);
-  first submission sends a one-time activation link to that address.
-- `nav.js` — shared burger menu (top-left). Edit `ITEMS` there and every
-  page updates together. Includes a fullscreen toggle (works on
+- `tilt-snake.html` — Tilt Snake. Tilt- or touch-steered snake collects
+  the twelve multiples of a chosen table **in order**; each becomes a
+  numbered tail segment. Wrong-order contact = amber refusal flash, no
+  penalty. Extras: tap the next numeral to autopilot toward it; idle-time
+  hint system (stronger target pulse, then a pointing arrow — all tunable).
+- `patterns.html` — Patterns. The hundred square: tap the twelve
+  multiples of a table (t…12t, any order) and watch its pattern emerge.
+  The board fills the screen at native cell size (no virtual
+  resolution — discrete space keeps its structure) and taps resolve to
+  the nearest cell centre, so below-44pt cells stay tappable.
+  `DEBUG_GRID` overlay shows the resolution boundaries.
+- `tilt-ball.html` — the original bare tilt probe (three steering modes,
+  HUD diagnostics). Development tool, not a game.
+- `feedback.html` — adult-facing feedback form → email via formsubmit.co
+  to roger.k.eve@outlook.com (`FEEDBACK_EMAIL` constant in the page).
+- `nav.js` — shared menu (top-right snake icon). Edit `ITEMS` there and
+  every page updates together. Includes a fullscreen toggle (works on
   Android/iPad; silently no-ops where iOS refuses element fullscreen).
+  Old filenames (`snake.html`, `search.html`, `ball.html`) are redirect
+  stubs so shared links keep working.
+
+## Naming
+
+Continuous-space pages scale everything proportionally through a single
+K factor ("design px" world on a 375-wide board — speed, radii and
+positions stay the same fraction of screen on every device). Discrete
+grids keep structure and adapt the input layer (centroid taps).
 
 ## Conventions
 

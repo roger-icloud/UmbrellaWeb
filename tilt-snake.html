@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Tilt Snake — Umbrella</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, ui-monospace, Menlo, monospace;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #hud {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 8px) + 52px);
+      left: 8px;
+      color: #7f9bb0;
+      font-size: 12px;
+      line-height: 1.5;
+      background: rgba(10, 14, 18, .55);
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      white-space: pre;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .88);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .overlay button.go {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    #tableRow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      max-width: 340px;
+      margin-top: 20px;
+    }
+
+    #tableRow button {
+      width: 52px;
+      height: 52px;
+      font-size: 18px;
+      border-radius: 12px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="hud"></div>
+
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Rotate back</div>
+    <div class="sub">Tilt maths assumes portrait — paused until you're upright again.</div>
+  </div>
+
+  <div id="tableOverlay" class="overlay">
+    <div class="title">Tilt Snake</div>
+    <div class="sub">Choose a table. Steer the snake to collect its multiples
+      <b>in order</b> — each one becomes a tail segment.
+    </div>
+    <div id="tableRow"></div>
+  </div>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="title" id="tableLabel"></div>
+    <div class="sub">Tilt steers the snake. Dragging a finger steers it too.</div>
+    <button class="go" id="go">Tap to enable tilt</button>
+    <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
+  </div>
+
+  <div id="doneOverlay" class="overlay hidden">
+    <div class="title" id="doneTitle">Complete!</div>
+    <div class="sub" id="doneStats"></div>
+    <button class="go" id="again">Another table</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const SNAKE_SPEED = 150;   // px/s constant forward speed
+    const TURN_RATE = 5.0;    // rad/s the heading may turn
+    const TILT_DEAD = 0.4;    // gravity magnitude below which heading holds
+    const SMOOTHING = 0.18;   // low-pass on gravity input
+    const HEAD_R = 18;
+    const SEG_R = 15;
+    const SEG_GAP = 30;       // centre spacing between tail segments
+    const NUM_R = 20;         // radius of scattered numeral circles
+    const NUM_MARGIN = 56;    // keep numerals this far from screen edge
+    const NUM_SEP = NUM_R * 2 + 34;  // min separation between numerals
+    const FLASH_SECS = 0.6;   // refusal ring duration
+    const EAT_DIST = HEAD_R + NUM_R - 4;
+    const TARGET_GLOW = true; // soft pulse on the next numeral to collect
+    const HINT_AFTER = 10;     // s idle before the target pulses harder
+    const HINT_ARROW_AFTER = 25;   // s idle before a direction arrow appears
+    const HINT_INTERVAL = 6;      // s between arrow flashes
+    const HINT_ARROW_SECS = 2.5;   // how long each arrow flash lasts
+    const TAP_PAD = 10;     // extra tap tolerance around numerals, px
+    const MANUAL_TILT = 1.5;    // tilt magnitude that cancels tap-autopilot
+
+    // Many Android devices report the motion axes with the opposite sign
+    // convention to iOS — tilt arrives inverted. Auto-flip on Android;
+    // append ?tilt=normal or ?tilt=invert to the URL to force either way.
+    const qs = new URLSearchParams(location.search);
+    const AXIS_FLIP = qs.get('tilt') === 'invert' ? true
+      : qs.get('tilt') === 'normal' ? false
+        : /android/i.test(navigator.userAgent);
+
+    /* ---------- game state ---------- */
+    let table = 7;
+    let state = 'menu';          // menu | ready | play | done
+    let head = { x: 0, y: 0 };   // positioned by reset() before play
+    let heading = -Math.PI / 2;
+    let segs = [];               // collected tail segments, index 0 = nearest head
+    let nums = [];               // {v, x, y, flashUntil}
+    let nextIdx = 0;             // next multiple ordinal to collect
+    let startT = 0, doneMs = 0;
+    let autoTarget = null;       // numeral the snake is being steered to by tap
+    let lastCollectT = 0;        // performance.now() of last collection / start
+
+    /* ---------- canvas: virtual resolution ----------
+       The whole game is laid out in "design px" — a board DESIGN_W wide,
+       matching the iPhone-8 space the tunables were chosen in. One scale
+       K (screen width / design width) maps design→real px at render time,
+       so positions, radii and speed all scale together: SNAKE_SPEED is a
+       constant fraction of screen per second on any device. Height is
+       left to breathe — taller screens simply get more logical room. */
+    const DESIGN_W = 375;
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, Wd = 0, Hd = 0, DPR = 1, K = 1;
+    function resize() {
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      W = window.innerWidth; H = window.innerHeight;
+      K = W / DESIGN_W;
+      Wd = DESIGN_W; Hd = H / K;
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR * K, 0, 0, DPR * K, 0, 0);
+      // a mid-game resize can shrink the logical board — clamp things in
+      nums.forEach(n => {
+        n.x = Math.min(Math.max(n.x, NUM_MARGIN), Wd - NUM_MARGIN);
+        n.y = Math.min(Math.max(n.y, NUM_MARGIN), Hd - NUM_MARGIN);
+      });
+      head.x = Math.min(Math.max(head.x, HEAD_R), Wd - HEAD_R);
+      head.y = Math.min(Math.max(head.y, HEAD_R), Hd - HEAD_R);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // telemetry stub — event list kept in memory; a fetch() POST to a
+    // serverless endpoint can be wired in here later (anon session id only)
+    const events = [];
+    const sid = Math.random().toString(36).slice(2, 10);
+    function logEvent(type, data) {
+      events.push({ t: Math.round(performance.now()), sid, type, ...data });
+    }
+
+    /* ---------- layout ---------- */
+    function dealNumerals() {
+      nums = [];
+      let guard = 0;
+      while (nums.length < 12 && guard++ < 4000) {
+        const x = NUM_MARGIN + Math.random() * (Wd - 2 * NUM_MARGIN);
+        const y = NUM_MARGIN + Math.random() * (Hd - 2 * NUM_MARGIN);
+        if (Math.hypot(x - head.x, y - head.y) < 140) continue;
+        if (nums.every(n => Math.hypot(n.x - x, n.y - y) >= NUM_SEP))
+          nums.push({ v: table * (nums.length + 1), x, y, flashUntil: 0 });
+      }
+      // scatter order is already random positions; values are assigned
+      // 1..12 so 'in order' means hunting the next value, not the nearest
+    }
+
+    function reset(tbl) {
+      table = tbl;
+      head = { x: Wd / 2, y: Hd * 0.62 };
+      heading = -Math.PI / 2;
+      segs = [];
+      nextIdx = 0;
+      dealNumerals();
+      logEvent('deal', { table });
+    }
+
+    /* ---------- table picker + permission overlay ---------- */
+    const tableOverlay = document.getElementById('tableOverlay');
+    const overlay = document.getElementById('overlay');
+    const doneOverlay = document.getElementById('doneOverlay');
+    const whyEl = document.getElementById('why');
+    const row = document.getElementById('tableRow');
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('click', () => {
+        reset(t);
+        document.getElementById('tableLabel').textContent = '×' + t + ' table';
+        tableOverlay.classList.add('hidden');
+        overlay.classList.remove('hidden');
+        state = 'ready';
+      });
+      row.appendChild(b);
+    }
+
+    function motionNeedsPermission() {
+      return typeof DeviceMotionEvent !== 'undefined'
+        && typeof DeviceMotionEvent.requestPermission === 'function';
+    }
+
+    document.getElementById('go').addEventListener('click', async () => {
+      try {
+        if (motionNeedsPermission()) {
+          const res = await DeviceMotionEvent.requestPermission();
+          if (res !== 'granted') {
+            whyEl.textContent = 'Permission "' + res +
+              '" — tilt unavailable, but touch-drag still works.';
+            document.getElementById('go').textContent = 'Play with touch';
+            document.getElementById('go').onclick = () => { overlay.classList.add('hidden'); startPlay(); };
+            return;
+          }
+        }
+        overlay.classList.add('hidden');
+        if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => { });
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        Promise.resolve(req ? req.call(el) : null)
+          .catch(() => { })
+          .then(() => {
+            if (screen.orientation && screen.orientation.lock)
+              screen.orientation.lock('portrait').catch(() => { });
+          });
+        startPlay();
+      } catch (e) {
+        whyEl.textContent = 'Motion request failed: ' + e.message;
+      }
+    });
+    if (!motionNeedsPermission()) {
+      document.getElementById('go').textContent = 'Play';
+      whyEl.textContent = 'This browser does not gate motion behind a permission prompt.';
+    }
+
+    function startPlay() {
+      state = 'play';
+      startT = performance.now();
+      lastCollectT = performance.now();
+      logEvent('start', { table });
+    }
+
+    document.getElementById('again').addEventListener('click', () => {
+      doneOverlay.classList.add('hidden');
+      tableOverlay.classList.remove('hidden');
+      state = 'menu';
+    });
+
+    /* ---------- input ---------- */
+    let smX = 0, smY = 0, tiltOn = false, motionHz = 0, motionCount = 0, lastHzT = performance.now();
+    window.addEventListener('devicemotion', (e) => {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.x === null) return;
+      const gx = AXIS_FLIP ? -g.x : g.x;
+      const gy = AXIS_FLIP ? -g.y : g.y;
+      smX += (gx - smX) * SMOOTHING;
+      smY += (gy - smY) * SMOOTHING;
+      tiltOn = true;
+      motionCount++;
+    });
+
+    let touch = null;
+    cv.addEventListener('pointerdown', (t) => {
+      // a tap on the next numeral sends the snake straight to it;
+      // a tap on any other numeral is a refusal, not a steer
+      const i = nums.findIndex(n => !n.collected &&
+        Math.hypot(n.x - t.clientX / K, n.y - t.clientY / K) < NUM_R + TAP_PAD);
+      if (i >= 0) {
+        if (i === nextIdx) autoTarget = nums[i];
+        else if (performance.now() > nums[i].flashUntil)
+          nums[i].flashUntil = performance.now() + FLASH_SECS * 1000;
+        return;
+      }
+      touch = { x: t.clientX / K, y: t.clientY / K };
+    });
+    cv.addEventListener('pointermove', (t) => { if (t.buttons) touch = { x: t.clientX / K, y: t.clientY / K }; });
+    window.addEventListener('pointerup', () => touch = null);
+    window.addEventListener('pointercancel', () => touch = null);
+    cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
+
+    /* ---------- orientation guard ---------- */
+    const rotOverlay = document.getElementById('rotOverlay');
+    let paused = false;
+    function checkOrientation() {
+      const portrait = screen.orientation && screen.orientation.type
+        ? screen.orientation.type.startsWith('portrait')
+        : matchMedia('(orientation: portrait)').matches;
+      paused = !portrait;
+      rotOverlay.classList.toggle('hidden', portrait);
+    }
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { smX = smY = 0; lastT = performance.now(); }
+    });
+
+    /* ---------- step ---------- */
+    let lastT = performance.now();
+
+    function wrapAngle(d) {
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    }
+
+    function step(dt, now) {
+      if (state !== 'play' || paused) return;
+
+      let target = null;
+      if (touch) {
+        autoTarget = null;
+        target = Math.atan2(touch.y - head.y, touch.x - head.x);
+      } else if (autoTarget) {
+        // firm manual tilt overrides the tap-autopilot
+        if (tiltOn && Math.hypot(smX, smY) > MANUAL_TILT) autoTarget = null;
+        else target = Math.atan2(autoTarget.y - head.y, autoTarget.x - head.x);
+      } else if (tiltOn) {
+        const mag = Math.hypot(smX, smY);
+        if (mag > TILT_DEAD) target = Math.atan2(-smY, smX);
+      }
+      if (target !== null) {
+        const d = wrapAngle(target - heading);
+        heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, d));
+      }
+
+      head.x += Math.cos(heading) * SNAKE_SPEED * dt;
+      head.y += Math.sin(heading) * SNAKE_SPEED * dt;
+
+      // walls: reflect heading so the snake bounces back into play
+      if (head.x < HEAD_R) { head.x = HEAD_R; heading = Math.PI - heading; }
+      if (head.x > Wd - HEAD_R) { head.x = Wd - HEAD_R; heading = Math.PI - heading; }
+      if (head.y < HEAD_R) { head.y = HEAD_R; heading = -heading; }
+      if (head.y > Hd - HEAD_R) { head.y = Hd - HEAD_R; heading = -heading; }
+
+      // tail follows: each segment holds SEG_GAP behind the one ahead
+      let lead = head;
+      segs.forEach(sg => {
+        const dx = lead.x - sg.x, dy = lead.y - sg.y;
+        const d = Math.hypot(dx, dy) || 1;
+        sg.x = lead.x - dx / d * SEG_GAP;
+        sg.y = lead.y - dy / d * SEG_GAP;
+        lead = sg;
+      });
+
+      // numeral contact
+      nums.forEach((n, i) => {
+        if (n.collected) return;
+        if (Math.hypot(n.x - head.x, n.y - head.y) < EAT_DIST) {
+          if (i === nextIdx) {
+            n.collected = true;
+            autoTarget = null;
+            lastCollectT = now;
+            segs.unshift({ x: lead.x, y: lead.y, v: n.v });
+            nextIdx++;
+            logEvent('collect', { v: n.v, ord: nextIdx });
+            if (nextIdx === 12) {
+              doneMs = now - startT;
+              state = 'done';
+              logEvent('complete', { table, ms: Math.round(doneMs) });
+              document.getElementById('doneTitle').textContent = '×' + table + ' complete!';
+              document.getElementById('doneStats').textContent =
+                'All twelve multiples in ' + (doneMs / 1000).toFixed(0) + 's';
+              doneOverlay.classList.remove('hidden');
+            }
+          } else if (now > n.flashUntil) {
+            n.flashUntil = now + FLASH_SECS * 1000;
+            logEvent('refuse', { v: n.v, want: table * (nextIdx + 1) });
+          }
+        }
+      });
+    }
+
+    /* ---------- draw ---------- */
+    const hud = document.getElementById('hud');
+
+    function drawNum(n, isTarget, hot) {
+      const flash = n.flashUntil > performance.now();
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, NUM_R, 0, Math.PI * 2);
+      ctx.fillStyle = flash ? '#5a4a28' : (isTarget ? '#1d3a4f' : '#1a2430');
+      ctx.fill();
+      ctx.strokeStyle = flash ? '#e0a53a' : (isTarget ? '#4da3ff' : '#2c3e50');
+      ctx.lineWidth = isTarget ? 2.5 : 1.5;
+      ctx.stroke();
+      if (isTarget && TARGET_GLOW) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, NUM_R + (hot ? 9 : 5)
+          + Math.sin(performance.now() / (hot ? 160 : 300)) * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = hot ? 'rgba(77,163,255,0.7)' : 'rgba(77,163,255,0.35)';
+        ctx.lineWidth = hot ? 3 : 2;
+        ctx.stroke();
+      }
+      ctx.fillStyle = flash ? '#e0a53a' : '#cfd8e0';
+      ctx.font = 'bold ' + (NUM_R - 2) + 'px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(n.v, n.x, n.y + 1);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, Wd, Hd);
+
+      const idle = (state === 'play' && lastCollectT)
+        ? (performance.now() - lastCollectT) / 1000 : 0;
+      nums.forEach((n, i) => {
+        if (!n.collected) drawNum(n, i === nextIdx, i === nextIdx && idle > HINT_AFTER);
+      });
+
+      // escalating hint: a faint arrow from the head toward the target
+      if (state === 'play' && nextIdx < 12 && idle > HINT_ARROW_AFTER
+        && idle % HINT_INTERVAL < HINT_ARROW_SECS) {
+        const n = nums[nextIdx];
+        const a = Math.atan2(n.y - head.y, n.x - head.x);
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const x1 = head.x + ca * (HEAD_R + 10), y1 = head.y + sa * (HEAD_R + 10);
+        const x2 = head.x + ca * (HEAD_R + 44), y2 = head.y + sa * (HEAD_R + 44);
+        ctx.strokeStyle = 'rgba(77,163,255,0.6)';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - Math.cos(a - 0.5) * 9, y2 - Math.sin(a - 0.5) * 9);
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - Math.cos(a + 0.5) * 9, y2 - Math.sin(a + 0.5) * 9);
+        ctx.stroke();
+      }
+
+      // tail, drawn back-to-front
+      for (let i = segs.length - 1; i >= 0; i--) {
+        const sg = segs[i];
+        ctx.beginPath();
+        ctx.arc(sg.x, sg.y, SEG_R, 0, Math.PI * 2);
+        ctx.fillStyle = '#1d6a52';
+        ctx.fill();
+        ctx.strokeStyle = '#2ea37e';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#dff3ec';
+        ctx.font = 'bold 15px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(sg.v, sg.x, sg.y + 1);
+      }
+
+      if (state === 'play' || state === 'done' || state === 'ready') {
+        // head
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, HEAD_R, 0, Math.PI * 2);
+        const grd = ctx.createRadialGradient(head.x - 6, head.y - 6, 4, head.x, head.y, HEAD_R);
+        grd.addColorStop(0, '#7fe0b8');
+        grd.addColorStop(1, '#1d6a52');
+        ctx.fillStyle = grd;
+        ctx.fill();
+        ctx.strokeStyle = '#2ea37e';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // eyes, offset perpendicular to heading
+        const ex = Math.cos(heading), ey = Math.sin(heading);
+        const px = -ey, py = ex;
+        [[1, 0], [-1, 0]].forEach(([sgn]) => {
+          ctx.beginPath();
+          ctx.arc(head.x + ex * 7 + px * sgn * 7, head.y + ey * 7 + py * sgn * 7, 3.2, 0, Math.PI * 2);
+          ctx.fillStyle = '#0b1512';
+          ctx.fill();
+        });
+      }
+
+      if (state === 'play') {
+        const got = nextIdx;
+        hud.textContent = '×' + table + '   ' + got + '/12' +
+          (got < 12 ? '   next ' + table * (got + 1) : '') +
+          '\nmotion ' + motionHz + '/s' + (AXIS_FLIP ? '  tilt-flip' : '');
+      } else {
+        hud.textContent = '';
+      }
+    }
+
+    function frame(now) {
+      const dt = Math.min((now - lastT) / 1000, 0.05);
+      lastT = now;
+      if (now - lastHzT >= 500) {
+        motionHz = Math.round(motionCount * 1000 / (now - lastHzT));
+        motionCount = 0; lastHzT = now;
+      }
+      step(dt, now);
+      draw();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=3"></script>
+</body>
+
+</html>

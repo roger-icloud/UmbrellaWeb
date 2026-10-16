@@ -247,6 +247,35 @@
         if (nums.every(n => Math.hypot(n.x - x, n.y - y) >= NUM_SEP))
           nums.push({ v: table * (nums.length + 1), x, y, flashUntil: 0 });
       }
+      // small boards can exhaust the scatter before all twelve land —
+      // a missing numeral means an unreachable target (observed: the 12th
+      // never dealt, hint arrow then dereferenced it and the loop died).
+      // Fall back to jittered grid slots so all twelve always exist.
+      if (nums.length < 12) {
+        const cols = Math.max(2, Math.floor((Wd - 2 * NUM_MARGIN) / NUM_SEP));
+        const rows = Math.ceil(12 / cols);
+        const cw = (Wd - 2 * NUM_MARGIN) / cols;
+        const ch = (Hd - 2 * NUM_MARGIN) / rows;
+        const spots = [];
+        for (let r = 0; r < rows; r++)
+          for (let c = 0; c < cols; c++)
+            spots.push({
+              x: NUM_MARGIN + cw * (c + 0.5) + (Math.random() - 0.5) * cw * 0.4,
+              y: NUM_MARGIN + ch * (r + 0.5) + (Math.random() - 0.5) * ch * 0.4
+            });
+        for (let i = spots.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [spots[i], spots[j]] = [spots[j], spots[i]];
+        }
+        // pass 1: near-normal separation; pass 2: merely non-overlapping
+        for (const sep of [NUM_SEP * 0.8, NUM_R * 2 + 6])
+          for (const s of spots) {
+            if (nums.length >= 12) break;
+            if (Math.hypot(s.x - head.x, s.y - head.y) < 100) continue;
+            if (nums.every(n => Math.hypot(n.x - s.x, n.y - s.y) >= sep))
+              nums.push({ v: table * (nums.length + 1), x: s.x, y: s.y, flashUntil: 0 });
+          }
+      }
       // scatter order is already random positions; values are assigned
       // 1..12 so 'in order' means hunting the next value, not the nearest
     }
@@ -506,7 +535,7 @@
 
       // escalating hint: a faint arrow from the head toward the target
       if (state === 'play' && nextIdx < 12 && idle > HINT_ARROW_AFTER
-        && idle % HINT_INTERVAL < HINT_ARROW_SECS) {
+        && idle % HINT_INTERVAL < HINT_ARROW_SECS && nums[nextIdx]) {
         const n = nums[nextIdx];
         const a = Math.atan2(n.y - head.y, n.x - head.x);
         const ca = Math.cos(a), sa = Math.sin(a);
@@ -583,7 +612,7 @@
         motionCount = 0; lastHzT = now;
       }
       step(dt, now);
-      draw();
+      try { draw(); } catch (e) { /* a bad frame must never kill the loop */ }
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);

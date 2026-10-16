@@ -148,7 +148,7 @@
     const NUM_FONT = 0.30;   // numeral size as a fraction of pitch
     const FLASH_SECS = 0.6;   // refusal flash duration
     const HINT_AFTER = 12;   // s idle before the next cells pulse
-    const MAX_TABLES = 2;    // chips selectable at once (one or two)
+    const MAX_TABLES = 3;    // chips selectable at once (one to three)
     const DECOY_MAX = 72;    // filler values drawn from 1..DECOY_MAX,
     // excluding multiples of every selected
     // table — decoys never carry a path value
@@ -327,7 +327,7 @@
 
         if (tables.length === 1) {
           paths[0] = genPathAnywhere(new Set());
-        } else {
+        } else if (tables.length === 2) {
           // one shared multiple: a multiple of lcm(A,B) within both
           // tables' first twelve — the crossover
           const [A, B] = tables;
@@ -343,8 +343,46 @@
           if (!paths[0]) continue;
           paths[1] = pathThrough(mX / B - 1, X,
             new Set(paths[0].filter(p => !(p.r === X.r && p.c === X.c)).map(key)));
+        } else {
+          // three tables: a cell shared by all three when a common
+          // multiple of all exists (lcm3 ≤ 12×min); otherwise a
+          // pairwise crossover for a random pair + a free third path
+          const [A, B, C] = tables;
+          const step3 = lcm(lcm(A, B), C), cap3 = 12 * Math.min(A, B, C);
+          const c3 = [];
+          for (let m = step3; m <= cap3; m += step3) c3.push(m);
+          const X = {
+            r: Math.floor(Math.random() * ROWS),
+            c: Math.floor(Math.random() * COLS)
+          };
+          const used = new Set();
+          const place = (ti, at) => {
+            paths[ti] = pathThrough(at, X, new Set(used));
+            if (paths[ti])
+              paths[ti].forEach(p => { if (!(p.r === X.r && p.c === X.c)) used.add(key(p)); });
+            return !!paths[ti];
+          };
+          if (c3.length) {
+            const mX = c3[Math.floor(Math.random() * c3.length)];
+            const pins = [mX / A - 1, mX / B - 1, mX / C - 1];
+            if (!place(0, pins[0]) || !place(1, pins[1]) || !place(2, pins[2])) continue;
+          } else {
+            // pairwise share for a random pair, third path free
+            const pairs = [[0, 1], [0, 2], [1, 2]]
+              .filter(([i, j]) => lcm(tables[i], tables[j]) <= 12 * Math.min(tables[i], tables[j]));
+            const [i, j] = pairs[Math.floor(Math.random() * pairs.length)];
+            const step = lcm(tables[i], tables[j]), cap = 12 * Math.min(tables[i], tables[j]);
+            const cands = [];
+            for (let m = step; m <= cap; m += step) cands.push(m);
+            const mX = cands[Math.floor(Math.random() * cands.length)];
+            const free = [0, 1, 2].find(x => x !== i && x !== j);
+            if (!place(i, mX / tables[i] - 1)) continue;
+            if (!place(j, mX / tables[j] - 1)) continue;
+            paths[free] = genPathAnywhere(used);
+            if (!paths[free]) continue;
+          }
         }
-        if (!paths[0] || (tables.length === 2 && !paths[1])) continue;
+        if (!paths.every(p => p)) continue;
 
         onPath = paths.map(p => {
           const m = new Map();
@@ -353,7 +391,7 @@
         });
         paths.forEach((p, ti) =>
           p.forEach((q, i) => { cells[q.r][q.c].v = tables[ti] * (i + 1); }));
-        if (tables.length === 2 && !unambiguous()) continue;
+        if (tables.length >= 2 && !unambiguous()) continue;
 
         const occupied = new Set(paths.flatMap(p => p.map(key)));
         for (let r = 0; r < ROWS; r++)
@@ -455,7 +493,8 @@
           document.getElementById('doneTitle').textContent =
             tables.map(t => '×' + t).join(' and ') + ' complete!';
           document.getElementById('doneStats').textContent =
-            'Both paths followed in ' + (doneMs / 1000).toFixed(0) + 's';
+            (tables.length > 1 ? 'All ' + tables.length + ' paths' : 'The path') +
+            ' followed in ' + (doneMs / 1000).toFixed(0) + 's';
           document.getElementById('doneOverlay').classList.remove('hidden');
         }
       } else if (now > cell.flashUntil) {
@@ -480,7 +519,7 @@
     function draw() {
       ctx.clearRect(0, 0, W, H);
       if (state === 'idle') {
-        hud.textContent = 'pick one or two tables below —\ntheir multiples hide as connected\npaths in the comb; two tables\nshare one cell';
+        hud.textContent = 'pick one, two or three tables below —\ntheir multiples hide as connected\npaths in the comb; a common cell\ncan belong to more than one path';
         return;
       }
       hud.textContent = '';
@@ -521,14 +560,20 @@
 
           ctx.beginPath();
           ctx.arc(ctr.x, ctr.y, rad, 0, Math.PI * 2);
-          if (isFound && cl.size === 2) {
-            // the crossover: claimed by both — half and half
-            const g = ctx.createLinearGradient(ctr.x - rad, ctr.y, ctr.x + rad, ctr.y);
-            g.addColorStop(0, tableColour(tables[0]));
-            g.addColorStop(0.5, tableColour(tables[0]));
-            g.addColorStop(0.5, tableColour(tables[1]));
-            g.addColorStop(1, tableColour(tables[1]));
-            ctx.fillStyle = g;
+          if (isFound && cl.size > 1) {
+            // a shared cell claimed from two or three sides — wedge
+            // sectors, one colour per claiming table
+            const parts = [...cl];
+            parts.forEach((ti, i) => {
+              const a0 = -Math.PI / 2 + i * 2 * Math.PI / parts.length;
+              const a1 = -Math.PI / 2 + (i + 1) * 2 * Math.PI / parts.length;
+              ctx.beginPath();
+              ctx.moveTo(ctr.x, ctr.y);
+              ctx.arc(ctr.x, ctr.y, rad, a0, a1);
+              ctx.closePath();
+              ctx.fillStyle = tableColour(tables[ti]);
+              ctx.fill();
+            });
           } else {
             ctx.fillStyle = isFound ? tableColour(tables[[...cl][0]])
               : isFlash ? '#5a4a28' : '#1a2430';

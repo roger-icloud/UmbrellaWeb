@@ -73,18 +73,18 @@
   /* an umbrella glyph rather than the standard ≡ — the browser's own
      menu button sits just above ours on some devices and two burgers
      stacked reads as clutter. Inline SVG keeps it crisp everywhere. */
-  /* a snake glyph rather than the standard ≡ — the browser's own menu
-     button sits just above ours on some devices and two stacked burgers
-     read as clutter. Inline SVG keeps it crisp everywhere. */
+  /* the glyph: a chunky S-bodied snake (after Roger's reference) — bold
+     head, eye, forked tongue. More visible than the thin outline was. */
   const burger = document.createElement('button');
   burger.id = 'navBurger';
   burger.setAttribute('aria-label', 'Menu');
   burger.innerHTML =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="#b9c8d4" ' +
-    'stroke-width="2" stroke-linecap="round">' +
-    '<path d="M3 18 c4.5 0 4.5-6.5 9-6.5 s4.5-5.5 8-5.5"/>' +
-    '<circle cx="20" cy="6" r="2.6" fill="#b9c8d4" stroke="none"/>' +
-    '<circle cx="20.8" cy="5.4" r="0.8" fill="#101418" stroke="none"/>' +
+    '<svg viewBox="0 0 24 24" stroke="#b9c8d4" fill="none" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M3.5 19.5 c4.5 0 4.5-6.5 9-6.5 s4.5-5 6.5-5" stroke-width="4.5"/>' +
+    '<circle cx="19.5" cy="8" r="3.4" fill="#b9c8d4" stroke="none"/>' +
+    '<circle cx="20.2" cy="6.8" r="0.9" fill="#101418" stroke="none"/>' +
+    '<path d="M22.6 8.6 l1.4-0.9 M22.6 8.6 l1.5 0.7" stroke-width="1"/>' +
     '</svg>';
 
   const panel = document.createElement('nav');

@@ -237,6 +237,15 @@
     function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
     function gcd(a, b) { while (b) { const t = b; b = a % b; a = t; } return a; }
     function lcm(a, b) { return a / gcd(a, b) * b; }
+    /* how many multiples two tables share within their first twelve.
+       Every pair shares at least one (their product), so "kin" means
+       sharing MORE than that bare minimum — 7 and 11 stay dim. */
+    function sharedCount(a, b) {
+      const st = lcm(a, b), cap = 12 * Math.min(a, b);
+      let n = 0;
+      for (let m = st; m <= cap; m += st) n++;
+      return n;
+    }
 
     /* ---------- board generation ----------
        Each table's twelve multiples form ONE CONNECTED PATH through
@@ -438,10 +447,10 @@
         [...chips.children].forEach((ch, i) => {
           const tt = i + 2;
           ch.classList.toggle('on', selected.includes(tt));
-          // glow tables that would meet a selected table in the comb —
-          // they share a common multiple within the first twelve
+          // glow tables that would meet a selected table richly —
+          // more shared multiples than the bare product
           ch.classList.toggle('kin', !selected.includes(tt) &&
-            selected.some(s => lcm(s, tt) <= 12 * Math.min(s, tt)));
+            selected.some(s => sharedCount(s, tt) >= 2));
         });
         if (selected.length) reset(selected);
       });

@@ -89,6 +89,17 @@
     }
   }
 
+  /* the fullscreen row doubles as a state indicator: its label says what
+     tapping will do next */
+  let fsRow = null;
+  function syncFSLabel() {
+    if (fsRow) fsRow.textContent =
+      (document.fullscreenElement || document.webkitFullscreenElement)
+        ? 'Exit fullscreen' : 'Fullscreen';
+  }
+  document.addEventListener('fullscreenchange', syncFSLabel);
+  document.addEventListener('webkitfullscreenchange', syncFSLabel);
+
   function addRow(item, parent, sub) {
     if (item.type === 'sep') {
       const s = document.createElement('div');
@@ -109,10 +120,12 @@
     }
     el.textContent = item.label;
     if (sub) el.className = 'sub';
+    if (item.action === 'fullscreen') fsRow = el;
     parent.appendChild(el);
     if (item.children) item.children.forEach(c => addRow(c, parent, true));
   }
   ITEMS.forEach(i => addRow(i, panel, false));
+  syncFSLabel();
 
   function close() { panel.classList.add('hidden'); }
   burger.addEventListener('click', (e) => {

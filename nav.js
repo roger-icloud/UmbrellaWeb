@@ -9,6 +9,7 @@
   const ITEMS = [
     { label: 'Home', href: 'index.html' },
     { label: 'Table Snake', href: 'snake.html' },
+    { label: 'Tables Search', href: 'search.html' },
     { label: 'Tilt Ball', href: 'ball.html' },
     { type: 'sep' },
     { label: 'Fullscreen', action: 'fullscreen' },

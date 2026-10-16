@@ -16,9 +16,13 @@
   ];
 
   const css = `
+    /* top offset: env(safe-area-inset-top) clears notches when the browser
+       reports them — but iPad's floating status bar overlaps content while
+       reporting 0, so keep generous breathing room after it. Bump the
+       trailing px value if the burger ever crowds the status line. */
     #navBurger {
       position: fixed;
-      top: calc(env(safe-area-inset-top, 0px) + 8px);
+      top: calc(env(safe-area-inset-top, 0px) + 24px);
       right: 8px;
       width: 40px; height: 40px;
       border-radius: 10px;
@@ -36,7 +40,7 @@
     }
     #navPanel {
       position: fixed;
-      top: calc(env(safe-area-inset-top, 0px) + 54px);
+      top: calc(env(safe-area-inset-top, 0px) + 70px);
       right: 8px;
       min-width: 170px;
       background: rgba(14, 20, 26, .96);
@@ -60,29 +64,6 @@
     #navPanel a:active, #navPanel button:active { background: #24303c; }
     #navPanel .sub { padding-left: 28px; font-size: 14px; color: #9fb0bd; }
     #navPanel .sep { border-top: 1px solid #2c3e50; margin: 6px 4px; }
-
-    /* pull-tab: appears only while fullscreen, taps exit. The platform's
-       own exit control (an x top-left, or a swipe-down gesture) still
-       exists underneath — it cannot be suppressed — this just gives the
-       exit a clearer, labelled door. */
-    #navPullTab {
-      position: fixed;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 72px; height: calc(env(safe-area-inset-top, 0px) + 22px);
-      border: 1px solid #3a4a58; border-top: none;
-      border-radius: 0 0 12px 12px;
-      background: rgba(20, 28, 36, .65);
-      z-index: 38;
-      display: none;
-      align-items: flex-end; justify-content: center;
-      padding-bottom: 4px;
-      color: #b9c8d4; font-size: 13px;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    }
-    #navPullTab.on { display: flex; }
   `;
   const style = document.createElement('style');
   style.textContent = css;
@@ -133,23 +114,6 @@
   }
   ITEMS.forEach(i => addRow(i, panel, false));
 
-  /* pull-tab: visible only while an element is fullscreen; tap = exit */
-  const pullTab = document.createElement('div');
-  pullTab.id = 'navPullTab';
-  pullTab.textContent = '⌄';
-  pullTab.setAttribute('role', 'button');
-  pullTab.setAttribute('aria-label', 'Exit fullscreen');
-  pullTab.addEventListener('click', () => {
-    const d = document;
-    (d.exitFullscreen || d.webkitExitFullscreen).call(d);
-  });
-  function syncPullTab() {
-    pullTab.classList.toggle('on',
-      !!(document.fullscreenElement || document.webkitFullscreenElement));
-  }
-  document.addEventListener('fullscreenchange', syncPullTab);
-  document.addEventListener('webkitfullscreenchange', syncPullTab);
-
   function close() { panel.classList.add('hidden'); }
   burger.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -162,5 +126,4 @@
 
   document.body.appendChild(burger);
   document.body.appendChild(panel);
-  document.body.appendChild(pullTab);
 })();

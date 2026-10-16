@@ -79,12 +79,13 @@
   burger.id = 'navBurger';
   burger.setAttribute('aria-label', 'Menu');
   burger.innerHTML =
-    '<svg viewBox="0 0 24 24" stroke="#b9c8d4" fill="none" ' +
-    'stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M3.5 19.5 c4.5 0 4.5-6.5 9-6.5 s4.5-5 6.5-5" stroke-width="4.5"/>' +
-    '<circle cx="19.5" cy="8" r="3.4" fill="#b9c8d4" stroke="none"/>' +
-    '<circle cx="20.2" cy="6.8" r="0.9" fill="#101418" stroke="none"/>' +
-    '<path d="M22.6 8.6 l1.4-0.9 M22.6 8.6 l1.5 0.7" stroke-width="1"/>' +
+    '<svg viewBox="0 0 24 24" stroke="#35c795" fill="none" ' +
+    'stroke-linecap="round">' +
+    '<path d="M18 6.5 C 9 4.5, 4.5 8.5, 7 12.5 C 9.5 16.5, 17.5 15, 16 19.5' +
+    ' C 15.2 21.6, 10.5 22.3, 5.5 20.8" stroke-width="4.2"/>' +
+    '<circle cx="18.6" cy="5.8" r="3.6" fill="#35c795" stroke="none"/>' +
+    '<circle cx="19.6" cy="4.6" r="0.9" fill="#101418" stroke="none"/>' +
+    '<path d="M22 5 l1.7-0.8 M22 5 l1.7 0.6" stroke="#e0a53a" stroke-width="1"/>' +
     '</svg>';
 
   const panel = document.createElement('nav');

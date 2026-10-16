@@ -35,9 +35,8 @@
       gap: 4px; padding: 0; cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    #navBurger span {
-      display: block; width: 16px; height: 2px;
-      background: #b9c8d4; border-radius: 1px;
+    #navBurger svg {
+      width: 18px; height: 18px;
     }
     #navPanel {
       position: fixed;
@@ -70,10 +69,19 @@
   style.textContent = css;
   document.head.appendChild(style);
 
+  /* an umbrella glyph rather than the standard ≡ — the browser's own
+     menu button sits just above ours on some devices and two burgers
+     stacked reads as clutter. Inline SVG keeps it crisp everywhere. */
   const burger = document.createElement('button');
   burger.id = 'navBurger';
   burger.setAttribute('aria-label', 'Menu');
-  burger.innerHTML = '<span></span><span></span><span></span>';
+  burger.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="#b9c8d4" ' +
+    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M12 2.5 v1.5"/>' +
+    '<path d="M3.5 12 a8.5 8.5 0 0 1 17 0 z" fill="#b9c8d4" fill-opacity="0.25"/>' +
+    '<path d="M12 12 v6.5 a2.5 2.5 0 0 1 -5 0"/>' +
+    '</svg>';
 
   const panel = document.createElement('nav');
   panel.id = 'navPanel';

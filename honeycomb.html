@@ -131,7 +131,7 @@
   <div id="doneOverlay" class="overlay hidden">
     <div class="title" id="doneTitle">Complete!</div>
     <div class="sub" id="doneStats"></div>
-    <button class="go" id="again">Another table</button>
+    <button class="go" id="again">Another board</button>
   </div>
 
   <script>
@@ -147,10 +147,11 @@
     const CIRCLE_R = 0.39;   // cell circle radius as a fraction of pitch
     const NUM_FONT = 0.30;   // numeral size as a fraction of pitch
     const FLASH_SECS = 0.6;   // refusal flash duration
-    const HINT_AFTER = 12;   // s idle before the target pulses
+    const HINT_AFTER = 12;   // s idle before the next cells pulse
+    const MAX_TABLES = 2;    // chips selectable at once (one or two)
     const DECOY_MAX = 72;    // filler values drawn from 1..DECOY_MAX,
-    // excluding every multiple of the table, so
-    // each path value appears exactly once
+    // excluding multiples of every selected
+    // table — decoys never carry a path value
 
     /* ---------- canvas ----------
        Same policy as Patterns: the board is discrete space — it fills
@@ -210,10 +211,11 @@
     }
 
     /* ---------- state ---------- */
-    let table = 0;
-    let cells = [];            // cells[r][c] = {v, flashUntil}
-    let path = [];             // ordered positions of t, 2t, …, 12t
-    let nextIdx = 0;           // how many path cells collected so far
+    let tables = [];           // [A] or [A, B]
+    let paths = [];            // paths[ti] = ordered [positions] t..12t
+    let idx = [];              // idx[ti] = how many cells collected
+    let cells = [];            // cells[r][c] = {v, claims:Set, flashUntil}
+    let onPath = [];           // onPath[ti] = Map(key -> index in path)
     let lastCollectT = 0;
     let state = 'idle';        // idle | play | done
     let startT = 0, doneMs = 0;
@@ -225,37 +227,20 @@
     }
 
     function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    function gcd(a, b) { while (b) { const t = b; b = a % b; a = t; } return a; }
+    function lcm(a, b) { return a / gcd(a, b) * b; }
 
     /* ---------- board generation ----------
-       The table's twelve multiples form ONE CONNECTED PATH: each
-       successive value is a hex-neighbour of the last, so the hunt is
-       always local — the answer is touching where you just found
-       something. Self-avoiding walk; a new cell must touch only the
-       current head or the path would visually branch. */
-    function genPath() {
-      for (let attempt = 0; attempt < 400; attempt++) {
-        const used = new Set();
-        const p = [];
-        let cur = { r: Math.floor(Math.random() * ROWS), c: Math.floor(Math.random() * COLS) };
-        p.push(cur); used.add(key(cur));
-        while (p.length < 12) {
-          const opts = hexNbrs(cur).filter(q => !used.has(key(q)));
-          const chain = opts.filter(q =>
-            hexNbrs(q).filter(s => used.has(key(s))).length === 1);
-          const cands = chain.length ? chain : opts;
-          if (!cands.length) break;
-          cur = cands[Math.floor(Math.random() * cands.length)];
-          p.push(cur); used.add(key(cur));
-        }
-        if (p.length === 12) return p;
-      }
-      return null;
-    }
+       Each table's twelve multiples form ONE CONNECTED PATH through
+       the comb — the answer is always a neighbour of the last find.
+       With two tables the paths SHARE one cell: a common multiple
+       (an lcm value) placed once, belonging to both — the crossover,
+       discoverable only by reaching it from both directions. Other
+       shared multiples may land as separate twin cells: same number,
+       different path — a refusal teaches the difference. */
 
-    // Shape follows the screen: a portrait phone gets a tall narrow comb
-    // (more of the unused vertical space becomes cell size — on iPhone 8
-    // ~9x15 vs a cramped 12x12); a wide or landscape screen gets a broad
-    // low comb. Chosen at deal time; a mid-game rotation just refits.
+    // Shape follows the screen (see pickShape in history: tall narrow
+    // comb on phones, broad on tablets); chosen at deal time.
     function pickShape() {
       const availW = W - 2 * BOARD_PAD;
       const availH = H - TOP_RESERVE - BOT_RESERVE - BOARD_PAD;
@@ -265,46 +250,148 @@
       resize();
     }
 
-    function dealBoard() {
-      pickShape();
-      cells = [];
-      for (let r = 0; r < ROWS; r++) {
-        const row = [];
-        for (let c = 0; c < COLS; c++) row.push({ v: 0, flashUntil: 0 });
-        cells.push(row);
+    /* a self-avoiding walk of n new cells from `start`.
+       `blocked` may not be stepped on; `own` counts toward the chain
+       rule — a new cell must touch exactly one of the path's own cells
+       or the route visually branches. */
+    function walkFrom(start, n, blocked, own) {
+      const out = [];
+      let cur = start;
+      while (out.length < n) {
+        const opts = hexNbrs(cur).filter(q => !blocked.has(key(q)));
+        const chain = opts.filter(q =>
+          hexNbrs(q).filter(s => own.has(key(s))).length === 1);
+        const cands = chain.length ? chain : opts;
+        if (!cands.length) return null;
+        cur = cands[Math.floor(Math.random() * cands.length)];
+        out.push(cur); blocked.add(key(cur)); own.add(key(cur));
       }
-      path = genPath();
-      path.forEach((p, i) => { cells[p.r][p.c].v = table * (i + 1); });
-      const onPath = new Set(path.map(key));
-      for (let r = 0; r < ROWS; r++)
-        for (let c = 0; c < COLS; c++) {
-          if (onPath.has(r * COLS + c)) continue;
-          let v;
-          do { v = 1 + Math.floor(Math.random() * DECOY_MAX); }
-          while (v % table === 0);
-          cells[r][c].v = v;
-        }
+      return out;
     }
 
-    function reset(t) {
-      table = t;
-      nextIdx = 0;
-      dealBoard();
+    /* a twelve-cell path routed through pin X at step `at` (0-based):
+       walk backwards for the prefix, forwards for the suffix. */
+    function pathThrough(at, X, foreign) {
+      for (let attempt = 0; attempt < 300; attempt++) {
+        const blocked = new Set(foreign); blocked.add(key(X));
+        const own = new Set([key(X)]);
+        const back = walkFrom(X, at, blocked, own);
+        if (!back) continue;
+        const fwd = walkFrom(X, 11 - at, blocked, own);
+        if (!fwd) continue;
+        return back.reverse().concat([X], fwd);
+      }
+      return null;
+    }
+
+    function genPathAnywhere(foreign) {
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const start = {
+          r: Math.floor(Math.random() * ROWS),
+          c: Math.floor(Math.random() * COLS)
+        };
+        const blocked = new Set(foreign); blocked.add(key(start));
+        const own = new Set([key(start)]);
+        const rest = walkFrom(start, 11, blocked, own);
+        if (rest) return [start].concat(rest);
+      }
+      return null;
+    }
+
+    /* rejection check ported from Swift: from each path cell, exactly
+       ONE neighbour may show the needed next value — hidden path
+       membership must never make one of two identical-looking choices
+       "wrong". */
+    function unambiguous() {
+      for (let ti = 0; ti < tables.length; ti++) {
+        for (let i = 0; i < 11; i++) {
+          const cur = paths[ti][i];
+          const need = tables[ti] * (i + 2);
+          const matches = hexNbrs(cur).filter(q => cells[q.r][q.c].v === need);
+          if (matches.length > 1) return false;
+        }
+      }
+      return true;
+    }
+
+    function genBoard() {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        cells = [];
+        for (let r = 0; r < ROWS; r++) {
+          const row = [];
+          for (let c = 0; c < COLS; c++)
+            row.push({ v: 0, claims: new Set(), flashUntil: 0 });
+          cells.push(row);
+        }
+        paths = [];
+
+        if (tables.length === 1) {
+          paths[0] = genPathAnywhere(new Set());
+        } else {
+          // one shared multiple: a multiple of lcm(A,B) within both
+          // tables' first twelve — the crossover
+          const [A, B] = tables;
+          const step = lcm(A, B), cap = 12 * Math.min(A, B);
+          const cands = [];
+          for (let m = step; m <= cap; m += step) cands.push(m);
+          const mX = cands[Math.floor(Math.random() * cands.length)];
+          const X = {
+            r: Math.floor(Math.random() * ROWS),
+            c: Math.floor(Math.random() * COLS)
+          };
+          paths[0] = pathThrough(mX / A - 1, X, new Set());
+          if (!paths[0]) continue;
+          paths[1] = pathThrough(mX / B - 1, X,
+            new Set(paths[0].filter(p => !(p.r === X.r && p.c === X.c)).map(key)));
+        }
+        if (!paths[0] || (tables.length === 2 && !paths[1])) continue;
+
+        onPath = paths.map(p => {
+          const m = new Map();
+          p.forEach((q, i) => m.set(key(q), i));
+          return m;
+        });
+        paths.forEach((p, ti) =>
+          p.forEach((q, i) => { cells[q.r][q.c].v = tables[ti] * (i + 1); }));
+        if (tables.length === 2 && !unambiguous()) continue;
+
+        const occupied = new Set(paths.flatMap(p => p.map(key)));
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS; c++) {
+            if (occupied.has(r * COLS + c)) continue;
+            let v;
+            do { v = 1 + Math.floor(Math.random() * DECOY_MAX); }
+            while (tables.some(t => v % t === 0));
+            cells[r][c].v = v;
+          }
+        return true;
+      }
+      return false;
+    }
+
+    function reset(sel) {
+      tables = sel.slice();
+      pickShape();
+      genBoard();
+      idx = tables.map(() => 0);
       state = 'play';
       startT = performance.now();
       lastCollectT = performance.now();
-      logEvent('deal', { table, path: path.map(key) });
+      logEvent('deal', { tables });
     }
 
-    /* ---------- table chips ---------- */
+    /* ---------- table chips: up to MAX_TABLES at once ---------- */
     const chips = document.getElementById('chipRow');
+    let selected = [];
     for (let t = 2; t <= 12; t++) {
       const b = document.createElement('button');
       b.textContent = '×' + t;
       b.addEventListener('click', () => {
-        [...chips.children].forEach(ch => ch.classList.remove('on'));
-        b.classList.add('on');
-        reset(t);
+        if (selected.includes(t)) selected = selected.filter(x => x !== t);
+        else { selected.push(t); if (selected.length > MAX_TABLES) selected.shift(); }
+        [...chips.children].forEach((ch, i) =>
+          ch.classList.toggle('on', selected.includes(i + 2)));
+        if (selected.length) reset(selected);
       });
       chips.appendChild(b);
     }
@@ -345,25 +432,37 @@
       if (!best) return;
       const cell = cells[best.r][best.c];
       const now = performance.now();
-      const wanted = table * (nextIdx + 1);
-      if (cell.v === wanted) {
-        nextIdx++;
+
+      // a tap is correct for table T iff the cell sits at T's next path
+      // index; the crossover can satisfy both tables in one tap, or
+      // each table at its own moment (re-tap when the second arrives)
+      let accepted = false;
+      for (let ti = 0; ti < tables.length; ti++) {
+        const pi = onPath[ti].get(key(best));
+        if (pi === idx[ti] && !cell.claims.has(ti)) {
+          idx[ti]++;
+          cell.claims.add(ti);
+          accepted = true;
+          logEvent('collect', { table: tables[ti], v: cell.v, ord: idx[ti] });
+        }
+      }
+      if (accepted) {
         lastCollectT = now;
-        logEvent('collect', { v: cell.v, ord: nextIdx });
-        if (nextIdx === 12) {
+        if (idx.every(i => i === 12)) {
           doneMs = now - startT;
           state = 'done';
-          logEvent('complete', { table, ms: Math.round(doneMs) });
-          document.getElementById('doneTitle').textContent = '×' + table + ' path complete!';
+          logEvent('complete', { tables, ms: Math.round(doneMs) });
+          document.getElementById('doneTitle').textContent =
+            tables.map(t => '×' + t).join(' and ') + ' complete!';
           document.getElementById('doneStats').textContent =
-            'Followed all twelve in ' + (doneMs / 1000).toFixed(0) + 's';
+            'Both paths followed in ' + (doneMs / 1000).toFixed(0) + 's';
           document.getElementById('doneOverlay').classList.remove('hidden');
         }
       } else if (now > cell.flashUntil) {
+        // decoy, out-of-order path cell, or right value on the other
+        // path (a twin) — one refusal grammar covers them all
         cell.flashUntil = now + FLASH_SECS * 1000;
-        // right family, wrong turn (a path cell out of order) vs a
-        // plain decoy — same refusal grammar as the snake
-        logEvent('refuse', { v: cell.v, want: wanted });
+        logEvent('refuse', { v: cell.v });
       }
     });
     cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
@@ -371,7 +470,7 @@
     document.getElementById('again').addEventListener('click', () => {
       document.getElementById('doneOverlay').classList.add('hidden');
       state = 'idle';
-      table = 0;
+      selected = [];
       [...chips.children].forEach(ch => ch.classList.remove('on'));
     });
 
@@ -381,55 +480,67 @@
     function draw() {
       ctx.clearRect(0, 0, W, H);
       if (state === 'idle') {
-        hud.textContent = 'pick a table below —\nits multiples hide as a\nconnected path in the comb';
+        hud.textContent = 'pick one or two tables below —\ntheir multiples hide as connected\npaths in the comb; two tables\nshare one cell';
         return;
       }
       hud.textContent = '';
       const now = performance.now();
       const rad = pitch * CIRCLE_R;
 
-      // the found chain — drawn under the cells so circles stay crisp
-      if (nextIdx > 0) {
-        ctx.strokeStyle = tableColour(table);
+      // found chains — under the cells so circles stay crisp
+      for (let ti = 0; ti < tables.length; ti++) {
+        if (idx[ti] === 0) continue;
+        ctx.strokeStyle = tableColour(tables[ti]);
         ctx.lineWidth = rad * 0.5;
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.globalAlpha = 0.45;
         ctx.beginPath();
-        for (let i = 0; i < nextIdx; i++) {
-          const ctr = centreOf(path[i]);
+        for (let i = 0; i < idx[ti]; i++) {
+          const ctr = centreOf(paths[ti][i]);
           if (i === 0) ctx.moveTo(ctr.x, ctr.y); else ctx.lineTo(ctr.x, ctr.y);
         }
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
 
-      const foundSet = new Set(path.slice(0, nextIdx).map(key));
       const idle = (now - lastCollectT) / 1000;
-      const foothold = path[0];
 
       for (let r = 0; r < ROWS; r++)
         for (let c = 0; c < COLS; c++) {
           const ctr = centreOf({ r, c });
           const cell = cells[r][c];
-          const isFound = foundSet.has(key({ r, c }));
+          const cl = cell.claims;
+          const isFound = cl.size > 0;
           const isFlash = cell.flashUntil > now;
-          const isFoothold = nextIdx === 0 && key({ r, c }) === key(foothold);
-          const isHint = state === 'play' && nextIdx > 0 && nextIdx < 12
-            && key({ r, c }) === key(path[nextIdx]) && idle > HINT_AFTER;
+          const k = key({ r, c });
+          const isFoothold = tables.some((t, ti) =>
+            idx[ti] === 0 && onPath[ti].get(k) === 0);
+          const isHint = state === 'play' && idle > HINT_AFTER &&
+            tables.some((t, ti) => idx[ti] < 12 && onPath[ti].get(k) === idx[ti]);
 
           ctx.beginPath();
           ctx.arc(ctr.x, ctr.y, rad, 0, Math.PI * 2);
-          ctx.fillStyle = isFound ? tableColour(table)
-            : isFlash ? '#5a4a28' : '#1a2430';
+          if (isFound && cl.size === 2) {
+            // the crossover: claimed by both — half and half
+            const g = ctx.createLinearGradient(ctr.x - rad, ctr.y, ctr.x + rad, ctr.y);
+            g.addColorStop(0, tableColour(tables[0]));
+            g.addColorStop(0.5, tableColour(tables[0]));
+            g.addColorStop(0.5, tableColour(tables[1]));
+            g.addColorStop(1, tableColour(tables[1]));
+            ctx.fillStyle = g;
+          } else {
+            ctx.fillStyle = isFound ? tableColour(tables[[...cl][0]])
+              : isFlash ? '#5a4a28' : '#1a2430';
+          }
           ctx.fill();
-          ctx.strokeStyle = isFound ? tableColour(table)
+          ctx.strokeStyle = isFound
+            ? (cl.size === 2 ? '#cfd8e0' : tableColour(tables[[...cl][0]]))
             : isFlash ? '#e0a53a' : '#2c3e50';
           ctx.lineWidth = isFound ? 2 : 1.2;
           ctx.stroke();
 
           if (isFoothold || isHint) {
-            // the way in / the next step — a soft pulse, never a command
             ctx.beginPath();
             ctx.arc(ctr.x, ctr.y,
               rad + 5 + Math.sin(now / 300) * 3, 0, Math.PI * 2);
@@ -449,9 +560,10 @@
         }
 
       if (state === 'play') {
-        hud.textContent = '×' + table + '   ' + nextIdx + '/12' +
-          (nextIdx < 12 ? '   next ' + table * (nextIdx + 1) : '')
-          + '\ncell ' + Math.round(pitch) + 'px';
+        hud.textContent = tables.map((t, ti) =>
+          '×' + t + '   ' + idx[ti] + '/12' +
+          (idx[ti] < 12 ? '   next ' + t * (idx[ti] + 1) : '   done')
+        ).join('\n') + '\ncell ' + Math.round(pitch) + 'px';
       }
     }
 

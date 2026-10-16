@@ -147,8 +147,11 @@
     let bX = 0, bY = 0, bS = 0, cell = 0;
 
     function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
       DPR = Math.min(window.devicePixelRatio || 1, 3);
-      W = window.innerWidth; H = window.innerHeight;
       cv.width = W * DPR; cv.height = H * DPR;
       cv.style.width = W + 'px'; cv.style.height = H + 'px';
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -160,6 +163,7 @@
       bY = TOP_RESERVE + (availH - bS) / 2;
     }
     window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
     resize();
 
     /* ---------- state ---------- */

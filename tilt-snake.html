@@ -189,8 +189,17 @@
     const ctx = cv.getContext('2d');
     let W = 0, H = 0, Wd = 0, Hd = 0, DPR = 1, K = 1;
     function resize() {
+      // visualViewport, not innerHeight: iOS reports layout space that
+      // includes area under the browser toolbar — vv is what is actually
+      // visible, so dealt numerals can't land under the chrome
+      const vv = window.visualViewport;
+      const w = vv ? vv.width : window.innerWidth;
+      const h = vv ? vv.height : window.innerHeight;
+      // transient degenerate sizes during fullscreen transitions would
+      // collapse the scale transform and blank the canvas — ignore them
+      if (w < 50 || h < 50) return;
       DPR = Math.min(window.devicePixelRatio || 1, 3);
-      W = window.innerWidth; H = window.innerHeight;
+      W = w; H = h;
       K = W / DESIGN_W;
       Wd = DESIGN_W; Hd = H / K;
       cv.width = W * DPR; cv.height = H * DPR;
@@ -205,6 +214,13 @@
       head.y = Math.min(Math.max(head.y, HEAD_R), Hd - HEAD_R);
     }
     window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    // fullscreen transitions settle to new dims after the event —
+    // measure again once they've landed
+    document.addEventListener('fullscreenchange', () => {
+      resize();
+      setTimeout(resize, 400);
+    });
     resize();
 
     // telemetry stub — event list kept in memory; a fetch() POST to a

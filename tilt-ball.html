@@ -176,8 +176,12 @@
     let W = 0, H = 0, Wd = 0, Hd = 0, DPR = 1, K = 1;
 
     function resize() {
+      const vv = window.visualViewport;
+      const w = vv ? vv.width : window.innerWidth;
+      const h = vv ? vv.height : window.innerHeight;
+      if (w < 50 || h < 50) return;   // transient degenerate sizes
       DPR = Math.min(window.devicePixelRatio || 1, 3);
-      W = window.innerWidth; H = window.innerHeight;
+      W = w; H = h;
       K = W / DESIGN_W;
       Wd = DESIGN_W; Hd = H / K;
       cv.width = W * DPR; cv.height = H * DPR;
@@ -187,6 +191,11 @@
       ball.y = Math.min(Math.max(ball.y, BALL_R), Hd - BALL_R);
     }
     window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    document.addEventListener('fullscreenchange', () => {
+      resize();
+      setTimeout(resize, 400);
+    });
 
     /* ---------- state ---------- */
     const ball = { x: 0, y: 0, vx: 0, vy: 0 };

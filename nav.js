@@ -6,13 +6,18 @@
 (function () {
   'use strict';
 
+  /* launched via "Add to Home Screen" the app already has no browser
+     chrome, so a fullscreen toggle would be a no-op — drop the row */
+  const standalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+
   const ITEMS = [
     { label: 'Home', href: 'index.html' },
     { label: 'Tilt Snake', href: 'tilt-snake.html' },
     { label: 'Patterns', href: 'patterns.html' },
     { label: 'Tilt Ball', href: 'tilt-ball.html' },
     { type: 'sep' },
-    { label: 'Fullscreen', action: 'fullscreen' },
+    ...(standalone ? [] : [{ label: 'Fullscreen', action: 'fullscreen' }]),
     { label: 'Feedback', href: 'feedback.html' },
   ];
 

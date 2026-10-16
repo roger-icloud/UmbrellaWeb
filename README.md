@@ -29,6 +29,16 @@ Static site, no build step. Live at
   Old filenames (`snake.html`, `search.html`, `ball.html`) are redirect
   stubs so shared links keep working.
 
+## Install as an app (PWA)
+
+`manifest.json` + `icon.svg`/PNGs make every page installable: browser
+menu → "Add to Home Screen". iOS launches chromeless (the
+`apple-mobile-web-app-*` meta was already present); Android/Chrome does
+a fuller install (WebAPK — own app-drawer entry). In standalone the
+menu's Fullscreen row hides itself (nothing left to toggle). No service
+worker yet, so installed pages still need a connection — offline caching
+is a deliberate future step.
+
 ## Naming
 
 Continuous-space pages scale everything proportionally through a single

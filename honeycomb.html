@@ -317,14 +317,19 @@
     const rotOverlay = document.getElementById('rotOverlay');
     let paused = false;
     function checkOrientation() {
-      const portrait = screen.orientation && screen.orientation.type
-        ? screen.orientation.type.startsWith('portrait')
-        : matchMedia('(orientation: portrait)').matches;
+      // viewport dims, not the orientation label: during a rotation iOS
+      // fires the events while matchMedia/orientation still report the
+      // OLD facing — dims tell the truth at call time
+      const portrait = H >= W;
       paused = handheld && !portrait;
       rotOverlay.classList.toggle('hidden', !paused);
     }
-    window.addEventListener('orientationchange', checkOrientation);
-    window.addEventListener('resize', checkOrientation);
+    function scheduleOrientationCheck() {
+      checkOrientation();
+      setTimeout(checkOrientation, 350);   // re-read once the turn settles
+    }
+    window.addEventListener('orientationchange', scheduleOrientationCheck);
+    window.addEventListener('resize', scheduleOrientationCheck);
     checkOrientation();
 
     /* ---------- tap → nearest cell centre ---------- */

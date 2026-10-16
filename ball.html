@@ -165,23 +165,33 @@
       : qs.get('tilt') === 'normal' ? false
         : /android/i.test(navigator.userAgent);
 
-    /* ---------- canvas ---------- */
+    /* ---------- canvas: virtual resolution ----------
+       Same scheme as snake.html: the sim runs in "design px" on a board
+       DESIGN_W wide and a single scale K maps it to the device at render
+       time, so distances and accelerations are a constant fraction of
+       screen on any device. Height breathes. */
+    const DESIGN_W = 375;
     const cv = document.getElementById('c');
     const ctx = cv.getContext('2d');
-    let W = 0, H = 0, DPR = 1;
+    let W = 0, H = 0, Wd = 0, Hd = 0, DPR = 1, K = 1;
 
     function resize() {
       DPR = Math.min(window.devicePixelRatio || 1, 3);
       W = window.innerWidth; H = window.innerHeight;
+      K = W / DESIGN_W;
+      Wd = DESIGN_W; Hd = H / K;
       cv.width = W * DPR; cv.height = H * DPR;
       cv.style.width = W + 'px'; cv.style.height = H + 'px';
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.setTransform(DPR * K, 0, 0, DPR * K, 0, 0);
+      ball.x = Math.min(Math.max(ball.x, BALL_R), Wd - BALL_R);
+      ball.y = Math.min(Math.max(ball.y, BALL_R), Hd - BALL_R);
     }
     window.addEventListener('resize', resize);
-    resize();
 
     /* ---------- state ---------- */
-    const ball = { x: W / 2, y: H / 2, vx: 0, vy: 0 };
+    const ball = { x: 0, y: 0, vx: 0, vy: 0 };
+    resize();
+    ball.x = Wd / 2; ball.y = Hd / 2;
     let smX = 0, smY = 0;            // smoothed gravity
     let rawX = 0, rawY = 0, rawZ = 0;
     let tiltOn = false;
@@ -251,7 +261,7 @@
     });
 
     /* ---------- touch steering ---------- */
-    function setTouch(t) { touch = { x: t.clientX, y: t.clientY }; }
+    function setTouch(t) { touch = { x: t.clientX / K, y: t.clientY / K }; }
     cv.addEventListener('pointerdown', setTouch);
     cv.addEventListener('pointermove', (t) => { if (t.buttons) setTouch(t); });
     window.addEventListener('pointerup', () => touch = null);
@@ -346,22 +356,22 @@
       ball.y += ball.vy * dt;
 
       if (ball.x < BALL_R) { ball.x = BALL_R; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
-      if (ball.x > W - BALL_R) { ball.x = W - BALL_R; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.x > Wd - BALL_R) { ball.x = Wd - BALL_R; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
       if (ball.y < BALL_R) { ball.y = BALL_R; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
-      if (ball.y > H - BALL_R) { ball.y = H - BALL_R; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
+      if (ball.y > Hd - BALL_R) { ball.y = Hd - BALL_R; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
     }
 
     /* ---------- draw + HUD ---------- */
     const hud = document.getElementById('hud');
 
     function draw() {
-      ctx.clearRect(0, 0, W, H);
+      ctx.clearRect(0, 0, Wd, Hd);
 
       // faint target cross at centre, handy for "hold level" judgement
       ctx.strokeStyle = 'rgba(255,255,255,0.08)';
       ctx.beginPath();
-      ctx.moveTo(W / 2 - 20, H / 2); ctx.lineTo(W / 2 + 20, H / 2);
-      ctx.moveTo(W / 2, H / 2 - 20); ctx.lineTo(W / 2, H / 2 + 20);
+      ctx.moveTo(Wd / 2 - 20, Hd / 2); ctx.lineTo(Wd / 2 + 20, Hd / 2);
+      ctx.moveTo(Wd / 2, Hd / 2 - 20); ctx.lineTo(Wd / 2, Hd / 2 + 20);
       ctx.stroke();
 
       const grd = ctx.createRadialGradient(

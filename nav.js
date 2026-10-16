@@ -17,6 +17,8 @@
     { label: 'Patterns', href: 'patterns.html' },
     { label: 'Honeycomb Search', href: 'honeycomb.html' },
     { label: 'Tilt Ball', href: 'tilt-ball.html' },
+    { label: 'Rationale', href: 'rationale.html' },
+    { label: 'Help', href: 'help.html' },
     { type: 'sep' },
     ...(standalone ? [] : [{ label: 'Fullscreen', action: 'fullscreen' }]),
     { label: 'Feedback', href: 'feedback.html' },

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Honeycomb Search — Umbrella</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #hud {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 8px) + 52px);
+      left: 8px;
+      color: #7f9bb0;
+      font-size: 12px;
+      line-height: 1.5;
+      background: rgba(10, 14, 18, .55);
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      white-space: pre;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .88);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .overlay button.go {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="hud"></div>
+  <div id="chipRow"></div>
+
+  <div id="doneOverlay" class="overlay hidden">
+    <div class="title" id="doneTitle">Complete!</div>
+    <div class="sub" id="doneStats"></div>
+    <button class="go" id="again">Another table</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const ROWS = 12, COLS = 12;   // 144 cells, hex-packed circles
+    const BOARD_PAD = 16;    // css px clear space around the board
+    const TOP_RESERVE = 92;   // room for HUD text + status
+    const BOT_RESERVE = 116;  // room for the table chips
+    const CIRCLE_R = 0.39;   // cell circle radius as a fraction of pitch
+    const NUM_FONT = 0.30;   // numeral size as a fraction of pitch
+    const FLASH_SECS = 0.6;   // refusal flash duration
+    const HINT_AFTER = 12;   // s idle before the target pulses
+    const DECOY_MAX = 72;    // filler values drawn from 1..DECOY_MAX,
+                             // excluding every multiple of the table, so
+                             // each path value appears exactly once
+
+    /* ---------- canvas ----------
+       Same policy as Patterns: the board is discrete space — it fills
+       the screen at native cell size and the input layer (nearest cell
+       centre) adapts, rather than scaling a virtual world. */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bX = 0, bY = 0, pitch = 0;   // pitch = centre-to-centre distance
+    const VP = Math.sqrt(3) / 2;     // vertical pitch of hex packing
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - BOARD_PAD;
+      // odd rows shift half a pitch right: board is COLS+0.5 pitches
+      // wide; rows sit VP pitches apart: 1 + (ROWS-1)*VP pitches tall
+      pitch = Math.min(availW / (COLS + 0.5), availH / (1 + (ROWS - 1) * VP));
+      bX = (W - pitch * (COLS + 0.5)) / 2;
+      bY = TOP_RESERVE + (availH - pitch * (1 + (ROWS - 1) * VP)) / 2;
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    resize();
+
+    /* ---------- hex grid ---------- */
+    // odd-r offset rows (matches the Swift SearchHexagonView geometry):
+    // even rows shift left, odd rows half a pitch right, so each cell
+    // has exactly six neighbours
+    function hexDirs(r) {
+      return (r % 2 === 0)
+        ? [[0, -1], [0, 1], [-1, -1], [-1, 0], [1, -1], [1, 0]]
+        : [[0, -1], [0, 1], [-1, 0], [-1, 1], [1, 0], [1, 1]];
+    }
+    function hexNbrs(p) {
+      const out = [];
+      for (const [dr, dc] of hexDirs(p.r)) {
+        const r = p.r + dr, c = p.c + dc;
+        if (r >= 0 && r < ROWS && c >= 0 && c < COLS) out.push({ r, c });
+      }
+      return out;
+    }
+    const key = p => p.r * COLS + p.c;
+    function centreOf(p) {
+      return {
+        x: bX + (p.r % 2 ? pitch / 2 : 0) + p.c * pitch + pitch / 2,
+        y: bY + p.r * pitch * VP + pitch / 2
+      };
+    }
+
+    /* ---------- state ---------- */
+    let table = 0;
+    let cells = [];            // cells[r][c] = {v, flashUntil}
+    let path = [];             // ordered positions of t, 2t, …, 12t
+    let nextIdx = 0;           // how many path cells collected so far
+    let lastCollectT = 0;
+    let state = 'idle';        // idle | play | done
+    let startT = 0, doneMs = 0;
+
+    const events = [];
+    const sid = Math.random().toString(36).slice(2, 10);
+    function logEvent(type, data) {
+      events.push({ t: Math.round(performance.now()), sid, type, ...data });
+    }
+
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+
+    /* ---------- board generation ----------
+       The table's twelve multiples form ONE CONNECTED PATH: each
+       successive value is a hex-neighbour of the last, so the hunt is
+       always local — the answer is touching where you just found
+       something. Self-avoiding walk; a new cell must touch only the
+       current head or the path would visually branch. */
+    function genPath() {
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const used = new Set();
+        const p = [];
+        let cur = { r: Math.floor(Math.random() * ROWS), c: Math.floor(Math.random() * COLS) };
+        p.push(cur); used.add(key(cur));
+        while (p.length < 12) {
+          const opts = hexNbrs(cur).filter(q => !used.has(key(q)));
+          const chain = opts.filter(q =>
+            hexNbrs(q).filter(s => used.has(key(s))).length === 1);
+          const cands = chain.length ? chain : opts;
+          if (!cands.length) break;
+          cur = cands[Math.floor(Math.random() * cands.length)];
+          p.push(cur); used.add(key(cur));
+        }
+        if (p.length === 12) return p;
+      }
+      return null;
+    }
+
+    function dealBoard() {
+      cells = [];
+      for (let r = 0; r < ROWS; r++) {
+        const row = [];
+        for (let c = 0; c < COLS; c++) row.push({ v: 0, flashUntil: 0 });
+        cells.push(row);
+      }
+      path = genPath();
+      path.forEach((p, i) => { cells[p.r][p.c].v = table * (i + 1); });
+      const onPath = new Set(path.map(key));
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          if (onPath.has(r * COLS + c)) continue;
+          let v;
+          do { v = 1 + Math.floor(Math.random() * DECOY_MAX); }
+          while (v % table === 0);
+          cells[r][c].v = v;
+        }
+    }
+
+    function reset(t) {
+      table = t;
+      nextIdx = 0;
+      dealBoard();
+      state = 'play';
+      startT = performance.now();
+      lastCollectT = performance.now();
+      logEvent('deal', { table, path: path.map(key) });
+    }
+
+    /* ---------- table chips ---------- */
+    const chips = document.getElementById('chipRow');
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('click', () => {
+        [...chips.children].forEach(ch => ch.classList.remove('on'));
+        b.classList.add('on');
+        reset(t);
+      });
+      chips.appendChild(b);
+    }
+
+    /* ---------- tap → nearest cell centre ---------- */
+    cv.addEventListener('pointerdown', (t) => {
+      if (state !== 'play') return;
+      let best = null, bestD = Infinity;
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          const ctr = centreOf({ r, c });
+          const d = (ctr.x - t.clientX) ** 2 + (ctr.y - t.clientY) ** 2;
+          if (d < bestD) { bestD = d; best = { r, c }; }
+        }
+      if (!best) return;
+      const cell = cells[best.r][best.c];
+      const now = performance.now();
+      const wanted = table * (nextIdx + 1);
+      if (cell.v === wanted) {
+        nextIdx++;
+        lastCollectT = now;
+        logEvent('collect', { v: cell.v, ord: nextIdx });
+        if (nextIdx === 12) {
+          doneMs = now - startT;
+          state = 'done';
+          logEvent('complete', { table, ms: Math.round(doneMs) });
+          document.getElementById('doneTitle').textContent = '×' + table + ' path complete!';
+          document.getElementById('doneStats').textContent =
+            'Followed all twelve in ' + (doneMs / 1000).toFixed(0) + 's';
+          document.getElementById('doneOverlay').classList.remove('hidden');
+        }
+      } else if (now > cell.flashUntil) {
+        cell.flashUntil = now + FLASH_SECS * 1000;
+        // right family, wrong turn (a path cell out of order) vs a
+        // plain decoy — same refusal grammar as the snake
+        logEvent('refuse', { v: cell.v, want: wanted });
+      }
+    });
+    cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
+
+    document.getElementById('again').addEventListener('click', () => {
+      document.getElementById('doneOverlay').classList.add('hidden');
+      state = 'idle';
+      table = 0;
+      [...chips.children].forEach(ch => ch.classList.remove('on'));
+    });
+
+    /* ---------- draw ---------- */
+    const hud = document.getElementById('hud');
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      if (state === 'idle') {
+        hud.textContent = 'pick a table below —\nits multiples hide as a\nconnected path in the comb';
+        return;
+      }
+      hud.textContent = '';
+      const now = performance.now();
+      const rad = pitch * CIRCLE_R;
+
+      // the found chain — drawn under the cells so circles stay crisp
+      if (nextIdx > 0) {
+        ctx.strokeStyle = tableColour(table);
+        ctx.lineWidth = rad * 0.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 0.45;
+        ctx.beginPath();
+        for (let i = 0; i < nextIdx; i++) {
+          const ctr = centreOf(path[i]);
+          if (i === 0) ctx.moveTo(ctr.x, ctr.y); else ctx.lineTo(ctr.x, ctr.y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      const foundSet = new Set(path.slice(0, nextIdx).map(key));
+      const idle = (now - lastCollectT) / 1000;
+      const foothold = path[0];
+
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          const ctr = centreOf({ r, c });
+          const cell = cells[r][c];
+          const isFound = foundSet.has(key({ r, c }));
+          const isFlash = cell.flashUntil > now;
+          const isFoothold = nextIdx === 0 && key({ r, c }) === key(foothold);
+          const isHint = state === 'play' && nextIdx > 0 && nextIdx < 12
+            && key({ r, c }) === key(path[nextIdx]) && idle > HINT_AFTER;
+
+          ctx.beginPath();
+          ctx.arc(ctr.x, ctr.y, rad, 0, Math.PI * 2);
+          ctx.fillStyle = isFound ? tableColour(table)
+            : isFlash ? '#5a4a28' : '#1a2430';
+          ctx.fill();
+          ctx.strokeStyle = isFound ? tableColour(table)
+            : isFlash ? '#e0a53a' : '#2c3e50';
+          ctx.lineWidth = isFound ? 2 : 1.2;
+          ctx.stroke();
+
+          if (isFoothold || isHint) {
+            // the way in / the next step — a soft pulse, never a command
+            ctx.beginPath();
+            ctx.arc(ctr.x, ctr.y,
+              rad + 5 + Math.sin(now / 300) * 3, 0, Math.PI * 2);
+            ctx.strokeStyle = isFoothold
+              ? 'rgba(77,163,255,0.55)' : 'rgba(77,163,255,0.7)';
+            ctx.lineWidth = isFoothold ? 2.5 : 3;
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = isFound ? '#fff'
+            : (isFlash ? '#e0a53a' : '#8a97a3');
+          ctx.font = 'bold ' + Math.round(pitch * NUM_FONT)
+            + 'px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cell.v, ctr.x, ctr.y + 1);
+        }
+
+      if (state === 'play') {
+        hud.textContent = '×' + table + '   ' + nextIdx + '/12' +
+          (nextIdx < 12 ? '   next ' + table * (nextIdx + 1) : '')
+          + '\ncell ' + Math.round(pitch) + 'px';
+      }
+    }
+
+    function frame() {
+      try { draw(); } catch (e) { /* a bad frame must never kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=6"></script>
+</body>
+
+</html>

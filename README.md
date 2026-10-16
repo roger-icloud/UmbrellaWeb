@@ -19,6 +19,12 @@ Static site, no build step. Live at
   resolution — discrete space keeps its structure) and taps resolve to
   the nearest cell centre, so below-44pt cells stay tappable.
   `DEBUG_GRID` overlay shows the resolution boundaries.
+- `honeycomb.html` — Honeycomb Search. A 12×12 field of hex-packed
+  circles; one table's twelve multiples hide as a single connected path
+  (each next value is a hex-neighbour of the last — the hunt is local,
+  not board-wide). Ordered taps t…12t; foothold (first cell) is ringed
+  until found; idle hints pulse the next cell. Single-table v1 — the
+  Swift version's multi-table crossovers are the intended next stage.
 - `tilt-ball.html` — the original bare tilt probe (three steering modes,
   HUD diagnostics). Development tool, not a game.
 - `feedback.html` — adult-facing feedback form → email via formsubmit.co

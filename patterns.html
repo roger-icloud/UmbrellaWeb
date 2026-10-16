@@ -122,6 +122,12 @@
   <div id="hud"></div>
   <div id="chipRow"></div>
 
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Turn upright</div>
+    <div class="sub">The square is far easier to read in portrait — the
+      game waits for you.</div>
+  </div>
+
   <div id="doneOverlay" class="overlay hidden">
     <div class="title" id="doneTitle">Complete!</div>
     <div class="sub" id="doneStats"></div>
@@ -213,8 +219,24 @@
        for sparse buttons; this is a tiled surface, so a tap resolves to
        the cell whose centre is nearest and that cell flashes/fills —
        the child always sees which cell their tap chose. */
+    /* landscape politely pauses on handhelds (desktops exempt — a wide
+       window is legitimate there) */
+    const handheld = matchMedia('(pointer: coarse)').matches;
+    const rotOverlay = document.getElementById('rotOverlay');
+    let paused = false;
+    function checkOrientation() {
+      const portrait = screen.orientation && screen.orientation.type
+        ? screen.orientation.type.startsWith('portrait')
+        : matchMedia('(orientation: portrait)').matches;
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', !paused);
+    }
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+
     cv.addEventListener('pointerdown', (t) => {
-      if (state !== 'play') return;
+      if (state !== 'play' || paused) return;
       const gx = (t.clientX - bX) / cell;
       const gy = (t.clientY - bY) / cell;
       // nearest-centre on a uniform grid is just floor: cell c spans

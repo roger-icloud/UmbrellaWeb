@@ -405,12 +405,14 @@
     /* ---------- orientation guard ---------- */
     const rotOverlay = document.getElementById('rotOverlay');
     let paused = false;
+    // desktops exempt — a wide window is legitimate there
+    const handheld = matchMedia('(pointer: coarse)').matches;
     function checkOrientation() {
       const portrait = screen.orientation && screen.orientation.type
         ? screen.orientation.type.startsWith('portrait')
         : matchMedia('(orientation: portrait)').matches;
-      paused = !portrait;
-      rotOverlay.classList.toggle('hidden', portrait);
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', !paused);
     }
     window.addEventListener('orientationchange', checkOrientation);
     window.addEventListener('resize', checkOrientation);

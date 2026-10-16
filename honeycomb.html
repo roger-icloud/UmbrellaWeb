@@ -122,6 +122,12 @@
   <div id="hud"></div>
   <div id="chipRow"></div>
 
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Turn upright</div>
+    <div class="sub">The comb is far easier to read in portrait — the
+      game waits for you.</div>
+  </div>
+
   <div id="doneOverlay" class="overlay hidden">
     <div class="title" id="doneTitle">Complete!</div>
     <div class="sub" id="doneStats"></div>
@@ -303,9 +309,27 @@
       chips.appendChild(b);
     }
 
+    /* ---------- orientation guard (handhelds only) ----------
+       Can't lock the browser's rotation, so landscape politely pauses:
+       the overlay covers the board and asks for portrait back. Desktops
+       get a pass — a wide window is legitimate there. */
+    const handheld = matchMedia('(pointer: coarse)').matches;
+    const rotOverlay = document.getElementById('rotOverlay');
+    let paused = false;
+    function checkOrientation() {
+      const portrait = screen.orientation && screen.orientation.type
+        ? screen.orientation.type.startsWith('portrait')
+        : matchMedia('(orientation: portrait)').matches;
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', !paused);
+    }
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+
     /* ---------- tap → nearest cell centre ---------- */
     cv.addEventListener('pointerdown', (t) => {
-      if (state !== 'play') return;
+      if (state !== 'play' || paused) return;
       let best = null, bestD = Infinity;
       for (let r = 0; r < ROWS; r++)
         for (let c = 0; c < COLS; c++) {

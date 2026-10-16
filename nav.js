@@ -64,6 +64,7 @@
     #navPanel a:active, #navPanel button:active { background: #24303c; }
     #navPanel .sub { padding-left: 28px; font-size: 14px; color: #9fb0bd; }
     #navPanel .sep { border-top: 1px solid #2c3e50; margin: 6px 4px; }
+    #navPanel .cur { color: #4da3ff; font-weight: 600; }
   `;
   const style = document.createElement('style');
   style.textContent = css;
@@ -72,15 +73,18 @@
   /* an umbrella glyph rather than the standard ≡ — the browser's own
      menu button sits just above ours on some devices and two burgers
      stacked reads as clutter. Inline SVG keeps it crisp everywhere. */
+  /* a snake glyph rather than the standard ≡ — the browser's own menu
+     button sits just above ours on some devices and two stacked burgers
+     read as clutter. Inline SVG keeps it crisp everywhere. */
   const burger = document.createElement('button');
   burger.id = 'navBurger';
   burger.setAttribute('aria-label', 'Menu');
   burger.innerHTML =
     '<svg viewBox="0 0 24 24" fill="none" stroke="#b9c8d4" ' +
-    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M12 2.5 v1.5"/>' +
-    '<path d="M3.5 12 a8.5 8.5 0 0 1 17 0 z" fill="#b9c8d4" fill-opacity="0.25"/>' +
-    '<path d="M12 12 v6.5 a2.5 2.5 0 0 1 -5 0"/>' +
+    'stroke-width="2" stroke-linecap="round">' +
+    '<path d="M3 18 c4.5 0 4.5-6.5 9-6.5 s4.5-5.5 8-5.5"/>' +
+    '<circle cx="20" cy="6" r="2.6" fill="#b9c8d4" stroke="none"/>' +
+    '<circle cx="20.8" cy="5.4" r="0.8" fill="#101418" stroke="none"/>' +
     '</svg>';
 
   const panel = document.createElement('nav');
@@ -109,6 +113,9 @@
   document.addEventListener('fullscreenchange', syncFSLabel);
   document.addEventListener('webkitfullscreenchange', syncFSLabel);
 
+  /* mark the row for the page we're standing on */
+  const here = location.pathname.split('/').pop() || 'index.html';
+
   function addRow(item, parent, sub) {
     if (item.type === 'sep') {
       const s = document.createElement('div');
@@ -129,6 +136,7 @@
     }
     el.textContent = item.label;
     if (sub) el.className = 'sub';
+    if (item.href === here) el.classList.add('cur');
     if (item.action === 'fullscreen') fsRow = el;
     parent.appendChild(el);
     if (item.children) item.children.forEach(c => addRow(c, parent, true));

@@ -218,7 +218,10 @@
       // taps clearly off the board still count (centroid forgiveness)
       const v = row * 10 + col + 1;
 
-      if (v % table === 0 && !found.has(v)) {
+      // membership is the table's FIRST TWELVE multiples (t…12t), not
+      // every multiple on the square — 2,6,18…98 is not the 2× lesson
+      const member = v % table === 0 && v <= table * 12;
+      if (member && !found.has(v)) {
         found.add(v);
         logEvent('collect', { v, ord: found.size });
         if (found.size === 12) {
@@ -230,7 +233,7 @@
             'All twelve multiples in ' + (doneMs / 1000).toFixed(0) + 's';
           document.getElementById('doneOverlay').classList.remove('hidden');
         }
-      } else if (v % table !== 0) {
+      } else if (!member) {
         flashCell = v;
         flashUntil = performance.now() + FLASH_SECS * 1000;
         logEvent('refuse', { v, table });
@@ -323,7 +326,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js"></script>
+  <script src="nav.js?v=2"></script>
 </body>
 
 </html>

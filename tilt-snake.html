@@ -275,6 +275,14 @@
             if (nums.every(n => Math.hypot(n.x - s.x, n.y - s.y) >= sep))
               nums.push({ v: table * (nums.length + 1), x: s.x, y: s.y, flashUntil: 0 });
           }
+        // pass 3 (airtight): head spawns centre-board and can exclude the
+        // exact slots needed — sweep a coarse lattice for anything that
+        // fits at all, requiring only non-overlap and non-instant-eat
+        for (let y = NUM_MARGIN + NUM_R; y <= Hd - NUM_MARGIN - NUM_R && nums.length < 12; y += 44)
+          for (let x = NUM_MARGIN + NUM_R; x <= Wd - NUM_MARGIN - NUM_R && nums.length < 12; x += 44)
+            if (Math.hypot(x - head.x, y - head.y) > EAT_DIST + NUM_R + 10
+              && nums.every(n => Math.hypot(n.x - x, n.y - y) >= NUM_R * 2 + 2))
+              nums.push({ v: table * (nums.length + 1), x, y, flashUntil: 0 });
       }
       // scatter order is already random positions; values are assigned
       // 1..12 so 'in order' means hunting the next value, not the nearest
@@ -287,7 +295,7 @@
       segs = [];
       nextIdx = 0;
       dealNumerals();
-      logEvent('deal', { table });
+      logEvent('deal', { table, count: nums.length });
     }
 
     /* ---------- table picker + permission overlay ---------- */

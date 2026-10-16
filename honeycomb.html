@@ -132,7 +132,9 @@
     'use strict';
 
     /* ---------- tunables ---------- */
-    const ROWS = 12, COLS = 12;   // 144 cells, hex-packed circles
+    const TARGET_CELLS = 132; // ~how many circles to deal; the silhouette
+    // (rows × cols) adapts to the screen's aspect
+    const COLS_MIN = 6, COLS_MAX = 14;
     const BOARD_PAD = 16;    // css px clear space around the board
     const TOP_RESERVE = 92;   // room for HUD text + status
     const BOT_RESERVE = 116;  // room for the table chips
@@ -141,8 +143,8 @@
     const FLASH_SECS = 0.6;   // refusal flash duration
     const HINT_AFTER = 12;   // s idle before the target pulses
     const DECOY_MAX = 72;    // filler values drawn from 1..DECOY_MAX,
-                             // excluding every multiple of the table, so
-                             // each path value appears exactly once
+    // excluding every multiple of the table, so
+    // each path value appears exactly once
 
     /* ---------- canvas ----------
        Same policy as Patterns: the board is discrete space — it fills
@@ -152,6 +154,7 @@
     const ctx = cv.getContext('2d');
     let W = 0, H = 0, DPR = 1;
     let bX = 0, bY = 0, pitch = 0;   // pitch = centre-to-centre distance
+    let ROWS = 12, COLS = 12;        // set by pickShape() at deal time
     const VP = Math.sqrt(3) / 2;     // vertical pitch of hex packing
 
     function resize() {
@@ -243,7 +246,21 @@
       return null;
     }
 
+    // Shape follows the screen: a portrait phone gets a tall narrow comb
+    // (more of the unused vertical space becomes cell size — on iPhone 8
+    // ~9x15 vs a cramped 12x12); a wide or landscape screen gets a broad
+    // low comb. Chosen at deal time; a mid-game rotation just refits.
+    function pickShape() {
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - BOARD_PAD;
+      const p = Math.sqrt(availW * availH / (VP * TARGET_CELLS));
+      COLS = Math.max(COLS_MIN, Math.min(COLS_MAX, Math.round(availW / p - 0.5)));
+      ROWS = Math.round(TARGET_CELLS / COLS);
+      resize();
+    }
+
     function dealBoard() {
+      pickShape();
       cells = [];
       for (let r = 0; r < ROWS; r++) {
         const row = [];

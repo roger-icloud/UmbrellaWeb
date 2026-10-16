@@ -75,6 +75,14 @@
       background: rgba(40, 64, 88, .95);
     }
 
+    /* kin tables — share a common multiple with a selected table;
+       a soft glow steers toward pairs/triples that meet in the comb
+       without constraining free choice */
+    #chipRow button.kin {
+      border-color: rgba(77, 163, 255, .55);
+      box-shadow: 0 0 9px rgba(77, 163, 255, .3);
+    }
+
     .overlay {
       position: fixed;
       inset: 0;
@@ -427,8 +435,14 @@
       b.addEventListener('click', () => {
         if (selected.includes(t)) selected = selected.filter(x => x !== t);
         else { selected.push(t); if (selected.length > MAX_TABLES) selected.shift(); }
-        [...chips.children].forEach((ch, i) =>
-          ch.classList.toggle('on', selected.includes(i + 2)));
+        [...chips.children].forEach((ch, i) => {
+          const tt = i + 2;
+          ch.classList.toggle('on', selected.includes(tt));
+          // glow tables that would meet a selected table in the comb —
+          // they share a common multiple within the first twelve
+          ch.classList.toggle('kin', !selected.includes(tt) &&
+            selected.some(s => lcm(s, tt) <= 12 * Math.min(s, tt)));
+        });
         if (selected.length) reset(selected);
       });
       chips.appendChild(b);
@@ -510,7 +524,7 @@
       document.getElementById('doneOverlay').classList.add('hidden');
       state = 'idle';
       selected = [];
-      [...chips.children].forEach(ch => ch.classList.remove('on'));
+      [...chips.children].forEach(ch => ch.classList.remove('on', 'kin'));
     });
 
     /* ---------- draw ---------- */

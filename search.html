@@ -86,8 +86,17 @@
       padding: 24px;
     }
 
-    .overlay .title { font-size: 22px; }
-    .overlay .sub { font-size: 13px; color: #8a97a3; margin-top: 14px; max-width: 340px; }
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
     .overlay button.go {
       font-size: 20px;
       padding: 16px 32px;
@@ -98,7 +107,9 @@
       margin-top: 16px;
     }
 
-    .hidden { display: none !important; }
+    .hidden {
+      display: none !important;
+    }
   </style>
 </head>
 
@@ -124,6 +135,7 @@
     const CELL_GAP = 1.5;    // css px grid-line gap between cells
     const FLASH_SECS = 0.6;   // refusal flash duration
     const NUM_FONT = 0.38;   // cell numeral size as a fraction of cell
+    const DEBUG_GRID = true;  // draw touch-resolution boundaries over cells
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
@@ -198,8 +210,11 @@
       if (state !== 'play') return;
       const gx = (t.clientX - bX) / cell;
       const gy = (t.clientY - bY) / cell;
-      const col = Math.min(9, Math.max(0, Math.floor(gx + 0.5)));
-      const row = Math.min(9, Math.max(0, Math.floor(gy + 0.5)));
+      // nearest-centre on a uniform grid is just floor: cell c spans
+      // [c, c+1) in grid coords, centre at c+0.5. Off-board taps clamp
+      // to the edge row/column (the forgiveness half of the scheme).
+      const col = Math.min(9, Math.max(0, Math.floor(gx)));
+      const row = Math.min(9, Math.max(0, Math.floor(gy)));
       // taps clearly off the board still count (centroid forgiveness)
       const v = row * 10 + col + 1;
 
@@ -263,6 +278,30 @@
           ctx.textBaseline = 'middle';
           ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
         }
+      }
+
+      // debug: show the actual tap-resolution boundaries (they coincide
+      // with the drawn cells — every in-board point resolves to the cell
+      // it lands in; outside the board they run on to the edges)
+      if (DEBUG_GRID) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i <= 10; i++) {
+          ctx.moveTo(bX + i * cell, bY);
+          ctx.lineTo(bX + i * cell, bY + bS);
+          ctx.moveTo(bX, bY + i * cell);
+          ctx.lineTo(bX + bS, bY + i * cell);
+        }
+        ctx.stroke();
+        // dots at the centres — the points taps resolve toward
+        ctx.fillStyle = 'rgba(255,255,255,0.28)';
+        for (let r = 0; r < 10; r++)
+          for (let c = 0; c < 10; c++) {
+            ctx.beginPath();
+            ctx.arc(bX + (c + 0.5) * cell, bY + (r + 0.5) * cell, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
       }
 
       if (state === 'play') {

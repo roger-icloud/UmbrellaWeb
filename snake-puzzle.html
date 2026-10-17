@@ -154,6 +154,13 @@
     const TOP_RESERVE = 92;     // room for HUD text
     const BOT_RESERVE = 116;    // room for the table chips
     const BOARD_PAD = 16;
+    /* head animation — the pose is static, so the life is in the eyes:
+       they drift toward the piece waiting to be placed and blink now
+       and then (same grammar as the shared SnakeEyesView) */
+    const GAZE_MAX = 0.85;      // rad the eyes may wander off the facing direction
+    const GAZE_EASE = 0.14;     // per-frame approach of gaze to its target
+    const BLINK_MIN = 2.4, BLINK_MAX = 6;  // s between blinks
+    const BLINK_SECS = 0.28;    // lid dip duration
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
@@ -222,6 +229,7 @@
     let dragging = false;
     let shakeIdx = -1, shakeT = 0;
     let flashIdx = -1, flashT = 0;
+    let gaze = 0, nextBlinkAt = 0, blinkT0 = -1;
     let hasInteracted = false;
     let state = 'play';          // play | done
     let startT = 0, doneMs = 0;
@@ -289,6 +297,9 @@
       misses = 0;
       state = 'play';
       startT = performance.now();
+      gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
+      nextBlinkAt = startT + 2000 + Math.random() * 2000;
+      blinkT0 = -1;
       chipRow.classList.remove('locked');
       doneOverlay.classList.add('hidden');
       syncHud();
@@ -401,20 +412,69 @@
       ctx.fillText(v, cx, cy);
     }
 
-    function drawHead(i, s) {
-      const nxt = segs[i + 1] || { x: s.x, y: s.y + 1 };
+    function wrapAngle(d) {
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    }
+
+    /* the eyes watch the piece in hand (clamped to the face); with
+       nothing to place they rest on the pose's facing direction */
+    function eyeLook(s, facing) {
+      let t = facing;
+      if (spawned) {
+        const d = wrapAngle(Math.atan2(spawned.y - s.y, spawned.x - s.x) - facing);
+        t = facing + Math.max(-GAZE_MAX, Math.min(GAZE_MAX, d));
+      }
+      gaze += wrapAngle(t - gaze) * GAZE_EASE;
+      return gaze;
+    }
+
+    /* 1 = eyes open, dipping briefly toward shut and back — one smooth
+       sinusoid so there are no blink states to manage */
+    function blinkScale(now) {
+      if (blinkT0 < 0) {
+        if (now < nextBlinkAt) return 1;
+        blinkT0 = now;
+      }
+      const k = (now - blinkT0) / 1000 / BLINK_SECS;
+      if (k >= 1) {
+        blinkT0 = -1;
+        nextBlinkAt = now + (BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN)) * 1000;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+
+    /* same construction as the tilt-snake head — radial-shaded ball,
+       rim stroke, pupil pair forward and across — but the hue comes
+       from the table so the snake takes its table's colour */
+    function drawHead(s, now) {
+      const nxt = segs[1] || { x: s.x, y: s.y + 1 };
       const ang = Math.atan2(s.y - nxt.y, s.x - nxt.x);
       const r = segD / 2;
+      const hue = (table * 31 + 200) % 360;
+
+      const g = ctx.createRadialGradient(
+        s.x - r * 0.33, s.y - r * 0.33, r * 0.2,
+        s.x, s.y, r);
+      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
       ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
-      ctx.fillStyle = '#35c795'; ctx.fill();
-      // two eyes, facing away from the neck
-      const ex = Math.cos(ang), ey = Math.sin(ang);
+      ctx.fillStyle = g; ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+      ctx.stroke();
+
+      const look = eyeLook(s, ang);
+      const ex = Math.cos(look), ey = Math.sin(look);
       const px = -ey, py = ex;
+      const sq = blinkScale(now);
       for (const side of [-1, 1]) {
         ctx.beginPath();
-        ctx.arc(s.x + ex * r * 0.38 + px * side * r * 0.34,
-          s.y + ey * r * 0.38 + py * side * r * 0.34,
-          r * 0.13, 0, 7);
+        ctx.ellipse(s.x + ex * r * 0.38 + px * side * r * 0.36,
+          s.y + ey * r * 0.38 + py * side * r * 0.36,
+          r * 0.16, Math.max(r * 0.16 * sq, r * 0.03), look, 0, 7);
         ctx.fillStyle = '#101418'; ctx.fill();
       }
     }
@@ -440,7 +500,7 @@
           else ox = Math.sin(t * 30) * 5 * (1 - t / SHAKE_SECS);
         }
         const cx = s.x + ox, cy = s.y, r = segD / 2;
-        if (i === 0) { drawHead(i, { x: cx, y: cy }); continue; }
+        if (i === 0) { drawHead({ x: cx, y: cy }, now); continue; }
         if (s.blank) {
           ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
           ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();

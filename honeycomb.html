@@ -627,12 +627,6 @@
           ctx.fillText(cell.v, ctr.x, ctr.y + 1);
         }
 
-      if (state === 'play') {
-        hud.textContent = tables.map((t, ti) =>
-          '×' + t + '   ' + idx[ti] + '/12' +
-          (idx[ti] < 12 ? '   next ' + t * (idx[ti] + 1) : '   done')
-        ).join('\n') + '\ncell ' + Math.round(pitch) + 'px';
-      }
     }
 
     function frame() {

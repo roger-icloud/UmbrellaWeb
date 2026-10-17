@@ -31,20 +31,6 @@
       inset: 0;
     }
 
-    #hud {
-      position: fixed;
-      top: calc(env(safe-area-inset-top, 8px) + 52px);
-      left: 8px;
-      color: #7f9bb0;
-      font-size: 12px;
-      line-height: 1.5;
-      background: rgba(10, 14, 18, .55);
-      padding: 8px 10px;
-      border-radius: 8px;
-      pointer-events: none;
-      white-space: pre;
-    }
-
     .overlay {
       position: fixed;
       inset: 0;
@@ -108,7 +94,6 @@
 <body>
 
   <canvas id="c"></canvas>
-  <div id="hud"></div>
 
   <div id="rotOverlay" class="overlay hidden">
     <div class="title">Rotate back</div>
@@ -382,7 +367,7 @@
     });
 
     /* ---------- input ---------- */
-    let smX = 0, smY = 0, tiltOn = false, motionHz = 0, motionCount = 0, lastHzT = performance.now();
+    let smX = 0, smY = 0, tiltOn = false;
     window.addEventListener('devicemotion', (e) => {
       const g = e.accelerationIncludingGravity;
       if (!g || g.x === null) return;
@@ -391,7 +376,6 @@
       smX += (gx - smX) * SMOOTHING;
       smY += (gy - smY) * SMOOTHING;
       tiltOn = true;
-      motionCount++;
     });
 
     let touch = null;
@@ -527,7 +511,6 @@
     }
 
     /* ---------- draw ---------- */
-    const hud = document.getElementById('hud');
 
     /* 1 = eyes open, dipping briefly toward shut and back — one smooth
        sinusoid so there are no blink states to manage */
@@ -651,23 +634,11 @@
         });
       }
 
-      if (state === 'play') {
-        const got = nextIdx;
-        hud.textContent = '×' + table + '   ' + got + '/12' +
-          (got < 12 ? '   next ' + table * (got + 1) : '') +
-          '\nmotion ' + motionHz + '/s' + (AXIS_FLIP ? '  tilt-flip' : '');
-      } else {
-        hud.textContent = '';
-      }
     }
 
     function frame(now) {
       const dt = Math.min((now - lastT) / 1000, 0.05);
       lastT = now;
-      if (now - lastHzT >= 500) {
-        motionHz = Math.round(motionCount * 1000 / (now - lastHzT));
-        motionCount = 0; lastHzT = now;
-      }
       step(dt, now);
       try { draw(); } catch (e) { /* a bad frame must never kill the loop */ }
       requestAnimationFrame(frame);

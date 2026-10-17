@@ -341,16 +341,11 @@
           }
       }
 
-      if (state === 'play') {
-        hud.textContent = '×' + table + '   ' + found.size + '/12'
-          + '\ncell ' + Math.round(cell) + 'px' +
-          (cell < 44 ? '  (below 44pt — centroid taps active)' : '');
-      } else if (state === 'idle') {
-        hud.textContent = 'pick a table below,\nthen tap its multiples on the square' +
-          '\n\ncell ' + Math.round(cell) + 'px';
-      } else {
-        hud.textContent = '';
-      }
+      // the box doubles as the only onboarding text — it speaks while a
+      // table is being picked, then stays out of the way
+      hud.textContent = state === 'idle'
+        ? 'pick a table below,\nthen tap its multiples on the square'
+        : '';
     }
 
     function frame() {

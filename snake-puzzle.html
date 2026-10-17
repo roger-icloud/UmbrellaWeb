@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Snake Puzzle — Umbrella</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #hud {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 8px) + 52px);
+      left: 8px;
+      color: #7f9bb0;
+      font-size: 12px;
+      line-height: 1.5;
+      background: rgba(10, 14, 18, .55);
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      white-space: pre;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    /* table choice happens between games only — once a child starts
+       dragging, the chips dim so the puzzle owns the screen */
+    #chipRow.locked button {
+      opacity: .35;
+      pointer-events: none;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .88);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .overlay button.go {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="hud"></div>
+  <div id="chipRow"></div>
+
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Turn upright</div>
+    <div class="sub">The snake is easier to see in portrait — the
+      game waits for you.</div>
+  </div>
+
+  <div id="doneOverlay" class="overlay hidden">
+    <div class="title">Complete!</div>
+    <div class="sub" id="doneStats"></div>
+    <button class="go" id="again">Another snake</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const BLANK_COUNT = 4;      // body cells left empty per deal
+    const DROP_TOL = 1.1;       // drop acceptance radius, in segment diameters
+    const SPAWN_POS = { x: 0.88, y: 0.12 }; // normalized point the numbers appear at
+    const SPAWN_SECS = 0.5;     // fade/rise-in duration for each spawned number
+    const SHAKE_SECS = 0.45;    // refusal shake on the mistaken segment
+    const FLASH_SECS = 0.6;     // amber ring on a refused drop
+    const TOP_RESERVE = 92;     // room for HUD text
+    const BOT_RESERVE = 116;    // room for the table chips
+    const BOARD_PAD = 16;
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bX = 0, bY = 0, bW = 0, bH = 0;   // board rect (css px)
+    let segD = 48;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      bX = BOARD_PAD; bY = TOP_RESERVE;
+      bW = W - 2 * BOARD_PAD; bH = H - TOP_RESERVE - BOT_RESERVE;
+      segD = Math.max(34, Math.min(72, Math.min(bW, bH) * 0.14));
+      layout();
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    /* ---------- poses ----------
+       A pose is 13 normalized points (0..1), head-first. Three families
+       mirrored and reversed at random — same grammar as the Swift
+       SnakePoseKind rails, smaller vocabulary for now. */
+    function poseRail() {
+      const t = i => i / 12;
+      const families = [
+        // gentle diagonal
+        i => ({ x: 0.18 + 0.64 * t(i), y: 0.22 + 0.5 * t(i) }),
+        // wide S across the board
+        i => ({
+          x: 0.16 + 0.68 * t(i),
+          y: 0.5 + 0.3 * Math.sin(t(i) * Math.PI * 2) * (1 - 0.25 * t(i))
+        }),
+        // lazy arc (top half of an ellipse, head at one end)
+        i => ({
+          x: 0.5 - 0.36 * Math.cos(t(i) * Math.PI),
+          y: 0.62 - 0.34 * Math.sin(t(i) * Math.PI)
+        }),
+      ];
+      let rail = families[Math.floor(Math.random() * families.length)];
+      let pts = [];
+      for (let i = 0; i <= 12; i++) pts.push(rail(i));
+      if (Math.random() < 0.5) pts = pts.map(p => ({ x: 1 - p.x, y: p.y }));
+      if (Math.random() < 0.5) pts = pts.map(p => ({ x: p.x, y: 1 - p.y }));
+      if (Math.random() < 0.5) pts.reverse();
+      return pts;
+    }
+
+    /* ---------- colours (same table-coding as the family) ---------- */
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+
+    /* ---------- state ---------- */
+    const N = 13;                 // head + twelve body segments
+    let table = 3;
+    let rail = [];               // normalized points
+    let segs = [];               // {x,y, expected, filled, blank}
+    let blanks = [];             // indices into segs awaiting values
+    let remaining = [];          // values still to spawn
+    let spawned = null;          // {value, x, y, born} — the piece in hand
+    let dragging = false;
+    let shakeIdx = -1, shakeT = 0;
+    let flashIdx = -1, flashT = 0;
+    let hasInteracted = false;
+    let state = 'play';          // play | done
+    let startT = 0, doneMs = 0;
+    let misses = 0;
+
+    const chipRow = document.getElementById('chipRow');
+    const hud = document.getElementById('hud');
+    const rotOverlay = document.getElementById('rotOverlay');
+    const doneOverlay = document.getElementById('doneOverlay');
+    const doneStats = document.getElementById('doneStats');
+
+    function layout() {
+      if (!rail.length) return;
+      for (let i = 0; i < N; i++) {
+        segs[i].x = bX + rail[i].x * bW;
+        segs[i].y = bY + rail[i].y * bH;
+      }
+      if (spawned && !dragging) homeSpawn();
+    }
+
+    function spawnHome() {
+      return { x: bX + SPAWN_POS.x * bW, y: bY + SPAWN_POS.y * bH };
+    }
+    function homeSpawn() {
+      const p = spawnHome();
+      spawned.x = p.x; spawned.y = p.y;
+    }
+
+    function spawnNext() {
+      if (!remaining.length) { spawned = null; return; }
+      const k = Math.floor(Math.random() * remaining.length);
+      const value = remaining.splice(k, 1)[0];
+      spawned = { value, x: 0, y: 0, born: performance.now() };
+      homeSpawn();
+    }
+
+    function deal() {
+      rail = poseRail();
+      segs = [];
+      for (let i = 0; i < N; i++) {
+        segs.push({
+          x: 0, y: 0,
+          expected: i === 0 ? 0 : i * table,
+          filled: true, blank: false
+        });
+      }
+      // choose BLANK_COUNT uniform body indices (never the head, never the
+      // first body cell — the first multiple stays as the foothold)
+      const pool = [];
+      for (let i = 2; i < N; i++) pool.push(i);
+      blanks = [];
+      for (let k = 0; k < BLANK_COUNT && pool.length; k++) {
+        const j = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+        blanks.push(j);
+      }
+      remaining = [];
+      for (const j of blanks) {
+        segs[j].filled = false; segs[j].blank = true;
+        remaining.push(segs[j].expected);
+      }
+      remaining.sort(() => Math.random() - 0.5);
+      layout();
+      spawnNext();
+      hasInteracted = false;
+      misses = 0;
+      state = 'play';
+      startT = performance.now();
+      chipRow.classList.remove('locked');
+      doneOverlay.classList.add('hidden');
+      syncHud();
+    }
+
+    /* ---------- chips ---------- */
+    const chipBtns = [];
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('click', () => {
+        if (hasInteracted && state === 'play') return;
+        if (t === table && state === 'play') return;
+        table = t;
+        syncChips();
+        deal();
+      });
+      chipBtns.push(b);
+      chipRow.appendChild(b);
+    }
+    function syncChips() {
+      chipBtns.forEach((b, i) => b.classList.toggle('on', i + 2 === table));
+      chipRow.classList.toggle('locked', hasInteracted && state === 'play');
+    }
+
+    function syncHud() {
+      const left = remaining.length + (spawned ? 1 : 0);
+      hud.textContent = state === 'play'
+        ? '×' + table + '  ·  ' + left + ' to place' +
+        (misses ? '  ·  ' + misses + ' refused' : '')
+        : '×' + table + '  ·  complete';
+    }
+
+    /* ---------- input ---------- */
+    function pt(e) {
+      const r = cv.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    cv.addEventListener('pointerdown', e => {
+      if (state !== 'play' || !spawned) return;
+      const p = pt(e);
+      if (Math.hypot(p.x - spawned.x, p.y - spawned.y) <= segD * 0.7) {
+        dragging = true;
+        hasInteracted = true;
+        syncChips();
+        cv.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      }
+    });
+
+    cv.addEventListener('pointermove', e => {
+      if (!dragging || !spawned) return;
+      const p = pt(e);
+      spawned.x = p.x; spawned.y = p.y;
+    });
+
+    cv.addEventListener('pointerup', e => {
+      if (!dragging || !spawned) return;
+      dragging = false;
+      const p = pt(e);
+      // nearest segment within tolerance
+      let best = -1, bestD = segD * DROP_TOL;
+      for (let i = 0; i < N; i++) {
+        const d = Math.hypot(p.x - segs[i].x, p.y - segs[i].y);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (best >= 0 && segs[best].blank && segs[best].expected === spawned.value) {
+        segs[best].filled = true; segs[best].blank = false;
+        spawnNext();
+        if (!spawned) finish();
+      } else if (best >= 0) {
+        // a real target, but not this number's home — refusal is information
+        shakeIdx = best; shakeT = performance.now();
+        flashIdx = best; flashT = performance.now();
+        misses++;
+        homeSpawn();
+      } else {
+        homeSpawn(); // dropped on empty ground: quietly goes home
+      }
+      syncHud();
+    });
+
+    function finish() {
+      state = 'done';
+      doneMs = Math.round(performance.now() - startT);
+      doneStats.textContent = 'The ×' + table + ' snake is whole — ' +
+        (doneMs / 1000).toFixed(0) + 's' +
+        (misses ? ', ' + misses + ' refusal' + (misses > 1 ? 's' : '') : '');
+      doneOverlay.classList.remove('hidden');
+      chipRow.classList.remove('locked');
+      syncHud();
+    }
+    document.getElementById('again').addEventListener('click', deal);
+
+    /* ---------- orientation guard (handheld only) ---------- */
+    const handheld = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    function checkOrientation() {
+      rotOverlay.classList.toggle('hidden',
+        !handheld || H >= W);
+    }
+    window.addEventListener('resize', checkOrientation);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', checkOrientation);
+
+    /* ---------- draw ---------- */
+    function numeral(v, cx, cy, size, colour) {
+      ctx.font = '700 ' + size + 'px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = colour;
+      ctx.fillText(v, cx, cy);
+    }
+
+    function drawHead(i, s) {
+      const nxt = segs[i + 1] || { x: s.x, y: s.y + 1 };
+      const ang = Math.atan2(s.y - nxt.y, s.x - nxt.x);
+      const r = segD / 2;
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
+      ctx.fillStyle = '#35c795'; ctx.fill();
+      // two eyes, facing away from the neck
+      const ex = Math.cos(ang), ey = Math.sin(ang);
+      const px = -ey, py = ex;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(s.x + ex * r * 0.38 + px * side * r * 0.34,
+          s.y + ey * r * 0.38 + py * side * r * 0.34,
+          r * 0.13, 0, 7);
+        ctx.fillStyle = '#101418'; ctx.fill();
+      }
+    }
+
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+
+      // spine: a faint thread through the segments so the pose reads as
+      // one animal even with gaps
+      ctx.beginPath();
+      segs.forEach((s, i) => i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y));
+      ctx.strokeStyle = 'rgba(90,110,130,.25)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      for (let i = N - 1; i >= 0; i--) {
+        const s = segs[i];
+        let ox = 0;
+        if (i === shakeIdx) {
+          const t = (now - shakeT) / 1000;
+          if (t > SHAKE_SECS) shakeIdx = -1;
+          else ox = Math.sin(t * 30) * 5 * (1 - t / SHAKE_SECS);
+        }
+        const cx = s.x + ox, cy = s.y, r = segD / 2;
+        if (i === 0) { drawHead(i, { x: cx, y: cy }); continue; }
+        if (s.blank) {
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+          ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();
+          ctx.setLineDash([5, 4]);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = tableColour(table);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+          ctx.fillStyle = tableColour(table); ctx.fill();
+          numeral(s.expected, cx, cy, segD * 0.34, '#fff');
+        }
+        if (i === flashIdx) {
+          const t = (now - flashT) / 1000;
+          if (t > FLASH_SECS) flashIdx = -1;
+          else {
+            ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, 7);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(224,165,58,' + (1 - t / FLASH_SECS) + ')';
+            ctx.stroke();
+          }
+        }
+      }
+
+      // the piece in hand — fades and rises in from the spawn point
+      if (spawned) {
+        const age = (now - spawned.born) / 1000;
+        const k = dragging ? 1 : Math.min(1, age / SPAWN_SECS);
+        const r = segD / 2;
+        ctx.globalAlpha = k;
+        ctx.beginPath();
+        ctx.arc(spawned.x, spawned.y - (1 - k) * 18, r, 0, 7);
+        ctx.fillStyle = tableColour(table); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke();
+        numeral(spawned.value, spawned.x, spawned.y - (1 - k) * 18, segD * 0.34, '#fff');
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function frame(now) {
+      try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+
+    resize();
+    checkOrientation();
+    syncChips();
+    deal();
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=8"></script>
+</body>
+
+</html>

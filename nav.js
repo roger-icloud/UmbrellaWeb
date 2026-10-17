@@ -14,6 +14,7 @@
   const ITEMS = [
     { label: 'Home', href: 'index.html' },
     { label: 'Tilt Snake', href: 'tilt-snake.html' },
+    { label: 'Snake Puzzle', href: 'snake-puzzle.html' },
     { label: 'Patterns', href: 'patterns.html' },
     { label: 'Honeycomb Search', href: 'honeycomb.html' },
     { label: 'Tilt Ball', href: 'tilt-ball.html' },

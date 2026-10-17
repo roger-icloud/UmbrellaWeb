@@ -174,6 +174,10 @@
        time, so distances and accelerations are a constant fraction of
        screen on any device. Height breathes. */
     const DESIGN_W = 375;
+    /* same cap as tilt-snake: past K_MAX, widen the logical world rather
+       than inflating the ball to parade size */
+    const K_MAX = 1.8;
+    const MIN_DESIGN_H = 480;
     const cv = document.getElementById('c');
     const ctx = cv.getContext('2d');
     let W = 0, H = 0, Wd = 0, Hd = 0, DPR = 1, K = 1;
@@ -185,8 +189,8 @@
       if (w < 50 || h < 50) return;   // transient degenerate sizes
       DPR = Math.min(window.devicePixelRatio || 1, 3);
       W = w; H = h;
-      K = W / DESIGN_W;
-      Wd = DESIGN_W; Hd = H / K;
+      K = Math.min(W / DESIGN_W, H / MIN_DESIGN_H, K_MAX);
+      Wd = W / K; Hd = H / K;
       cv.width = W * DPR; cv.height = H * DPR;
       cv.style.width = W + 'px'; cv.style.height = H + 'px';
       ctx.setTransform(DPR * K, 0, 0, DPR * K, 0, 0);

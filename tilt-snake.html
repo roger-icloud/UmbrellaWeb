@@ -164,6 +164,8 @@
     const HINT_ARROW_SECS = 2.5;   // how long each arrow flash lasts
     const TAP_PAD = 10;     // extra tap tolerance around numerals, px
     const MANUAL_TILT = 1.5;    // tilt magnitude that cancels tap-autopilot
+    const BLINK_MIN = 2.4, BLINK_MAX = 6;  // s between blinks
+    const BLINK_SECS = 0.28;               // lid dip duration
 
     // Many Android devices report the motion axes with the opposite sign
     // convention to iOS — tilt arrives inverted. Auto-flip on Android;
@@ -184,6 +186,7 @@
     let startT = 0, doneMs = 0;
     let autoTarget = null;       // numeral the snake is being steered to by tap
     let lastCollectT = 0;        // performance.now() of last collection / start
+    let nextBlinkAt = 0, blinkT0 = -1;
 
     /* ---------- canvas: virtual resolution ----------
        The whole game is laid out in "design px" — a board DESIGN_W wide,
@@ -304,6 +307,8 @@
       segs = [];
       nextIdx = 0;
       dealNumerals();
+      nextBlinkAt = performance.now() + 2000 + Math.random() * 2000;
+      blinkT0 = -1;
       logEvent('deal', { table, count: nums.length });
     }
 
@@ -524,6 +529,22 @@
     /* ---------- draw ---------- */
     const hud = document.getElementById('hud');
 
+    /* 1 = eyes open, dipping briefly toward shut and back — one smooth
+       sinusoid so there are no blink states to manage */
+    function blinkScale(now) {
+      if (blinkT0 < 0) {
+        if (now < nextBlinkAt) return 1;
+        blinkT0 = now;
+      }
+      const k = (now - blinkT0) / 1000 / BLINK_SECS;
+      if (k >= 1) {
+        blinkT0 = -1;
+        nextBlinkAt = now + (BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN)) * 1000;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+
     function drawNum(n, isTarget, hot) {
       const flash = n.flashUntil > performance.now();
       ctx.beginPath();
@@ -578,17 +599,21 @@
         ctx.stroke();
       }
 
+      // the snake takes its table's colour — same table-coding as the
+      // rest of the family (head gradient and body both derive from it)
+      const hue = (table * 31 + 200) % 360;
+
       // tail, drawn back-to-front
       for (let i = segs.length - 1; i >= 0; i--) {
         const sg = segs[i];
         ctx.beginPath();
         ctx.arc(sg.x, sg.y, SEG_R, 0, Math.PI * 2);
-        ctx.fillStyle = '#1d6a52';
+        ctx.fillStyle = 'hsl(' + hue + ',60%,45%)';
         ctx.fill();
-        ctx.strokeStyle = '#2ea37e';
+        ctx.strokeStyle = 'hsl(' + hue + ',55%,36%)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
-        ctx.fillStyle = '#dff3ec';
+        ctx.fillStyle = '#fff';
         ctx.font = 'bold 15px -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -596,24 +621,32 @@
       }
 
       if (state === 'play' || state === 'done' || state === 'ready') {
-        // head
+        // head — same construction as Snake Puzzle: radial-shaded ball,
+        // rim stroke, pupil pair forward and across. Here the eyes stay
+        // on the heading — where they point is steering information —
+        // and blink the same way.
         ctx.beginPath();
         ctx.arc(head.x, head.y, HEAD_R, 0, Math.PI * 2);
-        const grd = ctx.createRadialGradient(head.x - 6, head.y - 6, 4, head.x, head.y, HEAD_R);
-        grd.addColorStop(0, '#7fe0b8');
-        grd.addColorStop(1, '#1d6a52');
+        const grd = ctx.createRadialGradient(
+          head.x - HEAD_R * 0.33, head.y - HEAD_R * 0.33, HEAD_R * 0.2,
+          head.x, head.y, HEAD_R);
+        grd.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+        grd.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
         ctx.fillStyle = grd;
         ctx.fill();
-        ctx.strokeStyle = '#2ea37e';
+        ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
-        // eyes, offset perpendicular to heading
         const ex = Math.cos(heading), ey = Math.sin(heading);
         const px = -ey, py = ex;
+        const sq = blinkScale(performance.now());
         [[1, 0], [-1, 0]].forEach(([sgn]) => {
           ctx.beginPath();
-          ctx.arc(head.x + ex * 7 + px * sgn * 7, head.y + ey * 7 + py * sgn * 7, 3.2, 0, Math.PI * 2);
-          ctx.fillStyle = '#0b1512';
+          ctx.ellipse(head.x + ex * HEAD_R * 0.38 + px * sgn * HEAD_R * 0.36,
+            head.y + ey * HEAD_R * 0.38 + py * sgn * HEAD_R * 0.36,
+            HEAD_R * 0.16, Math.max(HEAD_R * 0.16 * sq, HEAD_R * 0.03),
+            heading, 0, Math.PI * 2);
+          ctx.fillStyle = '#101418';
           ctx.fill();
         });
       }

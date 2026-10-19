@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Lattice — Umbrella lab</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #hud {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 8px) + 52px);
+      left: 8px;
+      color: #7f9bb0;
+      font-size: 12px;
+      line-height: 1.5;
+      background: rgba(10, 14, 18, .55);
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      white-space: pre;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .88);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .overlay button.go {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="hud"></div>
+  <div id="chipRow"></div>
+
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Turn upright</div>
+    <div class="sub">The square is far easier to read in portrait — the
+      game waits for you.</div>
+  </div>
+
+  <div id="doneOverlay" class="overlay hidden">
+    <div class="title" id="doneTitle">Built!</div>
+    <div class="sub" id="doneStats"></div>
+    <button class="go" id="again">Another table</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const BOARD_PAD = 16;    // css px clear space around the board
+    const TOP_RESERVE = 92;   // room for HUD text + status
+    const BOT_RESERVE = 116;  // room for the table chips
+    const GROUND_H = 110;   // css px strip below the board holding the
+    //   loose numeral-discs ("the ground")
+    const CELL_GAP = 1.5;    // css px grid-line gap between cells
+    const NUM_FONT = 0.38;   // cell numeral size as a fraction of cell
+    const DISC_FRAC = 0.42;  // disc radius as a fraction of a cell
+    const LOOSE_ALPHA = 0.6;   // opacity of a disc still on the ground
+    const GHOST_A = 0.30;  // hinted value ghosting inside its socket
+    const SNAP_FRAC = 0.65;  // drop radius for socket capture (of cell)
+    const FLASH_SECS = 0.6;   // refusal flash duration
+    const HINT_PULSE = 0.9;   // s per pulse cycle of a hinted disc
+    const HINT_IDLE_S = 8;    // s of stillness before a socket ring is offered
+    const OFFER_FULL = false; // offered ring marks the spot only (false), or
+    //   gives the full hint too — ghost numeral + pulsing disc (true)
+    const NUM_HALO = 0.14;    // dark halo width around a disc numeral (of r)
+    const SETTLE_MS = 220;   // drop→seat animation after a good drop
+    const RETURN_MS = 380;   // slide-home time after a refused drop
+    const FLY_MS = 700;   // hinted-disc arc journey to its socket
+    const BEAT_STEP = 0.13;  // s between each multiple's victory flash
+    const BEAT_SECS = 0.55;  // flash duration per member
+
+    /* ---------- deterministic seeding (lab aid) ---------- */
+    const params = new URLSearchParams(location.search);
+    let rng = Math.random;
+    if (params.has('seed')) {
+      let s = (parseInt(params.get('seed'), 10) >>> 0) || 1;
+      rng = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+    }
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bX = 0, bY = 0, bS = 0, cell = 0;
+    let gY = 0, gH = 0;        // ground strip: top edge and height
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - GROUND_H - BOARD_PAD;
+      bS = Math.min(availW, availH);
+      cell = bS / 10;
+      bX = (W - bS) / 2;
+      bY = TOP_RESERVE + (availH - bS) / 2;
+      gY = bY + bS + 8;
+      gH = Math.max(0, H - BOT_RESERVE - gY - 4);
+      discs.forEach(d => {
+        if (d.state === 'ground' || d.state === 'return') {
+          d.gx = clampX(d.gx); d.gy = clampY(d.gy);
+          if (d.state === 'ground') { d.x = d.gx; d.y = d.gy; }
+        }
+      });
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    /* ---------- helpers ---------- */
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    function socketPos(v) {
+      const i = v - 1;
+      return {
+        x: bX + ((i % 10) + 0.5) * cell,
+        y: bY + (Math.floor(i / 10) + 0.5) * cell
+      };
+    }
+    function discR() { return cell * DISC_FRAC; }
+    function clampX(x) { return Math.min(W - discR() - 6, Math.max(discR() + 6, x)); }
+    function clampY(y) { return Math.min(gY + gH - discR(), Math.max(gY + discR(), y)); }
+    function easeOut(k) { return 1 - (1 - k) * (1 - k) * (1 - k); }
+
+    /* ---------- state ---------- */
+    let table = 0;
+    let count = 0;             // sockets/discs this round (≤ 12)
+    let discs = [];            // the numeral-discs
+    let placed = new Set();    // values seated in their sockets
+    let hintV = -1;            // value currently hinted (-1 = none)
+    let hintOffered = false;   // offered by a pause (ring only) vs asked by
+    //   a socket tap (also ghosts the numeral + pulses its disc)
+    let lastAct = 0;           // last touch — a still patch offers a hint
+    let flashCell = -1, flashUntil = 0;
+    let state = 'idle';        // idle | play | beat | done
+    let startT = 0;
+    let beatT0 = 0;            // sim-time origin for the victory beat
+    let dragD = null;          // disc being dragged
+    let simT = 0;
+
+    function reset(t) {
+      table = t;
+      // the square ends at 100 — high tables run out of room and play
+      // fewer discs (×9 → 11, ×10 → 10, ×11 → 9, ×12 → 8)
+      count = Math.min(12, Math.floor(100 / t));
+      placed = new Set();
+      hintV = -1;
+      hintOffered = false;
+      lastAct = performance.now();
+      flashCell = -1;
+      dragD = null;
+      state = 'play';
+      startT = performance.now();
+      discs = [];
+      // scatter the round's multiples loosely across the ground strip —
+      // unordered on purpose; ordering them is the task
+      for (let i = 1; i <= count; i++) {
+        const v = t * i;
+        discs.push({
+          v,
+          gx: 0, gy: 0,            // home spot on the ground
+          x: 0, y: 0,              // current centre
+          state: 'ground',         // ground | drag | return | fly | placed
+          t0: 0, fx: 0, fy: 0, tx: 0, ty: 0   // anim timing + endpoints
+        });
+      }
+      scatter();
+    }
+
+    function scatter() {
+      const r = discR();
+      const cols = Math.max(3, Math.floor((W - 2 * r - 16) / (r * 2.4)));
+      const order = discs.map((_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+      }
+      order.forEach((di, k) => {
+        const d = discs[di];
+        const cx = r + 10 + (k % cols) * (r * 2.4);
+        const cy = gY + r + 6 + Math.floor(k / cols) * (r * 2.4);
+        d.gx = clampX(cx + (rng() - 0.5) * r * 1.4);
+        d.gy = clampY(cy + (rng() - 0.5) * r * 1.2);
+        if (d.state === 'ground') { d.x = d.gx; d.y = d.gy; }
+      });
+    }
+
+    /* ---------- table chips ---------- */
+    const chips = document.getElementById('chipRow');
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.dataset.t = t;
+      b.addEventListener('click', () => {
+        [...chips.children].forEach(c => c.classList.remove('on'));
+        b.classList.add('on');
+        reset(t);
+      });
+      chips.appendChild(b);
+    }
+
+    /* ---------- orientation pause (handhelds) ---------- */
+    const handheld = matchMedia('(pointer: coarse)').matches;
+    const rotOverlay = document.getElementById('rotOverlay');
+    let paused = false;
+    function checkOrientation() {
+      const portrait = H >= W;
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', !paused);
+    }
+    function scheduleOrientationCheck() {
+      checkOrientation();
+      setTimeout(checkOrientation, 350);
+    }
+    window.addEventListener('orientationchange', scheduleOrientationCheck);
+    window.addEventListener('resize', scheduleOrientationCheck);
+
+    /* ---------- input ---------- */
+    function discAt(x, y) {
+      for (let i = discs.length - 1; i >= 0; i--) {
+        const d = discs[i];
+        if (d.state === 'placed') continue;
+        const dx = x - d.x, dy = y - d.y;
+        if (dx * dx + dy * dy <= discR() * discR() * 1.15) return d;
+      }
+      return null;
+    }
+    function nearestSocket(x, y) {
+      let best = null, bestD = cell * SNAP_FRAC;
+      for (let i = 1; i <= count; i++) {
+        const v = table * i;
+        if (placed.has(v)) continue;
+        const p = socketPos(v);
+        const d = Math.hypot(x - p.x, y - p.y);
+        if (d < bestD) { bestD = d; best = v; }
+      }
+      return best;
+    }
+
+    function seat(d) {
+      d.state = 'placed';
+      const p = socketPos(d.v);
+      d.x = p.x; d.y = p.y;
+      placed.add(d.v);
+      if (hintV === d.v) { hintV = -1; hintOffered = false; }
+      if (placed.size === count) {
+        state = 'beat';
+        beatT0 = simT;
+      }
+    }
+
+    cv.addEventListener('pointerdown', (e) => {
+      if (state !== 'play' || paused) return;
+      lastAct = performance.now();
+      const x = e.clientX, y = e.clientY;
+
+      // tapping a hinted disc on the ground sends it home — the socket
+      // pulls it in; the disc obeys physics, it doesn't walk
+      const d = discAt(x, y);
+      if (d) {
+        if (hintV === d.v) {
+          d.state = 'fly';
+          d.t0 = simT;
+          d.fx = d.x; d.fy = d.y;
+          const p = socketPos(d.v);
+          d.tx = p.x; d.ty = p.y;
+        } else {
+          d.state = 'drag';
+          dragD = d;
+          d.dx = d.x - x; d.dy = d.y - y;
+        }
+        return;
+      }
+
+      // tapping an empty socket asks "what lives here?" — its value
+      // ghosts inside and the matching disc pulses on the ground
+      const gx = (x - bX) / cell, gy = (y - bY) / cell;
+      if (gx >= 0 && gx < 10 && gy >= 0 && gy < 10) {
+        const v = Math.floor(gy) * 10 + Math.floor(gx) + 1;
+        const isSocket = v % table === 0 && v <= table * count && !placed.has(v);
+        hintV = isSocket ? v : -1;
+        hintOffered = false;   // a socket tap asks — it earns the full hint
+      }
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!dragD) return;
+      lastAct = performance.now();
+      dragD.x = e.clientX + dragD.dx;
+      dragD.y = e.clientY + dragD.dy;
+    });
+    function release(e) {
+      if (!dragD) return;
+      const d = dragD; dragD = null;
+      lastAct = performance.now();
+      const target = nearestSocket(d.x, d.y);
+      if (target === d.v) {
+        // good drop — snap-seats via a short settle animation
+        const p = socketPos(d.v);
+        d.state = 'return';       // reuse the slide channel
+        d.t0 = simT;
+        d.fx = d.x; d.fy = d.y;
+        d.tx = p.x; d.ty = p.y;
+        d.seats = true;
+      } else {
+        if (target !== null) {
+          const i = target - 1;
+          flashCell = target;
+          flashUntil = performance.now() + FLASH_SECS * 1000;
+        }
+        d.state = 'return';
+        d.t0 = simT;
+        d.fx = d.x; d.fy = d.y;
+        d.tx = d.gx; d.ty = d.gy;
+        d.seats = false;
+      }
+    }
+    cv.addEventListener('pointerup', release);
+    cv.addEventListener('pointercancel', release);
+    cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
+
+    document.getElementById('again').addEventListener('click', () => {
+      document.getElementById('doneOverlay').classList.add('hidden');
+      state = 'idle';
+      table = 0;
+      count = 0;
+      placed = new Set();
+      discs = [];
+      hintV = -1;
+      hintOffered = false;
+      [...chips.children].forEach(c => c.classList.remove('on'));
+    });
+
+    /* ---------- drawing ---------- */
+    function discLook(d, now) {
+      // loose: translucent flat token; seated: full-strength sphere
+      const r = discR();
+      const placedD = d.state === 'placed';
+      let a = placedD || d.state === 'drag' ? 1 : LOOSE_ALPHA;
+      if (hintV === d.v && d.state === 'ground' &&
+        (!hintOffered || OFFER_FULL)) {
+        const ph = (now / (HINT_PULSE * 1000)) % 1;
+        a = LOOSE_ALPHA + 0.35 * (0.5 - 0.5 * Math.cos(ph * Math.PI * 2));
+      }
+      ctx.globalAlpha = a;
+      if (placedD) {
+        const g = ctx.createRadialGradient(
+          d.x - r * 0.35, d.y - r * 0.35, r * 0.15,
+          d.x, d.y, r);
+        g.addColorStop(0, '#ffffff');
+        g.addColorStop(0.25, tableColour(table));
+        g.addColorStop(1, 'rgba(0,0,0,0.4)');
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = tableColour(table);
+      }
+      ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, 7); ctx.fill();
+      ctx.font = '700 ' + Math.round(r * (d.v >= 100 ? 0.8 : 1.05)) +
+        'px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      // white numeral inside a dark halo — legible over the sphere's
+      // bright spot and its shaded rim alike
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(10,14,18,0.85)';
+      ctx.lineWidth = Math.max(1.5, r * NUM_HALO);
+      ctx.strokeText(d.v, d.x, d.y + 1);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(d.v, d.x, d.y + 1);
+      ctx.globalAlpha = 1;
+    }
+
+    const hud = document.getElementById('hud');
+    function draw(now) {
+      ctx.clearRect(0, 0, W, H);
+      simT = now / 1000;
+
+      // a still patch offers a hint: ring one random empty socket. It
+      // marks the spot only — the child supplies the value. Any touch
+      // postpones it; a tap on that socket upgrades to the full hint.
+      if (state === 'play' && !paused && hintV < 0 && !dragD &&
+        now - lastAct > HINT_IDLE_S * 1000) {
+        const empt = [];
+        for (let i = 1; i <= count; i++) {
+          const v = table * i;
+          if (!placed.has(v)) empt.push(v);
+        }
+        if (empt.length) {
+          hintV = empt[Math.floor(rng() * empt.length)];
+          hintOffered = true;
+        }
+      }
+
+      for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 10; c++) {
+          const v = r * 10 + c + 1;
+          const x = bX + c * cell;
+          const y = bY + r * cell;
+          const isMember = table && v % table === 0 && v <= table * count;
+          const isEmpty = isMember && !placed.has(v);
+          const isFlash = v === flashCell && now < flashUntil;
+
+          ctx.fillStyle = isFlash ? '#5a4a28' : '#1a2430';
+          ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+            cell - CELL_GAP, cell - CELL_GAP);
+          if (isFlash) {
+            ctx.strokeStyle = '#e0a53a';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+              cell - CELL_GAP, cell - CELL_GAP);
+          }
+
+          if (isEmpty) {
+            // a socket: ring outline in the table's colour, value hidden
+            const p = socketPos(v);
+            ctx.strokeStyle = 'rgba(120,140,160,0.55)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath(); ctx.arc(p.x, p.y, discR(), 0, 7); ctx.stroke();
+            ctx.setLineDash([]);
+            if (v === hintV) {
+              // the hint ring — a breathing outline in the table's colour
+              const ph = (now / (HINT_PULSE * 1000)) % 1;
+              const s = 0.5 - 0.5 * Math.cos(ph * Math.PI * 2);
+              ctx.globalAlpha = 0.45 + 0.45 * s;
+              ctx.strokeStyle = tableColour(table);
+              ctx.lineWidth = 2.5;
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, discR() * (1.15 + 0.12 * s), 0, 7);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+              if (!hintOffered || OFFER_FULL) {
+                ctx.fillStyle = 'rgba(200,215,230,' + GHOST_A + ')';
+                ctx.font = Math.round(cell * NUM_FONT) +
+                  'px -apple-system, sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(v, p.x, p.y + 1);
+              }
+            }
+          } else {
+            ctx.fillStyle = isMember ? '#101418' : (isFlash ? '#e0a53a' : '#8a97a3');
+            ctx.font = Math.round(cell * NUM_FONT) +
+              'px -apple-system, sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
+          }
+        }
+      }
+
+      // a faint ground line — the world the loose discs rest on
+      if (state === 'play' || state === 'beat') {
+        ctx.strokeStyle = 'rgba(120,140,160,0.18)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(BOARD_PAD, gY); ctx.lineTo(W - BOARD_PAD, gY);
+        ctx.stroke();
+      }
+
+      for (const d of discs) {
+        if (d.state === 'fly') {
+          const k = Math.min(1, (simT - d.t0) / (FLY_MS / 1000));
+          const e = easeOut(k);
+          const mx = (d.fx + d.tx) / 2, my = Math.min(d.fy, d.ty) - cell * 1.1;
+          const u = 1 - e;
+          d.x = u * u * d.fx + 2 * u * e * mx + e * e * d.tx;
+          d.y = u * u * d.fy + 2 * u * e * my + e * e * d.ty;
+          if (k >= 1) seat(d);
+        } else if (d.state === 'return') {
+          const k = Math.min(1, (simT - d.t0) / (RETURN_MS / 1000));
+          const e = easeOut(k);
+          d.x = d.fx + (d.tx - d.fx) * e;
+          d.y = d.fy + (d.ty - d.fy) * e;
+          if (k >= 1) {
+            if (d.seats) seat(d); else { d.state = 'ground'; d.x = d.gx; d.y = d.gy; }
+          }
+        }
+        if (d !== dragD) discLook(d, now);
+      }
+      if (dragD) discLook(dragD, now);   // dragged disc rides on top
+
+      // completion beat: the placed multiples flash in order — the
+      // recap in miniature before the overlay offers another round
+      if (state === 'beat') {
+        const age = simT - beatT0;
+        const idx = Math.floor(age / BEAT_STEP);
+        if (idx < count) {
+          const v = table * (idx + 1);
+          const p = socketPos(v);
+          const ph = (age - idx * BEAT_STEP) / BEAT_SECS;
+          if (ph < 1) {
+            ctx.strokeStyle = 'rgba(255,230,160,' + (1 - ph) + ')';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, discR() * (1 + ph * 0.5), 0, 7);
+            ctx.stroke();
+          }
+        } else {
+          state = 'done';
+          const ms = performance.now() - startT;
+          document.getElementById('doneTitle').textContent = '×' + table + ' built!';
+          document.getElementById('doneStats').textContent =
+            count + ' discs placed in ' + (ms / 1000).toFixed(0) + 's';
+          document.getElementById('doneOverlay').classList.remove('hidden');
+        }
+      }
+
+      hud.textContent = state === 'idle'
+        ? 'pick a table below,\nthen carry its multiples home'
+        : state === 'play' ? 'tap a socket for a hint' : '';
+    }
+
+    function frame(t) { try { draw(t); } catch (e) { } requestAnimationFrame(frame); }
+
+    resize();
+    checkOrientation();
+    if (params.has('t')) {
+      const t = Math.min(12, Math.max(2, +params.get('t') || 0));
+      [...chips.children].forEach(c => c.classList.toggle('on', +c.dataset.t === t));
+      reset(t);
+      if (params.has('hint')) lastAct = -1e9;   // lab aid: offer a ring now
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=8"></script>
+</body>
+
+</html>

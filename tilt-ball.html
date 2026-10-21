@@ -121,7 +121,7 @@
 
   <canvas id="c"></canvas>
   <div id="hud">waiting…</div>
-  <button id="modeBtn">FORCE</button>
+  <button id="modeBtn">VELOCITY</button>
 
   <div id="rotOverlay" class="hidden">
     <div style="font-size:22px">Rotate back</div>
@@ -130,9 +130,9 @@
 
   <div id="overlay">
     <div style="font-size:22px">Tilt Ball</div>
-    <div class="sub">A probe for how usable device tilt is in a browser.
-      Tilt steers the ball. Dragging a finger steers it too —
-      that's the control condition for comparison.</div>
+    <div class="sub">Steer the numbered ball into a hole that divides it —
+      2, 3, 5, 7, or the prime hole for numbers none of them fit.
+      Tilt steers; so does dragging a finger.</div>
     <button id="go">Tap to enable tilt</button>
     <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
   </div>
@@ -154,11 +154,47 @@
     const BALL_R = 26;
     const MAX_SPEED = 2600;   // safety cap
 
+    /* ---------- bar-billiards holes ----------
+       ROGER NOTE — first cut of the factors idea, deliberately kept
+       simple so the mechanic can be judged live:
+       · Holes carry the small primes 2,3,5,7 (the factor-vocabulary)
+         plus one "prime" hole — any value 2..100 always has a home:
+         it either has a small prime factor or it doesn't divide down.
+         Every deal is winnable; ambiguity (42 → 2,3 or 7) is a
+         feature — the ball has more than one right hole.
+       · Wrong hole = refusal (amber rim flash, ball pushed back out);
+         right hole = the ball sinks and a fresh value fades in.
+       · Things to consider/develop:
+         – hole set: {2,3,5,7} only? add 4,6,8,9,10 as composite
+           labels? make the hole set a chosen "table" instead?
+         – the prime hole label/wording — "prime" teaches the term
+           but may need discovering; alternative glyphs welcome.
+         – deal range (currently 2..100 uniform); could bias
+         – VELOCITY is the default steer mode — level = stop; is it
+           the best fit for billiards, or is FORCE-glide truer?
+         – capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
+    const HOLE_R = 30;        // hole rim radius
+    const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
+    const HOLE_PUSH = 300;    // refusal ejection speed
+    const HOLE_FLASH = 0.6;   // s of amber rim on refusal
+    const SINK_SECS = 0.55;   // right-hole sink animation
+    const BALL_FADE = 0.8;    // s for a dealt ball to fade in
+    const DEAL_MIN = 2, DEAL_MAX = 100;
+    // {v:0} = the prime hole — accepts anything no small prime divides
+    const HOLES = [
+      { v: 2, fx: 0.16, fy: 0.22 },
+      { v: 3, fx: 0.38, fy: 0.15 },
+      { v: 5, fx: 0.62, fy: 0.15 },
+      { v: 7, fx: 0.84, fy: 0.22 },
+      { v: 0, fx: 0.50, fy: 0.31, label: 'prime' },
+    ];
+    const SMALL = [2, 3, 5, 7];
+
     // FORCE    tilt = push, glides on        (what you just tried)
     // VELOCITY tilt = speed, stops on level  (isolates sensor lag)
     // STEER    tilt = direction of travel    (snake-like heading control)
     const MODES = ['FORCE', 'VELOCITY', 'STEER'];
-    let steerMode = 0;
+    let steerMode = 1;          // VELOCITY default: level the phone = ball stops
 
     // Many Android devices report the motion axes with the opposite sign
     // convention to iOS. Auto-flip on Android; ?tilt=normal / ?tilt=invert
@@ -206,8 +242,31 @@
 
     /* ---------- state ---------- */
     const ball = { x: 0, y: 0, vx: 0, vy: 0 };
+    let ballNum = 0;           // the numeral the ball carries (2..100)
+    let lastNum = 0;           // avoid consecutive repeats
+    let ballBorn = 0;          // fade-in clock (performance.now ms)
+    let sink = null;           // {t0, hole} while a right hole swallows it
+    let flashUntil = 0;        // wrong-hole amber rim timestamp
+    let holeFlash = null;      // which hole is flashing
     resize();
     ball.x = Wd / 2; ball.y = Hd / 2;
+
+    const holeX = h => h.fx * Wd, holeY = h => h.fy * Hd;
+
+    function holeFits(h, n) {
+      return h.v === 0 ? !SMALL.some(d => n % d === 0) : n % h.v === 0;
+    }
+
+    function dealBall(now) {
+      do { ballNum = DEAL_MIN + Math.floor(Math.random() * (DEAL_MAX - DEAL_MIN + 1)); }
+      while (ballNum === lastNum);
+      lastNum = ballNum;
+      ball.x = Wd / 2 + (Math.random() - 0.5) * Wd * 0.3;
+      ball.y = Hd * 0.72;
+      ball.vx = ball.vy = 0;
+      ballBorn = now;
+      sink = null;
+    }
     let smX = 0, smY = 0;            // smoothed gravity
     let rawX = 0, rawY = 0, rawZ = 0;
     let tiltOn = false;
@@ -264,6 +323,7 @@
       document.getElementById('go').textContent = 'Start';
       whyEl.textContent = 'This browser does not gate motion behind a permission prompt.';
     }
+    if (qs.has('peek')) overlay.classList.add('hidden');   // stills diagnostic
 
     window.addEventListener('devicemotion', (e) => {
       const g = e.accelerationIncludingGravity;
@@ -295,12 +355,14 @@
 
     /* ---------- orientation guard ---------- */
     const rotOverlay = document.getElementById('rotOverlay');
+    const handheld = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     function checkOrientation() {
       const portrait = screen.orientation && screen.orientation.type
         ? screen.orientation.type.startsWith('portrait')
         : matchMedia('(orientation: portrait)').matches;
-      paused = !portrait;
-      rotOverlay.classList.toggle('hidden', portrait);
+      // only handhelds need the upright guard — desktop landscape is legitimate
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', portrait || !handheld);
     }
     window.addEventListener('orientationchange', checkOrientation);
     window.addEventListener('resize', checkOrientation);
@@ -375,30 +437,83 @@
       if (ball.x > Wd - BALL_R) { ball.x = Wd - BALL_R; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
       if (ball.y < BALL_R) { ball.y = BALL_R; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
       if (ball.y > Hd - BALL_R) { ball.y = Hd - BALL_R; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
+
+      /* holes: the ball sinks only where its number belongs */
+      if (sink) {
+        const hx = holeX(sink.hole), hy = holeY(sink.hole);
+        sink.k = Math.min(sink.k + dt / SINK_SECS, 1);
+        const e = sink.k;
+        ball.x += (hx - ball.x) * Math.min(1, 10 * dt);
+        ball.y += (hy - ball.y) * Math.min(1, 10 * dt);
+        ball.vx = ball.vy = 0;
+        if (e >= 1) dealBall(performance.now());
+      } else {
+        for (const h of HOLES) {
+          const dx = ball.x - holeX(h), dy = ball.y - holeY(h);
+          const d = Math.hypot(dx, dy);
+          if (d < HOLE_R - CAPTURE_IN) {
+            if (holeFits(h, ballNum)) {
+              sink = { hole: h, k: 0 };
+              ball.vx = ball.vy = 0;
+            } else {
+              flashUntil = performance.now() + HOLE_FLASH * 1000;
+              holeFlash = h;
+              const ux = dx / (d || 1), uy = dy / (d || 1);
+              const sp = Math.max(Math.hypot(ball.vx, ball.vy), HOLE_PUSH);
+              ball.vx = ux * sp; ball.vy = uy * sp;
+              ball.x = holeX(h) + ux * (HOLE_R - CAPTURE_IN + 1);
+              ball.y = holeY(h) + uy * (HOLE_R - CAPTURE_IN + 1);
+            }
+            break;
+          }
+        }
+      }
     }
 
     /* ---------- draw + HUD ---------- */
     const hud = document.getElementById('hud');
 
-    function draw() {
+    function draw(now) {
       ctx.clearRect(0, 0, Wd, Hd);
 
-      // faint target cross at centre, handy for "hold level" judgement
-      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-      ctx.beginPath();
-      ctx.moveTo(Wd / 2 - 20, Hd / 2); ctx.lineTo(Wd / 2 + 20, Hd / 2);
-      ctx.moveTo(Wd / 2, Hd / 2 - 20); ctx.lineTo(Wd / 2, Hd / 2 + 20);
-      ctx.stroke();
+      /* the holes — sunken dark circles, rim, factor numeral */
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const h of HOLES) {
+        const hx = holeX(h), hy = holeY(h);
+        const flashing = h === holeFlash && now < flashUntil;
+        ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
+        ctx.beginPath(); ctx.arc(hx, hy, HOLE_R, 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = flashing ? '#e0a53a' :
+          (h.v === 0 ? 'rgba(53,199,149,.45)' : 'rgba(120,150,175,.5)');
+        ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
+        ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
+          ' -apple-system, system-ui, sans-serif';
+        ctx.fillText(h.label || String(h.v), hx, hy);
+      }
 
+      /* the ball — fades/scales in on deal, shrinks away on sinking */
+      if (!ballNum) return;
+      const age = (now - ballBorn) / 1000;
+      let a = Math.min(age / BALL_FADE, 1);
+      let r = BALL_R * (0.6 + 0.4 * Math.min(age / BALL_FADE, 1));
+      if (sink) { r *= (1 - sink.k) * (1 - sink.k); a *= 1 - sink.k; }
+      if (r < 0.5 || a <= 0) return;
+      ctx.globalAlpha = a;
       const grd = ctx.createRadialGradient(
-        ball.x - BALL_R * 0.35, ball.y - BALL_R * 0.35, BALL_R * 0.2,
-        ball.x, ball.y, BALL_R);
+        ball.x - r * 0.35, ball.y - r * 0.35, r * 0.2,
+        ball.x, ball.y, r);
       grd.addColorStop(0, '#8ec9ff');
       grd.addColorStop(1, '#1660c8');
       ctx.fillStyle = grd;
       ctx.beginPath();
-      ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2);
+      ctx.arc(ball.x, ball.y, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 ' + Math.round(r * 0.9) + 'px -apple-system, system-ui, sans-serif';
+      ctx.fillText(String(ballNum), ball.x, ball.y + 1);
+      ctx.globalAlpha = 1;
     }
 
     function hudUpdate(now) {
@@ -413,17 +528,19 @@
         '\nraw  x ' + rawX.toFixed(2) + '  y ' + rawY.toFixed(2) + '  z ' + rawZ.toFixed(2) +
         '\nsmth x ' + smX.toFixed(2) + '  y ' + smY.toFixed(2) +
         '\nmotion events ' + motionHz + '/s' + (AXIS_FLIP ? '  tilt-flip' : '') +
-        '\nball ' + Math.round(Math.hypot(ball.vx, ball.vy)) + ' px/s';
+        '\nball ' + Math.round(Math.hypot(ball.vx, ball.vy)) + ' px/s' +
+        '\nnum ' + ballNum + (sink ? '  sinking' : '');
     }
 
     function frame(now) {
       const dt = Math.min((now - lastT) / 1000, 0.05);
       lastT = now;
       step(dt);
-      draw();
+      draw(now);
       hudUpdate(now);
       requestAnimationFrame(frame);
     }
+    dealBall(performance.now());
     requestAnimationFrame(frame);
   </script>
 

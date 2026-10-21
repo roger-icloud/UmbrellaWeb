@@ -70,7 +70,17 @@ attention" — never "still pending" for something broken).
   tables, crossover cells shared by paths (split-colour when claimed by
   two, wedge by three), twin cells, ambiguity rejection, kin glow
 - `patterns.html` — hundred-square multiples
-- `tilt-ball.html` — bare tilt probe
+- `lattice.html` — loose multiples of a table rest on the ground;
+  drag (or tap) each home to its socket on the hundred square.
+  On the main menu since 2026-10-21 — "earned its place" though the
+  idea isn't fully thought through; no departure yet.
+- `tilt-ball.html` — bar-billiards factors game (first cut 2026-10-21,
+  from the tilt probe): holes carry 2,3,5,7 plus a `prime` hole for
+  values none of them divide; ball deals 2..100, fades in, sinks in a
+  hole that divides it, refused (amber + ejection) elsewhere.
+  ROGER-NOTE block in the file lists open design questions — hole set,
+  prime-hole wording, deal bias, best steer mode (default VELOCITY =
+  level-to-stop), capture feel. Steer-mode button kept for now.
 - `rationale.html`, `help.html`, `feedback.html` — human-facing pages
 - `snake.html`/`search.html`/`ball.html` — redirect stubs, kept
 
@@ -362,6 +372,121 @@ spin-dryer emergence on the whirlpool); remaining exits (drift,
 sweep + the new candidates above); the audition mode; then the
 bounded composer. Hole pop-in could linger (fade-out) at polish
 time. All tunables at the top of the file.
+
+## anim.js exists (2026-10-20) — first port: Snake Puzzle
+
+The shared engine now lives in `anim.js` (`window.Anim`, nav.js
+style — bump `?v=` on change). `Anim.begin({ctx, W, H, board, segD,
+table, segs, kind, onFade, onDone})` hands the engine the assembled
+snake; `Anim.frame(now)` drives it until `Anim.state === 'gone'`.
+Callbacks: `onFade` fires when the numeral's terminal dim begins —
+the agreed moment for an end-card to fade up *over* it; `onDone` at
+all-gone. Exits are a registry (`SCRIPTS`) — `kind: 'random'` draws
+from `EXITS` so variety slots in free. `calm` on a phrase suppresses
+the wriggle (that's all `tour` is — lap minus wiggle; Roger's simple
+celebration, iPad-approved 2026-10-20).
+
+**macOS omits motion** — settled decision (parked investigation
+2026-10-18). `IS_MAC = platform==='MacIntel' && maxTouchPoints<=1`
+— iPadOS also reports MacIntel; touch is the discriminator. With
+motion off every exit maps to `still`: beat, body fades in place
+(`STILL_FADE`), halo+numeral fade up at centre — same tableau as the
+lap's end minus the journey. The conditional lives in `startDepart`
+so every future exit inherits it. `?motion=0|1` auditions either
+path anywhere. Parked: `LAP_SPEED` tunable is defined but never
+wired into a phrase — dead knob, deliberate.
+
+Snake Puzzle flow now: last drop → `finish()` → beat → departure →
+`doneOverlay` fades up during numeral dim ("Another?" Yes→fresh deal
+with chips live / No→index). Lab params: `?t=` `?done` `?pose=` `?dbg`
+(page), `?depart=` `?departAt=` `?motion=` `?seed=` `?animdbg`
+(engine). Static-target games keep the snake posed during play; the
+trail seeds from the pose at handover — rest and motion one
+continuum, proven.
+
+**Trail-ready poses (Roger's insight, 2026-10-20):** "a single
+arrangement ready for the off" — the dealt pose itself must satisfy
+the trail invariant, or sampling at fixed spacing lands segments
+somewhere else = visible rearrangement at handover (observed live;
+a settle-blend masked it but the cure is structural). `Anim.pose`
+now deals them: the lab's heading-walk grammar (steps of exactly
+`SPACING_K·segD`, so the body is always continuous — no beads-on-a-
+string) with one change from the lab — walks that don't fit are
+*rejected*, never fit-scaled (scaling bent the step length). Two
+margin tiers keep variety on phones; `serpentine` (compact ~4×3
+spacing fold) is the guaranteed-fit fallback. Verified lossless:
+dealt positions ≡ departure-sampled positions, so the settle blend
+is now a no-op kept only for foreign handovers (e.g. a live trail
+from tilt-snake). This is what "lift any arrangement and continue"
+means mechanically — the trail doesn't care how it got there, it
+only needs the spacing to be honest.
+
+**The `wind` exit — now the Snake Puzzle default (2026-10-21).**
+Roger's proposal, verbatim: "the screen tour continues but simply
+stops at the point where the tour circuit has become small enough
+that the head meets the tail". Motivation: the `ring` phrase renders
+incoherently on iPhone 6/8-era WebKit (tour circuit fine, corruption
+starts exactly at the circular steering — bisected with `?depart=`
+variants). `wind` = 3 `laptrack` circuits (`laps`/`speed` are phrase
+tunables) → `shrinktrack`: the same carrot-on-track steering, but
+the *track* contracts (`SHRINK_RATE` px/s) until its perimeter ≈
+one body-length (`SHRINK_TO`); the head keeps circling until the
+trail fills the loop — head meets tail with no ring machinery.
+Detail that matters: `lapGeom` refuses rects under 3·segD sides,
+so on near-square boards the rect floors at P≈12·segD > bodyLen —
+the body could only ever lie as an arc (observed by Roger, first
+device test). Fix: at the floor the phrase inscribes a *circle* in
+the last rect and keeps contracting that until the body closes.
+Head ends tucked slightly inside the loop — reads as settling.
+End-card also gained: `pose NNNNNN` seed line + **share pose**
+(native share sheet / clipboard — carries `?t=N&poseSeed=M`, which
+reproduces the dealt shape exactly; pinning survives "Another") and
+a **↺** button cycling exits in place for audition without URL
+editing. **Build tag**: a dim `#buildTag` numeral sits beside the
+nav snake — currently `7` — bump it when a change needs device
+confirmation, since mobile URL/cache ambiguity cost us a round of
+"is this the new build?". macOS still takes the `still` path;
+`?motion=1` auditions wind on the Mac — worth a look before
+deciding whether desktop inherits it.
+
+**2026-10-21, evening — convergence.** Roger's original spec landed
+verbatim: ONE perimeter tour (`wind` laps:1 — his "three circuits"
+meant three *of the closed loop*, see `WIND_TURNS`), the track
+contracts only while the head rides it (the arch/diving-head
+posture was the track outrunning the snake), and the loop ends head-
+meets-tail (`SHRINK_TO` 1.0 — 1.05 left a gap just over the meet
+threshold, so the failsafe always fired). The track is a centred
+square (`lapGeom` caps at `min(bW,bH)` — wide windows no longer tour
+the far edges). iPad Air + iPhone 8 confirmed clean; Mac verified in
+stills. IS_MAC restriction lifted — `still` remains an exit in the
+registry + `?motion=0` fallback. Cleanup pass: end-card stripped to
+Yes/No/share-pose (↺ audition button and its cycle removed);
+URL params stay dormant in code (invisible, lab convention, needed
+for baked stills during the remaining ports). `#buildTag` retires
+before the public push. **Tilt fix:** tap-autopilot was cancelled by
+*any* hand-held lean — gravity's x/y components are ~9.8 at normal
+angles vs MANUAL_TILT 1.5, so tap only worked flat-on-table
+("excellent when it works"). Now `tiltBase` snapshots the lean at
+tap time; only a *change* > MANUAL_TILT overrides the steer.
+
+**Snake Puzzle UI pass (Roger, 2026-10-21):** `share pose` and the
+seed line removed — they existed to capture seeds for the knotty-pose
+hunt; that job is done (`?poseSeed=` param stays dormant for
+diagnostics). "Another snake? Yes" no longer redeals — it returns to
+a `choose` state: empty board, chips live, "pick a table", and no
+snake until a choice is made (chips handle `state==='choose'`).
+Restless wriggle restored: after `IDLE_WRIG_S` (10s) of stillness the
+pose does a travelling sway — bursts of `WRIG_SECS` every
+`WRIG_CYCLE`, amplitude `WRIG_AMP` — **draw-time only**, so drop
+targets never move (the earlier version was lost in the static-pose
+work; this is its return on the new invariant).
+
+**ACTION POINT (Roger, 2026-10-21):** table choice is currently free;
+an enhancement should *guide* users to appropriate tables for their
+skill — track miss/refusal and completion-time stats per device and
+suggest or stage tables accordingly. Design deferred; the stats
+(misses, doneMs) already exist in-page per round — persistence and
+the guidance policy are the open parts.
 
 ## Priorities (Roger, 2026-10-17; updated 2026-10-19)
 

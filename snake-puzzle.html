@@ -103,8 +103,47 @@
       margin-top: 16px;
     }
 
+    .overlay .btnrow {
+      display: flex;
+      gap: 14px;
+    }
+
+    .overlay button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
+    }
+
+    /* the end-card fades up over the numeral's terminal dim — opacity,
+       not display, so the timings overlap */
+    #doneOverlay {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.9s ease;
+    }
+
+    #doneOverlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
     .hidden {
       display: none !important;
+    }
+
+    /* build tag: confirms which revision a device is running — sits
+       beside the nav snake */
+    #buildTag {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 24px);
+      right: 58px;
+      height: 40px;
+      line-height: 40px;
+      font-size: 14px;
+      color: #4a5a68;
+      user-select: none;
+      pointer-events: none;
+      z-index: 40;
     }
   </style>
 </head>
@@ -112,6 +151,7 @@
 <body>
 
   <canvas id="c"></canvas>
+  <div id="buildTag">8</div>
   <div id="chipRow"></div>
 
   <div id="rotOverlay" class="overlay hidden">
@@ -120,11 +160,16 @@
       game waits for you.</div>
   </div>
 
-  <div id="doneOverlay" class="overlay hidden">
-    <div class="title">Complete!</div>
+  <div id="doneOverlay" class="overlay">
+    <div class="title" id="doneTitle">Another snake?</div>
     <div class="sub" id="doneStats"></div>
-    <button class="go" id="again">Another snake</button>
+    <div class="btnrow">
+      <button class="go" id="againYes">Yes</button>
+      <button class="go quiet" id="againNo">No</button>
+    </div>
   </div>
+
+  <script src="anim.js?v=8"></script>
 
   <script>
     'use strict';
@@ -139,6 +184,10 @@
     const TOP_RESERVE = 92;     // clearance below the menu button
     const BOT_RESERVE = 116;    // room for the table chips
     const BOARD_PAD = 16;
+    const IDLE_WRIG_S = 10;     // s of stillness before the restless wriggle
+    const WRIG_CYCLE = 7;       // s between wriggle bursts while idle
+    const WRIG_SECS = 1.6;      // s in one burst
+    const WRIG_AMP = 0.14;      // peak sway, × segD — draw-time only
     /* head animation — the pose is static, so the life is in the eyes:
        they drift toward the piece waiting to be placed and blink now
        and then (same grammar as the shared SnakeEyesView) */
@@ -172,33 +221,11 @@
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
     /* ---------- poses ----------
-       A pose is 13 normalized points (0..1), head-first. Three families
-       mirrored and reversed at random — same grammar as the Swift
-       SnakePoseKind rails, smaller vocabulary for now. */
-    function poseRail() {
-      const t = i => i / 12;
-      const families = [
-        // gentle diagonal
-        i => ({ x: 0.18 + 0.64 * t(i), y: 0.22 + 0.5 * t(i) }),
-        // wide S across the board
-        i => ({
-          x: 0.16 + 0.68 * t(i),
-          y: 0.5 + 0.3 * Math.sin(t(i) * Math.PI * 2) * (1 - 0.25 * t(i))
-        }),
-        // lazy arc (top half of an ellipse, head at one end)
-        i => ({
-          x: 0.5 - 0.36 * Math.cos(t(i) * Math.PI),
-          y: 0.62 - 0.34 * Math.sin(t(i) * Math.PI)
-        }),
-      ];
-      let rail = families[Math.floor(Math.random() * families.length)];
-      let pts = [];
-      for (let i = 0; i <= 12; i++) pts.push(rail(i));
-      if (Math.random() < 0.5) pts = pts.map(p => ({ x: 1 - p.x, y: p.y }));
-      if (Math.random() < 0.5) pts = pts.map(p => ({ x: p.x, y: 1 - p.y }));
-      if (Math.random() < 0.5) pts.reverse();
-      return pts;
-    }
+       Poses come from Anim.pose — the shared heading-walk grammar:
+       segment-adjacent points exactly one spacing apart, so the body
+       is continuous AND already trail-ready. The celebration lifts the
+       dealt pose as-is; nothing rearranges at the handover. rail is
+       normalized 0..1 over a square centred on the board. */
 
     /* ---------- colours (same table-coding as the family) ---------- */
     function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
@@ -216,9 +243,16 @@
     let flashIdx = -1, flashT = 0;
     let gaze = 0, nextBlinkAt = 0, blinkT0 = -1;
     let hasInteracted = false;
-    let state = 'play';          // play | done
+    let state = 'play';          // play | choose | celebrate | done
     let startT = 0, doneMs = 0;
+    let lastAct = 0;             // last touch — a still patch wriggles
     let misses = 0;
+    let poseSeed = 0;            // seed of the dealt pose — shareable
+
+    const qs = new URLSearchParams(location.search);
+    // ?poseSeed=N pins every deal's pose for reproduction/auditioning
+    const pinSeed = qs.has('poseSeed') ?
+      (parseInt(qs.get('poseSeed'), 10) || 0) : null;
 
     const chipRow = document.getElementById('chipRow');
     const rotOverlay = document.getElementById('rotOverlay');
@@ -226,12 +260,17 @@
     const doneStats = document.getElementById('doneStats');
 
     function layout() {
+      // normalized rail -> board px, inside the centred board square
       if (!rail.length) return;
+      const sq = Math.min(bW, bH);
       for (let i = 0; i < N; i++) {
-        segs[i].x = bX + rail[i].x * bW;
-        segs[i].y = bY + rail[i].y * bH;
+        segs[i].x = bX + (bW - sq) / 2 + rail[i].x * sq;
+        segs[i].y = bY + (bH - sq) / 2 + rail[i].y * sq;
       }
       if (spawned && !dragging) homeSpawn();
+      if (qs.has('dbg'))
+        document.title = segs.map(p => Math.round(p.x) + ',' +
+          Math.round(p.y)).join(' ');
     }
 
     function spawnHome() {
@@ -251,7 +290,14 @@
     }
 
     function deal() {
-      rail = poseRail();
+      poseSeed = pinSeed !== null ? pinSeed
+        : Math.floor(Math.random() * 1e9);
+      rail = Anim.pose({
+        board: { x: bX, y: bY, w: bW, h: bH },
+        segD, count: N,
+        family: qs.get('pose') || 'any',
+        seed: poseSeed
+      }).rail;
       segs = [];
       for (let i = 0; i < N; i++) {
         segs.push({
@@ -281,11 +327,12 @@
       misses = 0;
       state = 'play';
       startT = performance.now();
+      lastAct = startT;
       gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
       nextBlinkAt = startT + 2000 + Math.random() * 2000;
       blinkT0 = -1;
       chipRow.classList.remove('locked');
-      doneOverlay.classList.add('hidden');
+      doneOverlay.classList.remove('show');
     }
 
     /* ---------- chips ---------- */
@@ -294,8 +341,10 @@
       const b = document.createElement('button');
       b.textContent = '×' + t;
       b.addEventListener('click', () => {
-        if (hasInteracted && state === 'play') return;
-        if (t === table && state === 'play') return;
+        lastAct = performance.now();
+        if (state === 'choose') { table = t; syncChips(); deal(); return; }
+        if (state !== 'play' || hasInteracted) return;
+        if (t === table) return;
         table = t;
         syncChips();
         deal();
@@ -305,7 +354,8 @@
     }
     function syncChips() {
       chipBtns.forEach((b, i) => b.classList.toggle('on', i + 2 === table));
-      chipRow.classList.toggle('locked', hasInteracted && state === 'play');
+      chipRow.classList.toggle('locked',
+        hasInteracted && (state === 'play' || state === 'celebrate'));
     }
 
     /* ---------- input ---------- */
@@ -315,6 +365,7 @@
     }
 
     cv.addEventListener('pointerdown', e => {
+      lastAct = performance.now();
       if (state !== 'play' || !spawned) return;
       const p = pt(e);
       if (Math.hypot(p.x - spawned.x, p.y - spawned.y) <= segD * 0.7) {
@@ -328,6 +379,7 @@
 
     cv.addEventListener('pointermove', e => {
       if (!dragging || !spawned) return;
+      lastAct = performance.now();
       const p = pt(e);
       spawned.x = p.x; spawned.y = p.y;
     });
@@ -335,6 +387,7 @@
     cv.addEventListener('pointerup', e => {
       if (!dragging || !spawned) return;
       dragging = false;
+      lastAct = performance.now();
       const p = pt(e);
       // nearest segment within tolerance
       let best = -1, bestD = segD * DROP_TOL;
@@ -357,16 +410,45 @@
       }
     });
 
+    /* the win hands the assembled snake to the shared engine — the
+       reinforcement beat, then the wind: circuits, then the track
+       contracts until the body closes the loop (the still path on
+       macOS). wind, not tour — the ring phrase renders incoherently
+       on some devices */
     function finish() {
-      state = 'done';
+      state = 'celebrate';
       doneMs = Math.round(performance.now() - startT);
+      syncChips();
+      Anim.begin({
+        ctx, W, H,
+        board: { x: bX, y: bY, w: bW, h: bH },
+        segD, table, segs,
+        kind: 'wind',
+        onFade: showDone
+      });
+    }
+
+    /* the end-card fades up over the numeral's terminal dim — milestone
+       stated, then the choice: another round or back to the menu */
+    function showDone() {
+      state = 'done';
       doneStats.textContent = 'The ×' + table + ' snake is whole — ' +
         (doneMs / 1000).toFixed(0) + 's' +
         (misses ? ', ' + misses + ' refusal' + (misses > 1 ? 's' : '') : '');
-      doneOverlay.classList.remove('hidden');
-      chipRow.classList.remove('locked');
+      doneOverlay.classList.add('show');
     }
-    document.getElementById('again').addEventListener('click', deal);
+    /* Yes doesn't redeal — it offers the chips. No snake is drawn
+       until a table is chosen */
+    document.getElementById('againYes').addEventListener('click', () => {
+      doneOverlay.classList.remove('show');
+      segs = []; rail = []; spawned = null; remaining = [];
+      hasInteracted = false;
+      state = 'choose';
+      syncChips();
+    });
+    document.getElementById('againNo').addEventListener('click', () => {
+      location.href = 'index.html';
+    });
 
     /* ---------- orientation guard (handheld only) ---------- */
     const handheld = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -453,13 +535,44 @@
     }
 
     function draw(now) {
+      if (state === 'choose') {
+        // chips alone offer the next round — no snake until one is picked
+        ctx.fillStyle = '#101418';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = 'rgba(120,140,160,.45)';
+        ctx.font = '15px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('pick a table', bX + bW / 2, bY + bH / 2);
+        return;
+      }
+      if (state !== 'play') { Anim.frame(now); return; }
       ctx.fillStyle = '#101418';
       ctx.fillRect(0, 0, W, H);
+
+      // a still patch earns a restless wriggle — a travelling sway,
+      // draw-time only, so dealt positions (and drop targets) never move
+      const idleAge = (now - lastAct) / 1000;
+      let wob = null;
+      if (idleAge > IDLE_WRIG_S) {
+        const c = (idleAge - IDLE_WRIG_S) % WRIG_CYCLE;
+        if (c < WRIG_SECS) {
+          const k = Math.sin(c / WRIG_SECS * Math.PI);
+          wob = segs.map((s, i) => {
+            const a = segs[Math.max(0, i - 1)], b = segs[Math.min(N - 1, i + 1)];
+            const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+            const m = Math.sin(now / 1000 * 9 - i * 0.9) * WRIG_AMP * segD * k;
+            return { x: -dy / d * m, y: dx / d * m };
+          });
+        }
+      }
 
       // spine: a faint thread through the segments so the pose reads as
       // one animal even with gaps
       ctx.beginPath();
-      segs.forEach((s, i) => i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y));
+      segs.forEach((s, i) => {
+        const x = s.x + (wob ? wob[i].x : 0), y = s.y + (wob ? wob[i].y : 0);
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
       ctx.strokeStyle = 'rgba(90,110,130,.25)';
       ctx.lineWidth = 3;
       ctx.stroke();
@@ -472,7 +585,8 @@
           if (t > SHAKE_SECS) shakeIdx = -1;
           else ox = Math.sin(t * 30) * 5 * (1 - t / SHAKE_SECS);
         }
-        const cx = s.x + ox, cy = s.y, r = segD / 2;
+        const cx = s.x + ox + (wob ? wob[i].x : 0),
+          cy = s.y + (wob ? wob[i].y : 0), r = segD / 2;
         if (i === 0) { drawHead({ x: cx, y: cy }, now); continue; }
         if (s.blank) {
           ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
@@ -524,6 +638,19 @@
     checkOrientation();
     syncChips();
     deal();
+    // lab aids: ?t=N picks the table, ?pose=fam pins the pose, ?done jumps
+    // to a completed round; ?depart=kind & ?departAt=N (inside anim.js)
+    // then audition the ending
+    if (qs.has('t')) {
+      table = Math.min(12, Math.max(2, +qs.get('t') || table));
+      syncChips();
+      deal();
+    }
+    if (qs.has('done')) {
+      segs.forEach(s => { s.filled = true; s.blank = false; });
+      remaining = []; spawned = null;
+      finish();
+    }
     requestAnimationFrame(frame);
   </script>
 

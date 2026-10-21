@@ -170,6 +170,8 @@
     let nextIdx = 0;             // next multiple ordinal to collect
     let startT = 0, doneMs = 0;
     let autoTarget = null;       // numeral the snake is being steered to by tap
+    let tiltBase = null;         // lean held when the tap landed — a deliberate
+    //   re-tilt cancels the autopilot; the resting angle must not
     let lastCollectT = 0;        // performance.now() of last collection / start
     let nextBlinkAt = 0, blinkT0 = -1;
 
@@ -385,7 +387,12 @@
       const i = nums.findIndex(n => !n.collected &&
         Math.hypot(n.x - t.clientX / K, n.y - t.clientY / K) < NUM_R + TAP_PAD);
       if (i >= 0) {
-        if (i === nextIdx) autoTarget = nums[i];
+        if (i === nextIdx) {
+          autoTarget = nums[i];
+          // the autopilot yields only to a *change* of lean — resting
+          // tilt (any held angle) must not cancel it
+          tiltBase = { x: smX, y: smY };
+        }
         else if (performance.now() > nums[i].flashUntil)
           nums[i].flashUntil = performance.now() + FLASH_SECS * 1000;
         return;
@@ -441,8 +448,12 @@
         target = Math.atan2(dy, dx);
         drive = Math.max(IDLE_DRIVE, Math.min(Math.hypot(dx, dy) / TOUCH_FULL, 1));
       } else if (autoTarget) {
-        // firm manual tilt overrides the tap-autopilot
-        if (tiltOn && Math.hypot(smX, smY) > MANUAL_TILT) autoTarget = null;
+        // firm manual tilt overrides the tap-autopilot — measured as a
+        // change from the lean held at tap time, since gravity's x/y
+        // components are large at ANY held angle
+        if (tiltOn && tiltBase &&
+          Math.hypot(smX - tiltBase.x, smY - tiltBase.y) > MANUAL_TILT)
+          autoTarget = null;
         else {
           const dx = autoTarget.x - head.x, dy = autoTarget.y - head.y;
           target = Math.atan2(dy, dx);

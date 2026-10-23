@@ -114,17 +114,49 @@
       border: 1px solid #3a4a58;
     }
 
-    /* the end-card fades up over the numeral's terminal dim — opacity,
-       not display, so the timings overlap */
-    #doneOverlay {
+    /* the end-bar fades up in the bottom strip while the coiled snake
+       and its numeral stay on screen above it */
+    #doneBar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 10px 18px;
+      z-index: 12;
+      color: #cfd8e0;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.9s ease;
+      transition: opacity 0.6s ease;
     }
 
-    #doneOverlay.show {
+    #doneBar.show {
       opacity: 1;
       pointer-events: auto;
+    }
+
+    #doneBar .prompt {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    #doneBar button {
+      font-size: 17px;
+      font-family: inherit;
+      padding: 10px 24px;
+      border-radius: 12px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+    }
+
+    #doneBar button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
     }
 
     .hidden {
@@ -151,7 +183,7 @@
 <body>
 
   <canvas id="c"></canvas>
-  <div id="buildTag">8</div>
+  <div id="buildTag">11</div>
   <div id="chipRow"></div>
 
   <div id="rotOverlay" class="overlay hidden">
@@ -160,16 +192,13 @@
       game waits for you.</div>
   </div>
 
-  <div id="doneOverlay" class="overlay">
-    <div class="title" id="doneTitle">Another snake?</div>
-    <div class="sub" id="doneStats"></div>
-    <div class="btnrow">
-      <button class="go" id="againYes">Yes</button>
-      <button class="go quiet" id="againNo">No</button>
-    </div>
+  <div id="doneBar">
+    <span class="prompt">Another snake?</span>
+    <button id="againYes">Yes</button>
+    <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=8"></script>
+  <script src="anim.js?v=11"></script>
 
   <script>
     'use strict';
@@ -256,8 +285,7 @@
 
     const chipRow = document.getElementById('chipRow');
     const rotOverlay = document.getElementById('rotOverlay');
-    const doneOverlay = document.getElementById('doneOverlay');
-    const doneStats = document.getElementById('doneStats');
+    const doneBar = document.getElementById('doneBar');
 
     function layout() {
       // normalized rail -> board px, inside the centred board square
@@ -331,8 +359,8 @@
       gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
       nextBlinkAt = startT + 2000 + Math.random() * 2000;
       blinkT0 = -1;
-      chipRow.classList.remove('locked');
-      doneOverlay.classList.remove('show');
+      chipRow.classList.remove('locked', 'hidden');
+      doneBar.classList.remove('show');
     }
 
     /* ---------- chips ---------- */
@@ -424,23 +452,23 @@
         board: { x: bX, y: bY, w: bW, h: bH },
         segD, table, segs,
         kind: 'wind',
-        onFade: showDone
+        hold: true,
+        onDone: showDone
       });
     }
 
-    /* the end-card fades up over the numeral's terminal dim — milestone
-       stated, then the choice: another round or back to the menu */
+    /* the bottom prompt fades up while the coiled snake and its numeral
+       remain on screen until the user responds */
     function showDone() {
       state = 'done';
-      doneStats.textContent = 'The ×' + table + ' snake is whole — ' +
-        (doneMs / 1000).toFixed(0) + 's' +
-        (misses ? ', ' + misses + ' refusal' + (misses > 1 ? 's' : '') : '');
-      doneOverlay.classList.add('show');
+      chipRow.classList.add('hidden');
+      doneBar.classList.add('show');
     }
     /* Yes doesn't redeal — it offers the chips. No snake is drawn
        until a table is chosen */
     document.getElementById('againYes').addEventListener('click', () => {
-      doneOverlay.classList.remove('show');
+      doneBar.classList.remove('show');
+      chipRow.classList.remove('hidden');
       segs = []; rail = []; spawned = null; remaining = [];
       hasInteracted = false;
       state = 'choose';

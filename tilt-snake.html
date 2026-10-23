@@ -66,6 +66,62 @@
       margin-top: 16px;
     }
 
+    .overlay .btnrow {
+      display: flex;
+      gap: 14px;
+    }
+
+    .overlay button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
+    }
+
+    /* the end-bar fades up in the bottom strip while the coiled snake
+       and its numeral stay on screen above it */
+    #doneBar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 10px 18px;
+      z-index: 12;
+      color: #cfd8e0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease;
+    }
+
+    #doneBar.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #doneBar .prompt {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    #doneBar button {
+      font-size: 17px;
+      font-family: inherit;
+      padding: 10px 24px;
+      border-radius: 12px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+    }
+
+    #doneBar button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
+    }
+
     #tableRow {
       display: flex;
       flex-wrap: wrap;
@@ -115,11 +171,13 @@
     <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
   </div>
 
-  <div id="doneOverlay" class="overlay hidden">
-    <div class="title" id="doneTitle">Complete!</div>
-    <div class="sub" id="doneStats"></div>
-    <button class="go" id="again">Another table</button>
+  <div id="doneBar">
+    <span class="prompt">Another snake?</span>
+    <button id="againYes">Yes</button>
+    <button class="quiet" id="againNo">No</button>
   </div>
+
+  <script src="anim.js?v=11"></script>
 
   <script>
     'use strict';
@@ -162,13 +220,13 @@
 
     /* ---------- game state ---------- */
     let table = 7;
-    let state = 'menu';          // menu | ready | play | done
+    let state = 'menu';          // menu | ready | play | celebrate | done
     let head = { x: 0, y: 0 };   // positioned by reset() before play
     let heading = -Math.PI / 2;
-    let segs = [];               // collected tail segments, index 0 = nearest head
+    let segs = [];               // collected tail segments, index 0 = nearest head (×1..×12)
     let nums = [];               // {v, x, y, flashUntil}
     let nextIdx = 0;             // next multiple ordinal to collect
-    let startT = 0, doneMs = 0;
+    let startT = 0, doneMs = 0, misses = 0;
     let autoTarget = null;       // numeral the snake is being steered to by tap
     let tiltBase = null;         // lean held when the tap landed — a deliberate
     //   re-tilt cancels the autopilot; the resting angle must not
@@ -293,16 +351,18 @@
       heading = -Math.PI / 2;
       segs = [];
       nextIdx = 0;
+      misses = 0;
       dealNumerals();
       nextBlinkAt = performance.now() + 2000 + Math.random() * 2000;
       blinkT0 = -1;
+      doneBar.classList.remove('show');
       logEvent('deal', { table, count: nums.length });
     }
 
     /* ---------- table picker + permission overlay ---------- */
     const tableOverlay = document.getElementById('tableOverlay');
     const overlay = document.getElementById('overlay');
-    const doneOverlay = document.getElementById('doneOverlay');
+    const doneBar = document.getElementById('doneBar');
     const whyEl = document.getElementById('why');
     const row = document.getElementById('tableRow');
     for (let t = 2; t <= 12; t++) {
@@ -362,10 +422,41 @@
       logEvent('start', { table });
     }
 
-    document.getElementById('again').addEventListener('click', () => {
-      doneOverlay.classList.add('hidden');
+    function finish() {
+      state = 'celebrate';
+      doneMs = Math.round(performance.now() - startT);
+      touch = null;
+      autoTarget = null;
+      logEvent('complete', { table, ms: doneMs, misses });
+      const fullSegs = [
+        { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
+        ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
+      ];
+      Anim.begin({
+        ctx, W: Wd, H: Hd,
+        board: { x: 12, y: 56, w: Wd - 24, h: Hd - 116 },
+        segD: HEAD_R * 2,
+        table,
+        segs: fullSegs,
+        kind: 'wind',
+        hold: true,
+        onDone: showDone
+      });
+    }
+
+    function showDone() {
+      state = 'done';
+      doneBar.classList.add('show');
+    }
+
+    document.getElementById('againYes').addEventListener('click', () => {
+      doneBar.classList.remove('show');
+      segs = []; nums = [];
       tableOverlay.classList.remove('hidden');
       state = 'menu';
+    });
+    document.getElementById('againNo').addEventListener('click', () => {
+      location.href = 'index.html';
     });
 
     /* ---------- input ---------- */
@@ -382,6 +473,7 @@
 
     let touch = null;
     cv.addEventListener('pointerdown', (t) => {
+      if (state !== 'play') return;
       // a tap on the next numeral sends the snake straight to it;
       // a tap on any other numeral is a refusal, not a steer
       const i = nums.findIndex(n => !n.collected &&
@@ -393,8 +485,10 @@
           // tilt (any held angle) must not cancel it
           tiltBase = { x: smX, y: smY };
         }
-        else if (performance.now() > nums[i].flashUntil)
+        else if (performance.now() > nums[i].flashUntil) {
           nums[i].flashUntil = performance.now() + FLASH_SECS * 1000;
+          misses++;
+        }
         return;
       }
       touch = { x: t.clientX / K, y: t.clientY / K };
@@ -501,20 +595,20 @@
             n.collected = true;
             autoTarget = null;
             lastCollectT = now;
-            segs.unshift({ x: lead.x, y: lead.y, v: n.v });
+            // lowest multiple stays behind the head (index 0); newest capture
+            // joins the tail end, stepped one SEG_GAP behind the current tip
+            const prev = segs.length >= 2 ? segs[segs.length - 2] : head;
+            let tx = lead.x - prev.x, ty = lead.y - prev.y;
+            const td = Math.hypot(tx, ty);
+            if (td > 1e-3) { tx /= td; ty /= td; }
+            else { tx = -Math.cos(heading); ty = -Math.sin(heading); }
+            segs.push({ x: lead.x + tx * SEG_GAP, y: lead.y + ty * SEG_GAP, v: n.v });
             nextIdx++;
             logEvent('collect', { v: n.v, ord: nextIdx });
-            if (nextIdx === 12) {
-              doneMs = now - startT;
-              state = 'done';
-              logEvent('complete', { table, ms: Math.round(doneMs) });
-              document.getElementById('doneTitle').textContent = '×' + table + ' complete!';
-              document.getElementById('doneStats').textContent =
-                'All twelve multiples in ' + (doneMs / 1000).toFixed(0) + 's';
-              doneOverlay.classList.remove('hidden');
-            }
+            if (nextIdx === 12) finish();
           } else if (now > n.flashUntil) {
             n.flashUntil = now + FLASH_SECS * 1000;
+            misses++;
             logEvent('refuse', { v: n.v, want: table * (nextIdx + 1) });
           }
         }
@@ -563,7 +657,11 @@
       ctx.fillText(n.v, n.x, n.y + 1);
     }
 
-    function draw() {
+    function draw(now) {
+      if (state === 'celebrate' || state === 'done') {
+        Anim.frame(now);
+        return;
+      }
       ctx.clearRect(0, 0, Wd, Hd);
 
       const idle = (state === 'play' && lastCollectT)
@@ -651,8 +749,30 @@
       const dt = Math.min((now - lastT) / 1000, 0.05);
       lastT = now;
       step(dt, now);
-      try { draw(); } catch (e) { /* a bad frame must never kill the loop */ }
+      try { draw(now); } catch (e) { /* a bad frame must never kill the loop */ }
       requestAnimationFrame(frame);
+    }
+    // lab aids: ?t=N jumps straight into table N; ?done auditions the
+    // completion from a sample 12-segment trail
+    if (qs.has('t')) {
+      reset(Math.min(12, Math.max(2, +qs.get('t') || table)));
+      tableOverlay.classList.add('hidden');
+      startPlay();
+    }
+    if (qs.has('done')) {
+      reset(Math.min(12, Math.max(2, +qs.get('t') || table)));
+      tableOverlay.classList.add('hidden');
+      overlay.classList.add('hidden');
+      segs = [];
+      for (let i = 0; i < 12; i++) {
+        segs.push({
+          x: head.x - Math.sin(i * 0.35) * 18,
+          y: head.y + (i + 1) * SEG_GAP * 0.85,
+          v: table * (i + 1)
+        });
+      }
+      startT = performance.now() - 18000;
+      finish();
     }
     requestAnimationFrame(frame);
   </script>

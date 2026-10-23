@@ -481,6 +481,63 @@ pose does a travelling sway — bursts of `WRIG_SECS` every
 targets never move (the earlier version was lost in the static-pose
 work; this is its return on the new invariant).
 
+**2026-10-23 — Tilt Snake completion + the real root cause of the
+"rigid hinge / resists curves" defect.**
+- `tilt-snake.html` now orders captured multiples `×1…×12` head-to-tail
+  (`segs.push` behind the current tail tip instead of `unshift` behind
+  the head) and hands the completed snake to `Anim.begin(..., kind:
+  'wind')` with the same `Another snake? Yes / No` fade-up card as
+  Snake Puzzle.
+- **Root cause of the "resists curves / single hinge" defect found via
+  Roger's iPad Air Tilt Snake recording (`pushHead` in `anim.js` and
+  `pose-lab.html`):**
+  `pushHead(p)` tested `hypot(p - l) >= CRUMB_STEP` (3 px) against
+  `l = trail[trail.length - 1]`, and when `< 3` it overwrote `l` in
+  place (`l.x = p.x; l.y = p.y`). Because `l` was moved to `p` on every
+  sub-3px frame, `hypot(p - l)` on the next frame measured only a
+  *single frame's step* (`v * dt`), never the cumulative distance from
+  the last dropped breadcrumb! Whenever `v * dt < 3` — which happened
+  as soon as `wind` slowed from `laptrack` (`speed: 1.6`, 3.07 px/frame)
+  to `shrinktrack` (`speed: 1.2`, 2.30 px/frame in Tilt Snake's
+  `segD=36` design-px), and previously in `ring` (`speed: 1.0`) on
+  iPhone 8 and 120Hz Macs — `trail.push` stopped firing altogether. The
+  tail froze on the old breadcrumbs while `trail[trail.length - 1]`
+  dragged a single straight line segment from `trail[trail.length - 2]`
+  (the single hinge!) to the orbiting head. Fixed by measuring distance
+  from `trail[trail.length - 2]` while keeping `trail[trail.length - 1]`
+  as the live head tip, plus clamping the circle carrot lookahead to
+  `1.2 * r` so `head` meets `tail` cleanly.
+- **Honeycomb Search (`honeycomb.html`) completion:**
+  1. Each completed 12-cell path ripples from `×1` to `×12` as soon as
+     its 12th cell is tapped.
+  2. Once all selected tables have completed and rippled, all unclaimed
+     lattice cells fade out over `LATTICE_FADE` (0.8s).
+  3. One table at a time (`startCoil(ti)`), each path sprouts a head at
+     its `×1` end and uses the shared `anim.js` engine (`kind: 'coil'`,
+     which skips the outer perimeter tour and steers directly into
+     `shrinktrack` + 3 circuits + halo + numeral around its assigned
+     non-overlapping spot: centre for 1 table, pair for 2, triangle for 3).
+  4. `anim.js` gained `hold: true`, `clear: false`, `Anim.snapshot()`,
+     and `Anim.drawCoil(snap, now)` so completed coils remain visible
+     together (with blinking eyes, halo, and table numeral) while later
+     tables coil and after all finish. Also fixed a `ph.dir === -1`
+     double-sign flip in `shrinktrack`'s `ptOf` lookahead.
+  5. At conclusion, a compact bottom bar (`#doneBar`: `Search again?
+     Yes / No`) fades in where the chips sit so the coils remain
+     completely uncovered.
+- **Unified held-coil ending & accelerated 3-circuit spin across Snake
+  Puzzle, Tilt Snake, and Honeycomb Search (`anim.js?v=11`):**
+  - Snake Puzzle and Tilt Snake now also pass `hold: true` to `Anim.begin`
+    and use the bottom `#doneBar` (`Another snake? Yes / No`), keeping
+    the coiled snake, halo, and table numeral on screen until the user
+    responds.
+  - On the closed loop (`ph.t.P <= bodyLen * SHRINK_TO`), rotation pace
+    follows a smooth bell curve `pace = 1 - 0.25*u + WIND_ACCEL * sin(π*u)`
+    (`WIND_ACCEL = 2.18`), accelerating into the middle of the three
+    circuits and easing down to rest (`0.75×`) so all three rotations
+    complete in the time of 1.5 standard rotations while preserving the
+    exact circular curvature.
+
 **ACTION POINT (Roger, 2026-10-21):** table choice is currently free;
 an enhancement should *guide* users to appropriate tables for their
 skill — track miss/refusal and completion-time stats per device and

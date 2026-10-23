@@ -83,6 +83,54 @@
       box-shadow: 0 0 9px rgba(77, 163, 255, .3);
     }
 
+    #chipRow.locked {
+      opacity: .35;
+      pointer-events: none;
+    }
+
+    #doneBar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 10px 18px;
+      z-index: 12;
+      color: #cfd8e0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease;
+    }
+
+    #doneBar.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #doneBar .prompt {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    #doneBar button {
+      font-size: 17px;
+      font-family: inherit;
+      padding: 10px 24px;
+      border-radius: 12px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+    }
+
+    #doneBar button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
+    }
+
     .overlay {
       position: fixed;
       inset: 0;
@@ -136,11 +184,13 @@
       game waits for you.</div>
   </div>
 
-  <div id="doneOverlay" class="overlay hidden">
-    <div class="title" id="doneTitle">Complete!</div>
-    <div class="sub" id="doneStats"></div>
-    <button class="go" id="again">Another board</button>
+  <div id="doneBar">
+    <span class="prompt">Search again?</span>
+    <button id="againYes">Yes</button>
+    <button class="quiet" id="againNo">No</button>
   </div>
+
+  <script src="anim.js?v=11"></script>
 
   <script>
     'use strict';
@@ -160,6 +210,11 @@
     const DECOY_MAX = 72;    // filler values drawn from 1..DECOY_MAX,
     // excluding multiples of every selected
     // table — decoys never carry a path value
+    const RIPPLE_STAGGER = 0.11; // s between segments in a completed path's ripple
+    const RIPPLE_HOLD = 0.45;    // s each segment stays enlarged during the ripple
+    const RIPPLE_SCALE = 0.24;   // peak radius boost during ripple (+24%)
+    const LATTICE_FADE = 0.8;    // s to fade unselected lattice after all ripples finish
+    const HOLD_SECS = 5.0;       // s to hold the isolated snakes before the end-card
 
     /* ---------- canvas ----------
        Same policy as Patterns: the board is discrete space — it fills
@@ -219,13 +274,17 @@
     }
 
     /* ---------- state ---------- */
-    let tables = [];           // [A] or [A, B]
+    let tables = [];           // [A] or [A, B] or [A, B, C]
     let paths = [];            // paths[ti] = ordered [positions] t..12t
     let idx = [];              // idx[ti] = how many cells collected
+    let rippleAt = [];         // rippleAt[ti] = performance.now() when path ti completed (0 if not yet)
+    let allRippledAt = 0;      // performance.now() when the last path's ripple finishes
+    let coilIdx = -1;          // index of the table currently coiling (-1 before coiling starts)
+    let finishedCoils = [];    // Anim.snapshot() of each table that has finished coiling
     let cells = [];            // cells[r][c] = {v, claims:Set, flashUntil}
     let onPath = [];           // onPath[ti] = Map(key -> index in path)
     let lastCollectT = 0;
-    let state = 'idle';        // idle | play | done
+    let state = 'idle';        // idle | play | celebrate | done
     let startT = 0, doneMs = 0;
 
     const events = [];
@@ -429,9 +488,15 @@
       pickShape();
       genBoard();
       idx = tables.map(() => 0);
+      rippleAt = tables.map(() => 0);
+      allRippledAt = 0;
+      coilIdx = -1;
+      finishedCoils = [];
       state = 'play';
       startT = performance.now();
       lastCollectT = performance.now();
+      chips.classList.remove('locked', 'hidden');
+      document.getElementById('doneBar').classList.remove('show');
       logEvent('deal', { tables });
     }
 
@@ -505,20 +570,20 @@
           cell.claims.add(ti);
           accepted = true;
           logEvent('collect', { table: tables[ti], v: cell.v, ord: idx[ti] });
+          if (idx[ti] === 12 && !rippleAt[ti]) {
+            rippleAt[ti] = now;
+          }
         }
       }
       if (accepted) {
         lastCollectT = now;
+        chips.classList.add('locked');
         if (idx.every(i => i === 12)) {
           doneMs = now - startT;
-          state = 'done';
+          state = 'celebrate';
+          const rippleDurMs = (11 * RIPPLE_STAGGER + RIPPLE_HOLD) * 1000;
+          allRippledAt = Math.max(...rippleAt) + rippleDurMs;
           logEvent('complete', { tables, ms: Math.round(doneMs) });
-          document.getElementById('doneTitle').textContent =
-            tables.map(t => '×' + t).join(' and ') + ' complete!';
-          document.getElementById('doneStats').textContent =
-            (tables.length > 1 ? 'All ' + tables.length + ' paths' : 'The path') +
-            ' followed in ' + (doneMs / 1000).toFixed(0) + 's';
-          document.getElementById('doneOverlay').classList.remove('hidden');
         }
       } else if (now > cell.flashUntil) {
         // decoy, out-of-order path cell, or right value on the other
@@ -529,29 +594,134 @@
     });
     cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
 
-    document.getElementById('again').addEventListener('click', () => {
-      document.getElementById('doneOverlay').classList.add('hidden');
+    document.getElementById('againYes').addEventListener('click', () => {
+      document.getElementById('doneBar').classList.remove('show');
+      chips.classList.remove('locked', 'hidden');
       state = 'idle';
       selected = [];
+      finishedCoils = [];
+      coilIdx = -1;
       [...chips.children].forEach(ch => ch.classList.remove('on', 'kin'));
     });
+    document.getElementById('againNo').addEventListener('click', () => {
+      location.href = 'index.html';
+    });
+
+    /* Non-overlapping resting spots + segment size for 1, 2 or 3 coils */
+    function coilPlan() {
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE;
+      const cx = BOARD_PAD + availW / 2;
+      const cy = TOP_RESERVE + availH / 2;
+      const n = tables.length;
+      if (n === 1) {
+        const sd = Math.min(pitch * 1.15, Math.min(availW, availH) / 4.6);
+        return { segD: sd, spots: [{ x: cx, y: cy }] };
+      }
+      if (n === 2) {
+        const spots = availH >= availW * 0.85
+          ? [
+            { x: cx - availW * 0.14, y: cy - availH * 0.24 },
+            { x: cx + availW * 0.14, y: cy + availH * 0.24 }
+          ]
+          : [
+            { x: cx - availW * 0.24, y: cy },
+            { x: cx + availW * 0.24, y: cy }
+          ];
+        const dPair = Math.hypot(spots[1].x - spots[0].x, spots[1].y - spots[0].y);
+        const sd = Math.min(pitch * 1.05, dPair / 4.3, Math.min(availW, availH) / 4.8);
+        return { segD: sd, spots };
+      }
+      const spots = [
+        { x: cx, y: cy - availH * 0.27 },
+        { x: cx - availW * 0.26, y: cy + availH * 0.21 },
+        { x: cx + availW * 0.26, y: cy + availH * 0.21 }
+      ];
+      const dPair = Math.min(
+        Math.hypot(spots[1].x - spots[0].x, spots[1].y - spots[0].y),
+        spots[2].x - spots[1].x
+      );
+      const edgeClear = Math.min(availW * 0.24, availH * 0.23);
+      const sd = Math.min(pitch * 1.0, dPair / 4.3, edgeClear / 2.05);
+      return { segD: sd, spots };
+    }
+
+    function startCoil(ti, nowTs) {
+      coilIdx = ti;
+      if (ti >= tables.length) {
+        state = 'done';
+        chips.classList.add('hidden');
+        document.getElementById('doneBar').classList.add('show');
+        return;
+      }
+      const { segD: sd, spots } = coilPlan();
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE;
+      const p0 = centreOf(paths[ti][0]);
+      const p1 = centreOf(paths[ti][1]);
+      const dx = p0.x - p1.x, dy = p0.y - p1.y, d = Math.hypot(dx, dy) || 1;
+      const sp = 0.78 * sd;
+      const hx = Math.min(W - sd, Math.max(sd, p0.x + (dx / d) * sp));
+      const hy = Math.min(H - BOT_RESERVE - sd, Math.max(TOP_RESERVE + sd, p0.y + (dy / d) * sp));
+      const snakeSegs = [
+        { x: hx, y: hy, expected: 0, filled: true, blank: false },
+        ...paths[ti].map((q, i) => {
+          const c = centreOf(q);
+          return { x: c.x, y: c.y, expected: tables[ti] * (i + 1), filled: true, blank: false };
+        })
+      ];
+      const tNow = nowTs !== undefined ? nowTs : performance.now();
+      Anim.begin({
+        ctx, W, H,
+        board: { x: BOARD_PAD, y: TOP_RESERVE, w: availW, h: availH },
+        segD: sd,
+        table: tables[ti],
+        segs: snakeSegs,
+        kind: 'coil',
+        target: spots[ti],
+        skipBeat: true,
+        clear: false,
+        hold: true,
+        now: tNow,
+        onDone: (endNow) => {
+          const snap = Anim.snapshot();
+          if (snap) finishedCoils.push(snap);
+          startCoil(ti + 1, endNow);
+        }
+      });
+    }
 
     /* ---------- draw ---------- */
     const hud = document.getElementById('hud');
 
-    function draw() {
+    function draw(nowArg) {
       ctx.clearRect(0, 0, W, H);
       if (state === 'idle') {
         hud.textContent = 'pick one, two or three tables below —\ntheir multiples hide as connected\npaths in the comb; a common cell\ncan belong to more than one path';
         return;
       }
       hud.textContent = '';
-      const now = performance.now();
+      const now = nowArg !== undefined ? nowArg : performance.now();
       const rad = pitch * CIRCLE_R;
 
-      // found chains — under the cells so circles stay crisp
+      // Once every selected table has completed and finished its ripple,
+      // fade out the surrounding lattice, then coil each completed path
+      // one at a time via Anim.
+      let latticeAlpha = 1;
+      if (state === 'celebrate' || state === 'done') {
+        if (now >= allRippledAt) {
+          const afterRipple = (now - allRippledAt) / 1000;
+          latticeAlpha = Math.max(0, 1 - afterRipple / LATTICE_FADE);
+          if (coilIdx < 0 && afterRipple >= LATTICE_FADE) {
+            startCoil(0, now);
+          }
+        }
+      }
+
+      // found chains — under the cells so circles stay crisp (skip tables
+      // that have already begun or finished coiling)
       for (let ti = 0; ti < tables.length; ti++) {
-        if (idx[ti] === 0) continue;
+        if (idx[ti] === 0 || (coilIdx >= 0 && ti <= coilIdx)) continue;
         ctx.strokeStyle = tableColour(tables[ti]);
         ctx.lineWidth = rad * 0.5;
         ctx.lineJoin = 'round';
@@ -568,70 +738,133 @@
 
       const idle = (now - lastCollectT) / 1000;
 
+      // Draw in two passes (unclaimed lattice first, claimed snake cells
+      // and any rippling cells on top) so enlarged ripple segments never
+      // clip under a neighbouring cell.
+      const cellList = [];
       for (let r = 0; r < ROWS; r++)
         for (let c = 0; c < COLS; c++) {
-          const ctr = centreOf({ r, c });
-          const cell = cells[r][c];
-          const cl = cell.claims;
-          const isFound = cl.size > 0;
-          const isFlash = cell.flashUntil > now;
           const k = key({ r, c });
-          const isFoothold = tables.some((t, ti) =>
-            idx[ti] === 0 && onPath[ti].get(k) === 0);
-          const isHint = state === 'play' && idle > HINT_AFTER &&
-            tables.some((t, ti) => idx[ti] < 12 && onPath[ti].get(k) === idx[ti]);
-
-          ctx.beginPath();
-          ctx.arc(ctr.x, ctr.y, rad, 0, Math.PI * 2);
-          if (isFound && cl.size > 1) {
-            // a shared cell claimed from two or three sides — wedge
-            // sectors, one colour per claiming table
-            const parts = [...cl];
-            parts.forEach((ti, i) => {
-              const a0 = -Math.PI / 2 + i * 2 * Math.PI / parts.length;
-              const a1 = -Math.PI / 2 + (i + 1) * 2 * Math.PI / parts.length;
-              ctx.beginPath();
-              ctx.moveTo(ctr.x, ctr.y);
-              ctx.arc(ctr.x, ctr.y, rad, a0, a1);
-              ctx.closePath();
-              ctx.fillStyle = tableColour(tables[ti]);
-              ctx.fill();
-            });
-          } else {
-            ctx.fillStyle = isFound ? tableColour(tables[[...cl][0]])
-              : isFlash ? '#5a4a28' : '#1a2430';
+          const cell = cells[r][c];
+          const activeClaims = [...cell.claims].filter(ti => coilIdx < 0 || ti > coilIdx);
+          const isFound = activeClaims.length > 0;
+          let pop = 0;
+          if (isFound) {
+            for (const ti of activeClaims) {
+              if (!rippleAt[ti]) continue;
+              const pi = onPath[ti].get(k);
+              if (pi === undefined) continue;
+              const dt = (now - rippleAt[ti]) / 1000 - pi * RIPPLE_STAGGER;
+              if (dt > 0 && dt < RIPPLE_HOLD) {
+                pop = Math.max(pop, Math.sin((dt / RIPPLE_HOLD) * Math.PI));
+              }
+            }
           }
-          ctx.fill();
-          ctx.strokeStyle = isFound
-            ? (cl.size === 2 ? '#cfd8e0' : tableColour(tables[[...cl][0]]))
-            : isFlash ? '#e0a53a' : '#2c3e50';
-          ctx.lineWidth = isFound ? 2 : 1.2;
-          ctx.stroke();
-
-          if (isFoothold || isHint) {
-            ctx.beginPath();
-            ctx.arc(ctr.x, ctr.y,
-              rad + 5 + Math.sin(now / 300) * 3, 0, Math.PI * 2);
-            ctx.strokeStyle = isFoothold
-              ? 'rgba(77,163,255,0.55)' : 'rgba(77,163,255,0.7)';
-            ctx.lineWidth = isFoothold ? 2.5 : 3;
-            ctx.stroke();
-          }
-
-          ctx.fillStyle = isFound ? '#fff'
-            : (isFlash ? '#e0a53a' : '#8a97a3');
-          ctx.font = 'bold ' + Math.round(pitch * NUM_FONT)
-            + 'px -apple-system, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(cell.v, ctr.x, ctr.y + 1);
+          cellList.push({ r, c, k, cell, activeClaims, isFound, pop });
         }
+      cellList.sort((a, b) => (a.isFound - b.isFound) || (a.pop - b.pop));
+
+      for (const { r, c, k, cell, activeClaims, isFound, pop } of cellList) {
+        if (!isFound && latticeAlpha <= 0.005) continue;
+        const ctr = centreOf({ r, c });
+        const isFlash = cell.flashUntil > now;
+        const isFoothold = state === 'play' && tables.some((t, ti) =>
+          idx[ti] === 0 && onPath[ti].get(k) === 0);
+        const isHint = state === 'play' && idle > HINT_AFTER &&
+          tables.some((t, ti) => idx[ti] < 12 && onPath[ti].get(k) === idx[ti]);
+        const rr = rad * (1 + pop * RIPPLE_SCALE);
+
+        ctx.globalAlpha = isFound ? 1 : latticeAlpha;
+        ctx.beginPath();
+        ctx.arc(ctr.x, ctr.y, rr, 0, Math.PI * 2);
+        if (isFound && activeClaims.length > 1) {
+          // a shared cell claimed from two or three sides — wedge
+          // sectors, one colour per claiming table
+          activeClaims.forEach((ti, i) => {
+            const a0 = -Math.PI / 2 + i * 2 * Math.PI / activeClaims.length;
+            const a1 = -Math.PI / 2 + (i + 1) * 2 * Math.PI / activeClaims.length;
+            ctx.beginPath();
+            ctx.moveTo(ctr.x, ctr.y);
+            ctx.arc(ctr.x, ctr.y, rr, a0, a1);
+            ctx.closePath();
+            ctx.fillStyle = tableColour(tables[ti]);
+            ctx.fill();
+          });
+        } else {
+          ctx.fillStyle = isFound ? tableColour(tables[activeClaims[0]])
+            : isFlash ? '#5a4a28' : '#1a2430';
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(ctr.x, ctr.y, rr, 0, Math.PI * 2);
+        ctx.strokeStyle = pop > 0
+          ? 'rgba(255,255,255,' + (0.35 + 0.6 * pop) + ')'
+          : isFound
+            ? (activeClaims.length >= 2 ? '#cfd8e0' : tableColour(tables[activeClaims[0]]))
+            : isFlash ? '#e0a53a' : '#2c3e50';
+        ctx.lineWidth = pop > 0 ? 2.5 : (isFound ? 2 : 1.2);
+        ctx.stroke();
+
+        if (isFoothold || isHint) {
+          ctx.beginPath();
+          ctx.arc(ctr.x, ctr.y,
+            rr + 5 + Math.sin(now / 300) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = isFoothold
+            ? 'rgba(77,163,255,0.55)' : 'rgba(77,163,255,0.7)';
+          ctx.lineWidth = isFoothold ? 2.5 : 3;
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = isFound ? '#fff'
+          : (isFlash ? '#e0a53a' : '#8a97a3');
+        ctx.font = 'bold ' + Math.round(pitch * NUM_FONT * (1 + pop * RIPPLE_SCALE * 0.7))
+          + 'px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cell.v, ctr.x, ctr.y + 1);
+      }
+      ctx.globalAlpha = 1;
+
+      // Draw any snakes that have already completed their coil, then
+      // advance the currently coiling snake.
+      for (const snap of finishedCoils) {
+        Anim.drawCoil(snap, now);
+      }
+      if (coilIdx >= 0 && coilIdx < tables.length) {
+        Anim.frame(now);
+      }
 
     }
 
-    function frame() {
-      try { draw(); } catch (e) { /* a bad frame must never kill the loop */ }
+    let timeOffset = 0;
+    function frame(now) {
+      try { draw(now + timeOffset); } catch (e) { /* a bad frame must never kill the loop */ }
       requestAnimationFrame(frame);
+    }
+    const qs = new URLSearchParams(location.search);
+    if (qs.has('t')) {
+      selected = qs.get('t').split(',').map(Number).filter(n => n >= 2 && n <= 12).slice(0, MAX_TABLES);
+      if (selected.length) {
+        [...chips.children].forEach((ch, i) => ch.classList.toggle('on', selected.includes(i + 2)));
+        reset(selected);
+      }
+    }
+    if (qs.has('done') && tables.length) {
+      const now = performance.now();
+      for (let ti = 0; ti < tables.length; ti++) {
+        idx[ti] = 12;
+        paths[ti].forEach(q => cells[q.r][q.c].claims.add(ti));
+        rippleAt[ti] = now;
+      }
+      doneMs = 24000;
+      state = 'celebrate';
+      allRippledAt = now + (11 * RIPPLE_STAGGER + RIPPLE_HOLD) * 1000;
+      const adv = parseFloat(qs.get('advance'));
+      if (adv > 0) {
+        const steps = Math.ceil(adv / 0.016);
+        for (let k = 1; k <= steps; k++) draw(now + k * 16);
+        timeOffset = adv * 1000;
+      }
     }
     requestAnimationFrame(frame);
   </script>

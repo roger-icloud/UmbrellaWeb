@@ -53,6 +53,7 @@ window.Anim = (function () {
   const SHRINK_RATE = 90;     // px/s the wind's track contracts inward
   const SHRINK_TO = 1.0;      // stop when perimeter ≈ body length × this
   const WIND_TURNS = 3;       // circuits of the closed loop before rest
+  const WIND_ACCEL = 2.18;    // bell-curve speed boost across WIND_TURNS (3 turns in ~1.5-turn time)
   const GLOW_SECS = 1.1;      // halo holds at full bloom
   const FADE_SECS = 1.8;      // then the slow fade
   const STILL_FADE = 0.9;     // s for the body to fade on the still path
@@ -106,6 +107,10 @@ window.Anim = (function () {
     // where the ring wind renders incoherently (iPhone 6/8-era WebKit)
     wind: [
       { laptrack: true, calm: true, laps: 1, speed: 1.6 },
+      { shrinktrack: true, calm: true, speed: 1.2 },
+      { glow: true, calm: true },
+    ],
+    coil: [
       { shrinktrack: true, calm: true, speed: 1.2 },
       { glow: true, calm: true },
     ],
@@ -235,6 +240,10 @@ window.Anim = (function () {
   let segD = 48, table = 0, segs = [];
   let onFade = null, onDone = null, fadeFired = false;
   let pageKind = null;        // the page's chosen exit; ?depart= outranks it
+  let coilTarget = null;      // optional {x,y} centre for a coil
+  let doClear = true;         // false when page draws its own backdrop/coils
+  let holdCoil = false;       // true when the finished coil should remain visible
+  let lastSnap = null;        // snapshot of the most recently completed coil
 
   /* ---------- engine state ---------- */
   let state = 'off';           // off | beat | depart | gone
@@ -263,7 +272,8 @@ window.Anim = (function () {
      the pose itself, so the celebration needs no mode switch. */
   function pushHead(p) {
     const l = trail[trail.length - 1];
-    if (!l || Math.hypot(p.x - l.x, p.y - l.y) >= CRUMB_STEP)
+    const prev = trail[trail.length - 2];
+    if (trail.length < 2 || Math.hypot(p.x - prev.x, p.y - prev.y) >= CRUMB_STEP)
       trail.push({ x: p.x, y: p.y });
     else { l.x = p.x; l.y = p.y; }
     if (trail.length > 4000) trail.splice(0, trail.length - 4000);
@@ -363,9 +373,9 @@ window.Anim = (function () {
   }
 
   /* ---------- the script drive ---------- */
-  function startDepart(kind) {
+  function startDepart(kind, now) {
     state = 'depart';
-    departT = performance.now();
+    departT = now !== undefined ? now : performance.now();
     const a = trail[trail.length - 1], b = trail[trail.length - 2];
     heading = Math.atan2(a.y - b.y, a.x - b.x);
     phraseArc = 0;
@@ -467,17 +477,32 @@ window.Anim = (function () {
         // the thing that moves: it contracts until it holds just one
         // body-length, then the snake keeps circling until the body
         // fills the loop — the ring without the ring machinery
-        if (ph.t === undefined) {
-          ph.inset = LAP_INSET * segD;
-          ph.t = lapGeom(ph.inset);
-          if (!ph.t) { script.shift(); phraseArc = 0; continue; }
-          ph.s = lapNearest(ph.t, headPos);
-          const tp = lapPt(ph.t, ph.s + 4), tm = lapPt(ph.t, ph.s - 4);
-          ph.dir = (Math.cos(heading) * (tp.x - tm.x) +
-            Math.sin(heading) * (tp.y - tm.y)) >= 0 ? 1 : -1;
-          ph.fill = 0;
-        }
         const bodyLen = (N - 1) * SPACING_K * segD;
+        if (ph.t === undefined) {
+          if (coilTarget || pageKind === 'coil') {
+            const cx = coilTarget ? coilTarget.x : bX + bW / 2;
+            const cy = coilTarget ? coilTarget.y : bY + bH / 2;
+            const rTarget = (bodyLen * SHRINK_TO) / (2 * Math.PI);
+            const d0 = Math.hypot(headPos.x - cx, headPos.y - cy);
+            const rInit = Math.max(rTarget * 1.25, Math.min(d0, rTarget * 2.2));
+            const a0 = Math.atan2(headPos.y - cy, headPos.x - cx);
+            const tanX = -Math.sin(a0), tanY = Math.cos(a0);
+            ph.dir = (Math.cos(heading) * tanX + Math.sin(heading) * tanY) >= 0 ? 1 : -1;
+            ph.circ = { x: cx, y: cy, r: rInit, a0 };
+            ph.t = { P: 2 * Math.PI * rInit };
+            ph.s = 0;
+            ph.fill = 0;
+          } else {
+            ph.inset = LAP_INSET * segD;
+            ph.t = lapGeom(ph.inset);
+            if (!ph.t) { script.shift(); phraseArc = 0; continue; }
+            ph.s = lapNearest(ph.t, headPos);
+            const tp = lapPt(ph.t, ph.s + 4), tm = lapPt(ph.t, ph.s - 4);
+            ph.dir = (Math.cos(heading) * (tp.x - tm.x) +
+              Math.sin(heading) * (tp.y - tm.y)) >= 0 ? 1 : -1;
+            ph.fill = 0;
+          }
+        }
         // the track: a rect while there's room, then a circle inscribed
         // at its floor — lapGeom stops at ~3 segD sides, but the body
         // is ~9 segD long and needs a loop it can actually fill
@@ -485,7 +510,8 @@ window.Anim = (function () {
           if (ph.circ) {
             // contract only while the head is riding the boundary —
             // the loop shrinks under the snake, never out from under it
-            const r2 = Math.max(segD * 0.8,
+            const rMin = (bodyLen * SHRINK_TO) / (2 * Math.PI);
+            const r2 = Math.max(rMin,
               ph.circ.r - SHRINK_RATE * budget);
             if (Math.abs(Math.hypot(headPos.x - ph.circ.x,
               headPos.y - ph.circ.y) - r2) <= segD * 1.2) {
@@ -533,16 +559,31 @@ window.Anim = (function () {
         if (dlt > ph.t.P / 2) dlt -= ph.t.P;
         if (dlt < -ph.t.P / 2) dlt += ph.t.P;
         ph.s = sNew;
-        const c = ptOf(ph.s + ph.dir * LAP_LOOKAHEAD * segD);
+        const look = ph.circ
+          ? Math.min(LAP_LOOKAHEAD * segD, ph.circ.r * 1.2)
+          : LAP_LOOKAHEAD * segD;
+        const c = ptOf(ph.s + (ph.circ ? look : ph.dir * look));
         const err = wrapAngle(Math.atan2(c.y - headPos.y,
           c.x - headPos.x) - heading);
         const w = Math.max(-LAP_TURN, Math.min(LAP_TURN,
           err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
-        heading += w * budget;
-        const step = v * budget;
+        // once on the final loop, accelerate smoothly into the middle of
+        // the three circuits and ease back down so 3 turns take ~1.5× time
+        let pace = 1;
+        if (ph.t.P <= bodyLen * SHRINK_TO) {
+          const prog = ph.met !== undefined
+            ? bodyLen + ph.met
+            : Math.min(bodyLen, ph.fill);
+          const u = Math.max(0, Math.min(1,
+            prog / (bodyLen + ph.t.P * (WIND_TURNS - 1))));
+          pace = 1 - 0.25 * u + WIND_ACCEL * Math.sin(Math.PI * u);
+        }
+        const step = v * pace * budget;
+        heading += w * pace * budget;
         headPos.x += Math.cos(heading) * step;
         headPos.y += Math.sin(heading) * step;
         tipArc += step; phraseArc += step;
+        if (ph.t.P <= bodyLen * SHRINK_TO) ph.fill += step - v * budget;
         budget = 0;
         // the loop "closes" when the head comes home to the tail —
         // actual meeting, not distance travelled. From there the head
@@ -768,39 +809,55 @@ window.Anim = (function () {
     segD = opts.segD; table = opts.table; segs = opts.segs;
     onFade = opts.onFade || null; onDone = opts.onDone || null;
     pageKind = opts.kind || null;
+    coilTarget = opts.target || null;
+    doClear = opts.clear !== false;
+    holdCoil = !!opts.hold;
     fadeFired = false;
     // the trail IS the pose, read tail→head — the celebration starts from
     // exactly where the game left the snake
     trail = segs.map(s => ({ x: s.x, y: s.y })).reverse();
     from = segs.map(s => ({ x: s.x, y: s.y }));
-    settleT = performance.now();
+    const t0 = opts.now !== undefined ? opts.now : performance.now();
+    settleT = t0;
     headPos = { x: segs[0].x, y: segs[0].y };
     tipArc = 0; hole = null; holeArc = null; script = [];
     spinning = false; whirlpool = false; spinProg = 0;
     ring = null; glowT0 = -1; stillK = 1;
-    prevNow = 0;
+    prevNow = t0;
     gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
-    nextBlinkAt = performance.now() + 2000 + rng() * 2000;
+    nextBlinkAt = t0 + 2000 + rng() * 2000;
     blinkT0 = -1;
     const at = parseFloat(qs.get('departAt'));
     if (at > 0) {
-      settleT = performance.now() - 2000;   // a baked run pretends the
+      settleT = t0 - 2000;                  // a baked run pretends the
       state = 'depart';                     // settle already happened
-      startDepart();
-      departT = performance.now() - at * 1000;
+      startDepart(undefined, t0);
+      departT = t0 - at * 1000;
       const steps = Math.ceil(at / 0.016);
       for (let k = 0; k < steps; k++) driveHead(0.016, k * 0.016);
+    } else if (opts.skipBeat) {
+      startDepart(undefined, t0);
     } else {
       state = 'beat';
-      beatT = performance.now();
+      beatT = t0;
     }
   }
 
   /* ---------- frame ---------- */
   function frame(now) {
+    if (state === 'gone' && holdCoil && lastSnap) {
+      if (doClear) {
+        ctx.fillStyle = '#101418';
+        ctx.fillRect(0, 0, W, H);
+      }
+      drawCoil(lastSnap, now);
+      return;
+    }
     if (state === 'off' || state === 'gone' || !segs.length) return;
-    ctx.fillStyle = '#101418';
-    ctx.fillRect(0, 0, W, H);
+    if (doClear) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+    }
 
     const dt = Math.min((now - prevNow) / 1000 || 0.016, 0.05);
     prevNow = now;
@@ -809,7 +866,7 @@ window.Anim = (function () {
     if (state === 'depart') driveHead(dt, departAge + dt);
     if (state === 'beat' &&
       now - beatT > (N - 1) * BEAT_STAGGER * 1000 + BEAT_HOLD * 1000 + 250)
-      startDepart();
+      startDepart(undefined, now);
 
     // the hole, if there is one, under everything — a flat sandy circle
     if (hole) {
@@ -832,20 +889,21 @@ window.Anim = (function () {
     }
 
     // the halo ending: bloom, hold, slow fade — the numeral gathers the
-    // light and outlives the ring by a beat
-    let fadeK = 1, numA = 0;
+    // light and outlives the ring by a beat (unless holdCoil is set, in
+    // which case the coil, halo and numeral stay visible at full bloom)
+    let fadeK = 1, numA = 0, haloR = 0, haloA = 0;
     if (glowT0 >= 0 && ring) {
       const ga = departAge - glowT0;
       const bloom = Math.max(0, Math.min(1, ga / 0.35));
-      fadeK = ga <= GLOW_SECS ? 1
-        : Math.max(0, 1 - (ga - GLOW_SECS) / FADE_SECS);
+      fadeK = holdCoil ? 1 : (ga <= GLOW_SECS ? 1
+        : Math.max(0, 1 - (ga - GLOW_SECS) / FADE_SECS));
       const nk = Math.max(0, Math.min(1, (ga - 0.7) / NUM_RISE));
-      const held = ga <= GLOW_SECS + FADE_SECS + NUM_LINGER;
+      const held = holdCoil || ga <= GLOW_SECS + FADE_SECS + NUM_LINGER;
       numA = nk * nk * (3 - 2 * nk) *
         (held ? 1 : Math.max(0, 1 -
           (ga - GLOW_SECS - FADE_SECS - NUM_LINGER) / NUM_FADE));
-      const haloR = ring.r + segD * 2 * (1 - 0.55 * nk);
-      const haloA = bloom * fadeK * (1 - 0.35 * nk);
+      haloR = ring.r + segD * 2 * (1 - 0.55 * nk);
+      haloA = bloom * fadeK * (1 - 0.35 * nk);
       const g = ctx.createRadialGradient(ring.x, ring.y,
         ring.r * 0.2, ring.x, ring.y, haloR);
       g.addColorStop(0, 'rgba(255,240,200,' + 0.55 * haloA + ')');
@@ -919,7 +977,7 @@ window.Anim = (function () {
     if (qs.has('animdbg') && state === 'depart')
       document.title = pos.map(p => p ?
         Math.round(p.x) + ',' + Math.round(p.y) : 'x').join(' ');
-    if (state === 'depart' && (allGone || (glowT0 >= 0 &&
+    if (state === 'depart' && !holdCoil && (allGone || (glowT0 >= 0 &&
       departAge - glowT0 > GLOW_SECS + FADE_SECS + NUM_LINGER + NUM_FADE))) {
       state = 'gone';
       if (!fadeFired) { fadeFired = true; if (onFade) onFade(); }
@@ -973,12 +1031,112 @@ window.Anim = (function () {
       ctx.fillStyle = 'rgba(255,240,200,' + numA + ')';
       ctx.fillText(table, ring.x, ring.y);
     }
+
+    if (state === 'depart' && holdCoil && glowT0 >= 0 &&
+      departAge - glowT0 >= 0.7 + NUM_RISE + 0.1) {
+      lastSnap = {
+        table, segD,
+        segs: segs.map(s => ({ ...s })),
+        pos: pos.map(p => p ? { ...p } : null),
+        headFacing,
+        gaze,
+        ring: ring ? { ...ring } : null,
+        haloR, haloA,
+        nextBlinkAt: now + 2000 + rng() * 2000,
+        blinkT0: -1
+      };
+      state = 'gone';
+      if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
+      if (onDone) onDone(now);
+    }
+  }
+
+  function snapshot() { return lastSnap; }
+
+  function drawCoil(snap, now) {
+    if (!snap || !ctx) return;
+    const { table: tbl, segD: sd, segs: sgs, pos, ring: rg, haloR, haloA } = snap;
+    if (rg && haloR > 0) {
+      const g = ctx.createRadialGradient(rg.x, rg.y,
+        rg.r * 0.2, rg.x, rg.y, haloR);
+      g.addColorStop(0, 'rgba(255,240,200,' + 0.55 * haloA + ')');
+      g.addColorStop(0.65, 'rgba(255,215,130,' + 0.28 * haloA + ')');
+      g.addColorStop(1, 'rgba(255,215,130,0)');
+      ctx.beginPath();
+      ctx.arc(rg.x, rg.y, haloR, 0, 7);
+      ctx.fillStyle = g; ctx.fill();
+    }
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < sgs.length; i++) {
+      if (!pos[i]) continue;
+      if (!started) { ctx.moveTo(pos[i].x, pos[i].y); started = true; }
+      else ctx.lineTo(pos[i].x, pos[i].y);
+    }
+    ctx.strokeStyle = 'rgba(90,110,130,.25)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    const r = sd / 2;
+    const hue = (tbl * 31 + 200) % 360;
+    for (let i = sgs.length - 1; i >= 0; i--) {
+      if (!pos[i]) continue;
+      if (i === 0) {
+        const s = pos[0];
+        const g = ctx.createRadialGradient(
+          s.x - r * 0.33, s.y - r * 0.33, r * 0.2, s.x, s.y, r);
+        g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+        g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+        ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
+        ctx.fillStyle = g; ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+        ctx.stroke();
+        let sq = 1;
+        if (now !== undefined) {
+          if (snap.blinkT0 < 0) {
+            if (now >= snap.nextBlinkAt) snap.blinkT0 = now;
+          }
+          if (snap.blinkT0 >= 0) {
+            const k = (now - snap.blinkT0) / 1000 / BLINK_SECS;
+            if (k >= 1) {
+              snap.blinkT0 = -1;
+              snap.nextBlinkAt = now + (BLINK_MIN + rng() * (BLINK_MAX - BLINK_MIN)) * 1000;
+            } else {
+              sq = 1 - Math.sin(k * Math.PI) * 0.88;
+            }
+          }
+        }
+        const ex = Math.cos(snap.gaze), ey = Math.sin(snap.gaze);
+        const px = -ey, py = ex;
+        for (const side of [-1, 1]) {
+          ctx.beginPath();
+          ctx.ellipse(s.x + ex * r * 0.38 + px * side * r * 0.36,
+            s.y + ey * r * 0.38 + py * side * r * 0.36,
+            r * 0.16, Math.max(r * 0.16 * sq, r * 0.03), snap.gaze, 0, 7);
+          ctx.fillStyle = '#101418'; ctx.fill();
+        }
+        continue;
+      }
+      ctx.beginPath(); ctx.arc(pos[i].x, pos[i].y, r, 0, 7);
+      ctx.fillStyle = tableColour(tbl); ctx.fill();
+      numeral(sgs[i].expected, pos[i].x, pos[i].y, sd * 0.34, '#fff');
+    }
+    if (rg) {
+      ctx.font = '800 ' + (sd * (tbl >= 10 ? 0.8 : 1.05)) +
+        'px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,240,200,1)';
+      ctx.fillText(tbl, rg.x, rg.y);
+    }
   }
 
   return {
     begin,
     frame,
     pose,
+    snapshot,
+    drawCoil,
     get state() { return state; }
   };
 })();

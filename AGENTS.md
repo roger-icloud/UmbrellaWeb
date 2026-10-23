@@ -537,6 +537,81 @@ work; this is its return on the new invariant).
     circuits and easing down to rest (`0.75×`) so all three rotations
     complete in the time of 1.5 standard rotations while preserving the
     exact circular curvature.
+- **Honeycomb Search crossover variety (`genBoard` in `honeycomb.html`):**
+  - Multi-table deals now vary naturally across deals (<1 ms per board):
+    - **2 tables** with ≥2 common multiples: ~45% of deals cross twice
+      (`pathThroughTwo` routing through two shared multiples `X1, X2`),
+      ~55% cross once.
+    - **3 tables**: mixes **chained 2-way meetings** (middle snake meets
+      the other two at two separate cells `X1 !== X2`), **double 2-way
+      meetings** on a pair, **single 2-way meeting** + third path free,
+      and **single 3-way meeting** (~15–20% when `lcm(A,B,C) ≤ 12×min`).
+  - Also fixed a latent defect in `genPathAnywhere(foreign)` where the
+    random `start` cell wasn't checked against `foreign`, which could
+    occasionally drop a free path's `×1` cell onto an existing path.
+- **Patterns & Lattice mull (2026-10-23):**
+  - Snakes teach *sequence/chain*; the hundred square (`Patterns` and
+    `Lattice`) teaches *decade geometry and intersections* within 1–100.
+  - Known defects in `patterns.html` to fix when we touch it:
+    `DEBUG_GRID = true` is still on, and `found.size === 12` makes
+    `×9..×12` uncompletable on the 100-square (needs `Math.min(12,
+    Math.floor(100 / t))` like `lattice.html`).
+  - Bridge candidates between snake and grid under consideration:
+    1. Unused grid numbers fade, leaving the table's geometric pattern;
+       after a hold, the pattern either morphs into a snake or leaves
+       ghost imprints behind.
+    2. A snake threads through the grid positions in order (`×1 → ×2…`),
+       lighting/plumping each sphere in place as it passes and gliding
+       off so the completed geometric pattern stays standing on the
+       square above the bottom `Yes / No` bar (or at deal time in
+       Lattice, the snake slithers across the ground strip dropping the
+       loose discs).
+  - **Built experimental `pattern-snake.html` (on main menu + `nav.js`):**
+    0. **Opening attract state (`choose`) + top-left table numeral:**
+       Starts on the `10 × 10` grid with the `×2…×12` buttons live at the
+       bottom. Until the user taps a table, a random table button glows in
+       its coded colour (`tableColour(demoTable)`), its pattern fades up on
+       the grid (`1×..12×` solid, `>12×` at 50%), and its table numeral
+       appears in the top-left corner at completion-animation scale for
+       `DEMO_HOLD_S = 2.0s` before cycling to another random table. Tapping
+       any table button interrupts immediately; the chosen table's numeral
+       remains in the top-left corner for the duration of the round.
+    1. **Stage 1a (`run`, top-down `1×t → 100` → `waitCollect`):** The
+       12-segment snake enters at the top-left (`1`), visits `1×t .. 12×t`
+       first — leaving a 100%-solid square and shedding one body segment
+       per multiple until at `12×t` only the light round head remains —
+       then zips down the remaining multiples (`> 12×t` up to `100`),
+       leaving 50%-opaque (`PALE_ALPHA = 0.48`) continuation squares. At
+       the bottom, the lone head steps just below the grid (`waitCollect`),
+       the numbers fade up over all coloured squares (`PRE_NUM_FADE_S =
+       0.8s`), and the top-left table numeral pulses an intermittent halo
+       ring (`NUM_HALO_CYCLE_S = 2.2s`). Tapping the top-left numeral
+       initiates the collection.
+    2. **Stage 1b (`collect` → `parkTop`):** Once the top-left numeral is
+       tapped, the preview numbers fade out and the lone head wanders back
+       up through the `1×t .. 12×t` solid squares in a randomised order
+       (`buildCollectOrder`). Each square it visits softens to a faint
+       pattern trace (`FAINT_SOLID = 0.28`) while the snake grows back by
+       one segment (`0 → 12`). Finishing near the top-right of the grid,
+       the reassembled snake slithers directly into its S-wave resting
+       strip **above** the 100-square (`parkTop`), and the multiples fade
+       up on its segments.
+    3. **Stage 2 (`play`, drag down from above the 100-square):**
+       **Synchronous pair-glow hint:** `1.5s` after parking (`HINT_FIRST_S`,
+       picking the 3rd segment, e.g. `9`, first — and after any `6.5s`
+       idle pause `HINT_IDLE_S`), a segment on the snake above and its
+       corresponding square on the grid below pulse in lockstep
+       (`HINT_DUR_S = 3.2s`) while the snake's eyes glance toward that
+       square. Dragging down from above the square makes the top-row
+       multiples a short, easy reach. Each valid drop lights the square
+       solid with its white numeral and shortens the snake by one segment;
+       any other drop returns silently and uncritically to its slot.
+    4. **Conclusion (`endFloat` → `reveal` → `done`):** When the last
+       segment is placed, the lone head above the grid floats playfully
+       upward with a blink, the `>12×` multiples fade up over their
+       coloured squares (`SEQ_FADE_S`), followed 1s later by a slow
+       fade-in of the remaining unpatterned grid numbers (`REST_FADE_S`),
+       holding with `Another pattern? Yes / No` at the bottom.
 
 **ACTION POINT (Roger, 2026-10-21):** table choice is currently free;
 an enhancement should *guide* users to appropriate tables for their

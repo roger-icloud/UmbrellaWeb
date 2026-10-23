@@ -345,6 +345,19 @@
       return out;
     }
 
+    /* hex-grid step distance (odd-r offset coordinates) */
+    function hexDist(a, b) {
+      const ax = a.c - (a.r - (a.r & 1)) / 2, az = a.r, ay = -ax - az;
+      const bx = b.c - (b.r - (b.r & 1)) / 2, bz = b.r, by = -bx - bz;
+      return (Math.abs(ax - bx) + Math.abs(ay - by) + Math.abs(az - bz)) / 2;
+    }
+
+    function sharedMultiples(a, b) {
+      const st = lcm(a, b), cap = 12 * Math.min(a, b), out = [];
+      for (let m = st; m <= cap; m += st) out.push(m);
+      return out;
+    }
+
     /* a twelve-cell path routed through pin X at step `at` (0-based):
        walk backwards for the prefix, forwards for the suffix. */
     function pathThrough(at, X, foreign) {
@@ -360,12 +373,43 @@
       return null;
     }
 
+    /* a twelve-cell path routed through TWO pins X1 (at step at1) and
+       X2 (at step at2, at1 < at2) so two snakes can cross twice. */
+    function pathThroughTwo(at1, X1, at2, X2, foreign) {
+      const steps = at2 - at1;
+      if (hexDist(X1, X2) > steps) return null;
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const blocked = new Set(foreign);
+        blocked.add(key(X1)); blocked.add(key(X2));
+        const own = new Set([key(X1)]);
+        const mid = [];
+        let cur = X1, ok = true;
+        for (let s = 1; s < steps; s++) {
+          const rem = steps - s;
+          const opts = hexNbrs(cur).filter(q =>
+            !blocked.has(key(q)) && hexDist(q, X2) <= rem);
+          if (!opts.length) { ok = false; break; }
+          cur = opts[Math.floor(Math.random() * opts.length)];
+          mid.push(cur); blocked.add(key(cur)); own.add(key(cur));
+        }
+        if (!ok || hexDist(cur, X2) !== 1) continue;
+        own.add(key(X2));
+        const back = walkFrom(X1, at1, blocked, own);
+        if (!back) continue;
+        const fwd = walkFrom(X2, 11 - at2, blocked, own);
+        if (!fwd) continue;
+        return back.reverse().concat([X1], mid, [X2], fwd);
+      }
+      return null;
+    }
+
     function genPathAnywhere(foreign) {
       for (let attempt = 0; attempt < 400; attempt++) {
         const start = {
           r: Math.floor(Math.random() * ROWS),
           c: Math.floor(Math.random() * COLS)
         };
+        if (foreign.has(key(start))) continue;
         const blocked = new Set(foreign); blocked.add(key(start));
         const own = new Set([key(start)]);
         const rest = walkFrom(start, 11, blocked, own);
@@ -391,6 +435,17 @@
     }
 
     function genBoard() {
+      // Pick a target crossover pattern for this deal so multi-table
+      // boards vary naturally between 3-way meetings, chained 2-way
+      // meetings (A–B and B–C), double 2-way meetings, and single 2-way
+      // meetings (falling back freely if early attempts don't land).
+      const wantTwoOnPair = Math.random() < 0.45;
+      const mode3Roll = Math.random();
+      const targetMode3 = mode3Roll < 0.40 ? 'chain2'
+        : mode3Roll < 0.62 ? 'one2'
+          : mode3Roll < 0.80 ? 'double2'
+            : 'three';
+
       for (let attempt = 0; attempt < 250; attempt++) {
         cells = [];
         for (let r = 0; r < ROWS; r++) {
@@ -404,61 +459,149 @@
         if (tables.length === 1) {
           paths[0] = genPathAnywhere(new Set());
         } else if (tables.length === 2) {
-          // one shared multiple: a multiple of lcm(A,B) within both
-          // tables' first twelve — the crossover
           const [A, B] = tables;
-          const step = lcm(A, B), cap = 12 * Math.min(A, B);
-          const cands = [];
-          for (let m = step; m <= cap; m += step) cands.push(m);
-          const mX = cands[Math.floor(Math.random() * cands.length)];
-          const X = {
-            r: Math.floor(Math.random() * ROWS),
-            c: Math.floor(Math.random() * COLS)
-          };
-          paths[0] = pathThrough(mX / A - 1, X, new Set());
-          if (!paths[0]) continue;
-          paths[1] = pathThrough(mX / B - 1, X,
-            new Set(paths[0].filter(p => !(p.r === X.r && p.c === X.c)).map(key)));
+          const cands = sharedMultiples(A, B);
+          if ((wantTwoOnPair && attempt < 70) && cands.length >= 2) {
+            // two 2-way crossovers between the two snakes
+            paths[0] = genPathAnywhere(new Set());
+            if (!paths[0]) continue;
+            const i1 = Math.floor(Math.random() * (cands.length - 1));
+            const i2 = i1 + 1 + Math.floor(Math.random() * (cands.length - 1 - i1));
+            const m1 = cands[i1], m2 = cands[i2];
+            const X1 = paths[0][m1 / A - 1], X2 = paths[0][m2 / A - 1];
+            const foreign = new Set(paths[0].map(key));
+            foreign.delete(key(X1)); foreign.delete(key(X2));
+            paths[1] = pathThroughTwo(m1 / B - 1, X1, m2 / B - 1, X2, foreign);
+            if (!paths[1]) continue;
+          } else if (cands.length) {
+            // one shared multiple
+            const mX = cands[Math.floor(Math.random() * cands.length)];
+            const X = {
+              r: Math.floor(Math.random() * ROWS),
+              c: Math.floor(Math.random() * COLS)
+            };
+            paths[0] = pathThrough(mX / A - 1, X, new Set());
+            if (!paths[0]) continue;
+            paths[1] = pathThrough(mX / B - 1, X,
+              new Set(paths[0].filter(p => !(p.r === X.r && p.c === X.c)).map(key)));
+          } else {
+            paths[0] = genPathAnywhere(new Set());
+            if (!paths[0]) continue;
+            paths[1] = genPathAnywhere(new Set(paths[0].map(key)));
+          }
         } else {
-          // three tables: a cell shared by all three when a common
-          // multiple of all exists (lcm3 ≤ 12×min); otherwise a
-          // pairwise crossover for a random pair + a free third path
+          // three tables: vary between a chain of two 2-way crossovers
+          // (mid meets p at X1, mid meets q at X2), one 2-way crossover
+          // + free third path, two 2-way crossovers on one pair + free
+          // third path, and a single 3-way crossover.
           const [A, B, C] = tables;
           const step3 = lcm(lcm(A, B), C), cap3 = 12 * Math.min(A, B, C);
           const c3 = [];
           for (let m = step3; m <= cap3; m += step3) c3.push(m);
-          const X = {
-            r: Math.floor(Math.random() * ROWS),
-            c: Math.floor(Math.random() * COLS)
-          };
-          const used = new Set();
-          const place = (ti, at) => {
-            paths[ti] = pathThrough(at, X, new Set(used));
-            if (paths[ti])
-              paths[ti].forEach(p => { if (!(p.r === X.r && p.c === X.c)) used.add(key(p)); });
-            return !!paths[ti];
-          };
-          if (c3.length) {
+          const pairs = [[0, 1], [0, 2], [1, 2]]
+            .filter(([i, j]) => sharedMultiples(tables[i], tables[j]).length > 0);
+          const doublePairs = pairs
+            .filter(([i, j]) => sharedMultiples(tables[i], tables[j]).length >= 2);
+          // middle tables that can bridge to both other tables at two distinct cells
+          const chainMids = [0, 1, 2].filter(mid => {
+            const [p, q] = [0, 1, 2].filter(x => x !== mid);
+            const sp = sharedMultiples(tables[mid], tables[p]);
+            const sq = sharedMultiples(tables[mid], tables[q]);
+            return sp.length > 0 && sq.length > 0 && (sp.length > 1 || sq.length > 1 || sp[0] !== sq[0]);
+          });
+
+          let mode = attempt < 65 ? targetMode3
+            : (chainMids.length && Math.random() < 0.45 ? 'chain2'
+              : (pairs.length ? 'one2' : 'three'));
+          if (mode === 'three' && !c3.length) mode = chainMids.length ? 'chain2' : 'one2';
+          if (mode === 'chain2' && !chainMids.length) mode = pairs.length ? 'one2' : 'three';
+          if (mode === 'double2' && !doublePairs.length) mode = chainMids.length ? 'chain2' : 'one2';
+
+          if (mode === 'chain2' && chainMids.length) {
+            const mid = chainMids[Math.floor(Math.random() * chainMids.length)];
+            const [p, q] = [0, 1, 2].filter(x => x !== mid);
+            const sp = sharedMultiples(tables[mid], tables[p]);
+            const sq = sharedMultiples(tables[mid], tables[q]);
+            const mP = sp[Math.floor(Math.random() * sp.length)];
+            const sqDiff = sq.filter(m => m !== mP);
+            if (!sqDiff.length) continue;
+            const mQ = sqDiff[Math.floor(Math.random() * sqDiff.length)];
+            paths[mid] = genPathAnywhere(new Set());
+            if (!paths[mid]) continue;
+            const X1 = paths[mid][mP / tables[mid] - 1];
+            const X2 = paths[mid][mQ / tables[mid] - 1];
+            const used = new Set(paths[mid].map(key));
+            const usedP = new Set(used); usedP.delete(key(X1));
+            paths[p] = pathThrough(mP / tables[p] - 1, X1, usedP);
+            if (!paths[p]) continue;
+            paths[p].forEach(pt => used.add(key(pt)));
+            const usedQ = new Set(used); usedQ.delete(key(X2));
+            paths[q] = pathThrough(mQ / tables[q] - 1, X2, usedQ);
+            if (!paths[q]) continue;
+          } else if (mode === 'double2' && doublePairs.length) {
+            const [i, j] = doublePairs[Math.floor(Math.random() * doublePairs.length)];
+            const free = [0, 1, 2].find(x => x !== i && x !== j);
+            const cands = sharedMultiples(tables[i], tables[j]);
+            paths[i] = genPathAnywhere(new Set());
+            if (!paths[i]) continue;
+            const i1 = Math.floor(Math.random() * (cands.length - 1));
+            const i2 = i1 + 1 + Math.floor(Math.random() * (cands.length - 1 - i1));
+            const m1 = cands[i1], m2 = cands[i2];
+            const X1 = paths[i][m1 / tables[i] - 1], X2 = paths[i][m2 / tables[i] - 1];
+            const foreign = new Set(paths[i].map(key));
+            foreign.delete(key(X1)); foreign.delete(key(X2));
+            paths[j] = pathThroughTwo(m1 / tables[j] - 1, X1, m2 / tables[j] - 1, X2, foreign);
+            if (!paths[j]) continue;
+            const used = new Set([...paths[i].map(key), ...paths[j].map(key)]);
+            paths[free] = genPathAnywhere(used);
+            if (!paths[free]) continue;
+          } else if (mode === 'three' && c3.length) {
+            const X = {
+              r: Math.floor(Math.random() * ROWS),
+              c: Math.floor(Math.random() * COLS)
+            };
+            const used = new Set();
+            const place = (ti, at) => {
+              paths[ti] = pathThrough(at, X, new Set(used));
+              if (paths[ti])
+                paths[ti].forEach(p => { if (!(p.r === X.r && p.c === X.c)) used.add(key(p)); });
+              return !!paths[ti];
+            };
             const mX = c3[Math.floor(Math.random() * c3.length)];
             const pins = [mX / A - 1, mX / B - 1, mX / C - 1];
             if (!place(0, pins[0]) || !place(1, pins[1]) || !place(2, pins[2])) continue;
-          } else {
-            // pairwise share for a random pair, third path free
-            const pairs = [[0, 1], [0, 2], [1, 2]]
-              .filter(([i, j]) => lcm(tables[i], tables[j]) <= 12 * Math.min(tables[i], tables[j]));
+          } else if (pairs.length) {
+            // one 2-way crossover for a random pair, third path free
+            const X = {
+              r: Math.floor(Math.random() * ROWS),
+              c: Math.floor(Math.random() * COLS)
+            };
+            const used = new Set();
+            const place = (ti, at) => {
+              paths[ti] = pathThrough(at, X, new Set(used));
+              if (paths[ti])
+                paths[ti].forEach(p => { if (!(p.r === X.r && p.c === X.c)) used.add(key(p)); });
+              return !!paths[ti];
+            };
             const [i, j] = pairs[Math.floor(Math.random() * pairs.length)];
-            const step = lcm(tables[i], tables[j]), cap = 12 * Math.min(tables[i], tables[j]);
-            const cands = [];
-            for (let m = step; m <= cap; m += step) cands.push(m);
+            const cands = sharedMultiples(tables[i], tables[j]);
             const mX = cands[Math.floor(Math.random() * cands.length)];
             const free = [0, 1, 2].find(x => x !== i && x !== j);
             if (!place(i, mX / tables[i] - 1)) continue;
             if (!place(j, mX / tables[j] - 1)) continue;
+            used.add(key(X));
             paths[free] = genPathAnywhere(used);
             if (!paths[free]) continue;
+          } else {
+            const used = new Set();
+            for (let ti = 0; ti < 3; ti++) {
+              paths[ti] = genPathAnywhere(used);
+              if (!paths[ti]) break;
+              paths[ti].forEach(p => used.add(key(p)));
+            }
           }
         }
-        if (!paths.every(p => p)) continue;
+        if (paths.length !== tables.length || !paths.every(p => p)) continue;
 
         onPath = paths.map(p => {
           const m = new Map();

@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Pattern Snake — Umbrella</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    #chipRow.locked {
+      opacity: .35;
+      pointer-events: none;
+    }
+
+    #doneBar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 10px 18px;
+      z-index: 12;
+      color: #cfd8e0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease;
+    }
+
+    #doneBar.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #doneBar .prompt {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    #doneBar button {
+      font-size: 17px;
+      font-family: inherit;
+      padding: 10px 24px;
+      border-radius: 12px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+    }
+
+    #doneBar button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .88);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="chipRow"></div>
+
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Turn upright</div>
+    <div class="sub">The square is far easier to read in portrait — the
+      game waits for you.</div>
+  </div>
+
+  <div id="doneBar">
+    <span class="prompt">Another pattern?</span>
+    <button id="againYes">Yes</button>
+    <button class="quiet" id="againNo">No</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const BOARD_PAD = 16;         // css px clear space around the board
+    const TOP_RESERVE = 88;       // clearance below the top-left numeral & menu button
+    const BOT_RESERVE = 108;      // room for the table chips / prompt bar
+    const SNAKE_STRIP_FRAC = 1.85; // height of the top snake strip (in grid cells)
+    const CELL_GAP = 1.5;         // css px grid-line gap between cells
+    const NUM_FONT = 0.38;        // cell numeral size as a fraction of cell
+    const PALE_ALPHA = 0.48;      // opacity of multiples above 12×t
+    const SOLID_ALPHA = 1.0;      // opacity of multiples 1×t .. 12×t
+    const FAINT_SOLID = 0.28;     // faint pattern left on 1×..12× squares after collection
+    const FAINT_PALE = 0.16;      // faint pattern left on >12× squares during play
+    const DEMO_HOLD_S = 2.0;      // s each random table's pattern shows before a choice is made
+    const DEMO_FADE_S = 0.38;     // fade-in / fade-out envelope inside DEMO_HOLD_S
+    const DEPOSIT_SPEED = 3.8;    // cells/s while depositing 1×t .. 12×t
+    const UPPER_SPEED = 6.2;      // cells/s while lone head paints >12×t
+    const PRE_NUM_FADE_S = 0.8;   // s to fade up numbers on coloured squares after distribution
+    const NUM_HALO_CYCLE_S = 2.2; // s between intermittent halo pulses on top-left numeral
+    const NUM_HALO_ON_S = 1.3;    // s duration of each halo pulse on top-left numeral
+    const COLLECT_SPEED = 5.4;    // cells/s while head wanders back collecting 1×..12×
+    const PARK_SPEED = 5.0;       // cells/s while completed snake parks above the square
+    const WRIG_AMP = 0.50;        // lateral wriggle amplitude (in cells)
+    const SEG_DIAM = 0.78;        // snake segment diameter as a fraction of cell
+    const SEG_SPACE = 0.75;       // trail spacing between segments (of cell)
+    const POP_SECS = 0.35;        // brief cell pulse when colour is deposited/collected
+    const FLOAT_SECS = 2.2;       // duration of the lone head's playful float at the end
+    const SLIDE_SECS = 0.26;      // s for tail segments to close a gap after a drop
+    const RETURN_SECS = 0.32;     // s for an unplaced segment to slide quietly home
+    const SNAP_TOL = 0.75;        // drop acceptance radius (in cells)
+    const HINT_FIRST_S = 1.5;     // s after snake parks before the first pair-glow hint
+    const HINT_IDLE_S = 6.5;      // s of inactivity before another pair-glow hint
+    const HINT_DUR_S = 3.2;       // duration of one synchronous pair-glow burst
+    const HINT_PULSE_S = 0.85;    // period of the synchronous glow pulse
+    const SEQ_FADE_S = 0.9;       // s to fade up the sequence numbers over colour
+    const HOLD_BEFORE_REST = 1.0; // s pause before the unpatterned numbers fade in
+    const REST_FADE_S = 1.5;      // s for the remaining grid numbers to fade in
+    const BLINK_MIN = 2.2, BLINK_MAX = 5.2, BLINK_SECS = 0.26;
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bX = 0, bY = 0, bS = 0, cell = 0;
+    let stripY = 0;               // vertical centre of the top snake strip (above the 100-square)
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - BOARD_PAD;
+      // SNAKE_STRIP_FRAC rows ABOVE the 10×10 grid for the resting snake
+      cell = Math.min(availW / 10, availH / (10 + SNAKE_STRIP_FRAC));
+      bS = cell * 10;
+      const totalH = cell * (10 + SNAKE_STRIP_FRAC);
+      bX = (W - bS) / 2;
+      const top0 = TOP_RESERVE + (availH - totalH) / 2;
+      stripY = top0 + cell * (SNAKE_STRIP_FRAC * 0.48);
+      bY = top0 + cell * SNAKE_STRIP_FRAC;
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    resize();
+
+    /* ---------- orientation guard (handhelds only) ---------- */
+    const handheld = matchMedia('(pointer: coarse)').matches;
+    const rotOverlay = document.getElementById('rotOverlay');
+    let paused = false;
+    function checkOrientation() {
+      const portrait = H >= W;
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', !paused);
+    }
+    window.addEventListener('orientationchange', () => {
+      checkOrientation();
+      setTimeout(checkOrientation, 350);
+    });
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    function cellCentre(v) {
+      const i = v - 1;
+      return {
+        x: bX + ((i % 10) + 0.5) * cell,
+        y: bY + (Math.floor(i / 10) + 0.5) * cell
+      };
+    }
+
+    /* Slot positions (0 = head on left, 1..12 = tail segments to the right)
+       along a gentle S-wave in the strip ABOVE the 10×10 grid */
+    function slotPos(slotIdx) {
+      const stepX = (bS - cell * 0.96) / 12;
+      const x = bX + cell * 0.48 + slotIdx * stepX;
+      const y = stripY + Math.sin(slotIdx * 0.65) * cell * 0.22;
+      return { x, y };
+    }
+
+    /* ---------- state ----------
+       choose | run | waitCollect | collect | parkTop | play | endFloat | reveal | done */
+    let table = 0;
+    let state = 'choose';
+    let demoTable = 0;          // random table currently previewing while state === 'choose'
+    let demoT0 = 0;             // start timestamp of current 2s demo preview
+    let waitCollectT0 = 0;      // timestamp when distribution finished and numbers began fading up
+    let collectStartT0 = 0;     // timestamp when user clicked top-left numeral to start collection
+    let targets = [];           // ascending multiples of table from 1×t up to ≤100
+    let collectTargets = [];    // randomised bottom-to-top order of 1×t..12×t to collect back
+    let targetIdx = 0;          // index in targets / collectTargets currently being approached
+    let segsLeft = 12;          // body segments attached to head during 'run' / 'collect' / 'parkTop'
+    let painted = new Map();    // v -> { kind: 'pale' | 'solid' | 'faint', at: now }
+    let placed = new Map();     // v -> placedAt timestamp (segments dropped by user)
+    let head = { x: 0, y: 0 };
+    let heading = 0;
+    let trail = [];
+    let segFrom = null, segTo = null;
+    let segDist = 0, segProg = 0;
+    let parkFrom = null, parkApproach = true;
+    let parkU = 12;             // u from count down to 0 along slotPos(u)
+    let bounceT0 = 0;
+    let bounceStart = { x: 0, y: 0, phase: 0, amp1: 1, amp2: 1, driftX: 0 };
+    let playStartT = 0;
+    let revealT0 = 0;
+    let doneShown = false;
+    let nextBlinkAt = 0, blinkT0 = -1;
+    let gaze = Math.PI / 2;
+
+    let playSegs = [];
+    let dragSeg = null;
+    let dragOff = { x: 0, y: 0 };
+    let lastAct = 0;
+    let hintFirstDone = false;
+    let hintV = -1;
+    let hintT0 = 0;
+
+    const chipRow = document.getElementById('chipRow');
+    const doneBar = document.getElementById('doneBar');
+
+    function pushTrail(p) {
+      const l = trail[trail.length - 1];
+      const prev = trail[trail.length - 2];
+      if (trail.length < 2 || Math.hypot(p.x - prev.x, p.y - prev.y) >= 2.5)
+        trail.push({ x: p.x, y: p.y });
+      else { l.x = p.x; l.y = p.y; }
+      if (trail.length > 3500) trail.splice(0, trail.length - 3500);
+    }
+
+    function sampleTrail(d) {
+      let acc = 0;
+      for (let i = trail.length - 1; i > 0; i--) {
+        const a = trail[i], b = trail[i - 1];
+        const s = Math.hypot(a.x - b.x, a.y - b.y);
+        if (acc + s >= d) {
+          const f = s ? (d - acc) / s : 0;
+          return {
+            x: a.x + (b.x - a.x) * f,
+            y: a.y + (b.y - a.y) * f
+          };
+        }
+        acc += s;
+      }
+      const t0 = trail[0] || { x: 0, y: 0 };
+      return { x: t0.x, y: t0.y };
+    }
+
+    /* Build a randomised bottom-to-top collection order for the 1×t..count×t
+       solid squares so the lone head wanders playfully around the grid
+       picking them back up, finishing near the top-right ready to park
+       in the strip above the 100-square. */
+    function buildCollectOrder(t, count) {
+      const list = [];
+      for (let i = 1; i <= count; i++) list.push(t * i);
+      // Score each value by its row (bottom rows first) plus random jitter
+      // of ±2.5 rows so it darts across rows rather than marching in order
+      const scored = list.map(v => {
+        const row = Math.floor((v - 1) / 10);
+        const col = (v - 1) % 10;
+        const isTopRight = row <= 1 && col >= 4;
+        const score = isTopRight ? -20 + Math.random() : row + (Math.random() - 0.5) * 4.8;
+        return { v, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      return scored.map(x => x.v);
+    }
+
+    function buildPlaySnake(now) {
+      const count = Math.min(12, Math.floor(100 / table));
+      playSegs = [];
+      for (let i = 1; i <= count; i++) {
+        playSegs.push({
+          v: table * i,
+          slot: i,
+          fromSlot: i,
+          slideT0: 0,
+          state: 'idle',
+          x: 0, y: 0,
+          rx: 0, ry: 0,
+          retT0: 0
+        });
+      }
+      dragSeg = null;
+      playStartT = now;
+      lastAct = now;
+      hintFirstDone = false;
+      hintV = -1;
+      hintT0 = 0;
+      gaze = Math.PI / 2;
+    }
+
+    function beginEndFloat(fromX, fromY, now) {
+      bounceT0 = now;
+      const toCenter = (bX + bS * (0.35 + Math.random() * 0.3)) - fromX;
+      bounceStart = {
+        x: fromX,
+        y: fromY,
+        phase: Math.random() * Math.PI * 2,
+        amp1: (0.8 + Math.random() * 0.8) * (Math.random() < 0.5 ? -1 : 1),
+        amp2: (0.4 + Math.random() * 0.5) * (Math.random() < 0.5 ? -1 : 1),
+        driftX: toCenter
+      };
+      blinkT0 = -1;
+      nextBlinkAt = now + 180;
+    }
+
+    function startTable(t, now) {
+      const tNow = now !== undefined ? now : performance.now();
+      table = t;
+      painted.clear();
+      placed.clear();
+      targets = [];
+      for (let v = t; v <= 100; v += t) {
+        targets.push(v);
+      }
+      const count = Math.min(12, targets.length);
+      segsLeft = count;
+      collectTargets = buildCollectOrder(t, count);
+      targetIdx = 0;
+      const firstP = cellCentre(targets[0]);
+      // Enter at the top-left of the grid, slithering into 1×t
+      const startX = bX - cell * 0.5;
+      const startY = bY - cell * 0.4;
+      head = { x: startX, y: startY };
+      heading = Math.atan2(firstP.y - startY, firstP.x - startX);
+      trail = [];
+      const sp = cell * SEG_SPACE;
+      for (let i = segsLeft; i >= 0; i--) {
+        trail.push({
+          x: startX - Math.cos(heading) * i * sp,
+          y: startY - Math.sin(heading) * i * sp
+        });
+      }
+      segFrom = { x: startX, y: startY };
+      segTo = firstP;
+      segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+      segProg = 0;
+      doneShown = false;
+      state = 'run';
+      nextBlinkAt = tNow + 1500 + Math.random() * 2000;
+      blinkT0 = -1;
+      syncChips();
+      chipRow.classList.remove('hidden');
+      chipRow.classList.add('locked');
+      doneBar.classList.remove('show');
+    }
+
+    /* ---------- chips & bottom bar ---------- */
+    const chipBtns = [];
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('pointerdown', (e) => {
+        if (state !== 'choose') return;
+        e.preventDefault();
+        startTable(t);
+      });
+      b.addEventListener('click', () => {
+        if (state !== 'choose') return;
+        startTable(t);
+      });
+      chipBtns.push(b);
+      chipRow.appendChild(b);
+    }
+    function syncChips(demoT, demoAlpha) {
+      chipBtns.forEach((b, i) => {
+        const t = i + 2;
+        if (state === 'choose') {
+          b.classList.remove('on');
+          if (t === demoT && demoAlpha > 0.02) {
+            const col = tableColour(t);
+            b.style.borderColor = col;
+            b.style.background = col;
+            b.style.color = '#ffffff';
+            b.style.boxShadow = '0 0 ' + Math.round(14 * demoAlpha) + 'px ' + col;
+          } else {
+            b.style.borderColor = '';
+            b.style.background = '';
+            b.style.color = '';
+            b.style.boxShadow = '';
+          }
+        } else {
+          b.style.borderColor = '';
+          b.style.background = '';
+          b.style.color = '';
+          b.style.boxShadow = '';
+          b.classList.toggle('on', t === table);
+        }
+      });
+    }
+
+    function enterChoose(now) {
+      const tNow = now !== undefined ? now : performance.now();
+      doneBar.classList.remove('show');
+      chipRow.classList.remove('hidden', 'locked');
+      painted.clear();
+      placed.clear();
+      playSegs = [];
+      table = 0;
+      demoTable = 0;
+      demoT0 = tNow - DEMO_HOLD_S * 1000; // trigger first random demo immediately
+      state = 'choose';
+      syncChips(0, 0);
+    }
+
+    document.getElementById('againYes').addEventListener('click', () => {
+      enterChoose(performance.now() + timeOffset);
+    });
+    document.getElementById('againNo').addEventListener('click', () => {
+      location.href = 'index.html';
+    });
+
+    /* ---------- current rendered position of a playSeg ---------- */
+    function segCurrentPos(sg, now) {
+      if (sg.state === 'drag') return { x: sg.x, y: sg.y };
+      let sIdx = sg.slot;
+      if (sg.slideT0 > 0) {
+        const sk = Math.min(1, (now - sg.slideT0) / 1000 / SLIDE_SECS);
+        const se = sk * sk * (3 - 2 * sk);
+        sIdx = sg.fromSlot + (sg.slot - sg.fromSlot) * se;
+      }
+      const pos = slotPos(sIdx);
+      let x = pos.x, y = pos.y;
+
+      if (sg.state === 'return') {
+        const rk = Math.min(1, (now - sg.retT0) / 1000 / RETURN_SECS);
+        const re = 1 - Math.pow(1 - rk, 3);
+        x = sg.rx + (x - sg.rx) * re;
+        y = sg.ry + (y - sg.ry) * re;
+      }
+      return { x, y };
+    }
+
+    /* ---------- pointer input for dragging segments ---------- */
+    function pt(e) {
+      const r = cv.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    /* Top-left numeral position + hit radius */
+    function topNumPos() {
+      return { x: Math.max(36, bX + cell * 0.55), y: 44, r: Math.max(38, cell * 1.15) };
+    }
+
+    function beginCollect(now) {
+      if (state !== 'waitCollect') return;
+      state = 'collect';
+      collectStartT0 = now;
+      targetIdx = 0;
+      segFrom = { x: head.x, y: head.y };
+      segTo = cellCentre(collectTargets[0]);
+      segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+      segProg = 0;
+    }
+
+    cv.addEventListener('pointerdown', (e) => {
+      if (paused) return;
+      const p = pt(e);
+      const now = performance.now() + timeOffset;
+      if (state === 'waitCollect') {
+        const tn = topNumPos();
+        if (Math.hypot(p.x - tn.x, p.y - tn.y) <= tn.r * 1.35) {
+          beginCollect(now);
+          e.preventDefault();
+        }
+        return;
+      }
+      if (state !== 'play') return;
+      lastAct = now;
+      hintV = -1;
+      const hitR = cell * SEG_DIAM * 0.68;
+      let best = null, bestD = hitR;
+      for (const sg of playSegs) {
+        if (sg.state === 'drag') continue;
+        const pos = segCurrentPos(sg, now);
+        const d = Math.hypot(p.x - pos.x, p.y - pos.y);
+        if (d < bestD) { bestD = d; best = { sg, pos }; }
+      }
+      if (best) {
+        dragSeg = best.sg;
+        dragSeg.state = 'drag';
+        dragOff.x = best.pos.x - p.x;
+        dragOff.y = best.pos.y - p.y;
+        dragSeg.x = best.pos.x;
+        dragSeg.y = best.pos.y;
+        cv.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      }
+    });
+
+    cv.addEventListener('pointermove', (e) => {
+      if (!dragSeg) return;
+      lastAct = performance.now() + timeOffset;
+      const p = pt(e);
+      dragSeg.x = p.x + dragOff.x;
+      dragSeg.y = p.y + dragOff.y;
+    });
+
+    function releaseDrag() {
+      if (!dragSeg) return;
+      const sg = dragSeg;
+      dragSeg = null;
+      const now = performance.now() + timeOffset;
+      lastAct = now;
+      hintV = -1;
+
+      const targetP = cellCentre(sg.v);
+      if (Math.hypot(sg.x - targetP.x, sg.y - targetP.y) <= cell * SNAP_TOL) {
+        placed.set(sg.v, now);
+        const removedIdx = playSegs.indexOf(sg);
+        if (removedIdx >= 0) {
+          playSegs.splice(removedIdx, 1);
+          for (let i = 0; i < playSegs.length; i++) {
+            const item = playSegs[i];
+            const newSlot = i + 1;
+            if (item.slot !== newSlot) {
+              item.fromSlot = item.slot;
+              item.slot = newSlot;
+              item.slideT0 = now;
+            }
+          }
+        }
+        if (playSegs.length === 0) {
+          const hp = slotPos(0);
+          head.x = hp.x;
+          head.y = hp.y;
+          beginEndFloat(hp.x, hp.y, now);
+          state = 'endFloat';
+        }
+      } else {
+        sg.state = 'return';
+        sg.rx = sg.x;
+        sg.ry = sg.y;
+        sg.retT0 = now;
+      }
+    }
+    cv.addEventListener('pointerup', releaseDrag);
+    cv.addEventListener('pointercancel', releaseDrag);
+    cv.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+    /* ---------- step ---------- */
+    function stepWriggleLeg() {
+      const u = Math.max(0, Math.min(1, segProg / segDist));
+      const dx = segTo.x - segFrom.x, dy = segTo.y - segFrom.y;
+      const baseAng = Math.atan2(dy, dx);
+      const nx = -dy / segDist, ny = dx / segDist;
+      const waves = segDist > cell * 3.5 ? 2 : 1;
+      const arch = Math.sin(u * Math.PI) *
+        Math.sin(u * Math.PI * waves + targetIdx * 1.7) *
+        (WRIG_AMP * cell * (segDist > cell * 3.5 ? 1.3 : 0.95));
+      const px = segFrom.x + dx * u + nx * arch;
+      const py = segFrom.y + dy * u + ny * arch;
+      if (Math.hypot(px - head.x, py - head.y) > 0.2) {
+        heading = Math.atan2(py - head.y, px - head.x);
+      } else {
+        heading = baseAng;
+      }
+      head.x = px;
+      head.y = py;
+      pushTrail(head);
+    }
+
+    function step(dt, now) {
+      if (paused) return;
+      if (state === 'choose') {
+        if (!demoTable || (now - demoT0) / 1000 >= DEMO_HOLD_S) {
+          // Pick a new random table (2..12) different from the last one
+          const pool = [];
+          for (let t = 2; t <= 12; t++) {
+            if (t !== demoTable) pool.push(t);
+          }
+          demoTable = pool[Math.floor(Math.random() * pool.length)];
+          demoT0 = now;
+        }
+        return;
+      }
+      if (state === 'run') {
+        const curV = targets[targetIdx];
+        const isSolid = curV <= table * 12;
+        const spd = (isSolid ? DEPOSIT_SPEED : UPPER_SPEED) * cell;
+        segProg += spd * dt;
+
+        while (segProg >= segDist && state === 'run') {
+          const v = targets[targetIdx];
+          const solid = v <= table * 12;
+          painted.set(v, { kind: solid ? 'solid' : 'pale', at: now });
+          if (solid && segsLeft > 0) segsLeft--;
+          const overshoot = segProg - segDist;
+          targetIdx++;
+          if (targetIdx >= targets.length) {
+            // Reached the bottom of the grid as a lone head — step just
+            // below the bottom edge so every numbered cell is uncovered,
+            // fade up the numbers on the coloured squares, and wait for the
+            // user to tap the top-left table numeral (with its intermittent
+            // halo) to initiate collection!
+            state = 'waitCollect';
+            waitCollectT0 = now;
+            const lastC = cellCentre(v);
+            head.x = lastC.x;
+            head.y = bY + bS + cell * 0.52;
+            const tn = topNumPos();
+            heading = Math.atan2(tn.y - head.y, tn.x - head.x);
+            return;
+          }
+          segFrom = cellCentre(v);
+          segTo = cellCentre(targets[targetIdx]);
+          segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+          segProg = overshoot;
+        }
+        if (state === 'run') stepWriggleLeg();
+      } else if (state === 'collect') {
+        const spd = COLLECT_SPEED * cell;
+        segProg += spd * dt;
+
+        while (segProg >= segDist && state === 'collect') {
+          const v = collectTargets[targetIdx];
+          // Picking up this solid square softens it to the faint pattern trace
+          // and adds one segment back onto the snake's tail!
+          painted.set(v, { kind: 'faint', at: now });
+          segsLeft++;
+          const overshoot = segProg - segDist;
+          targetIdx++;
+          if (targetIdx >= collectTargets.length) {
+            // All 12 segments collected — glide directly up into the resting
+            // strip above the 100-square!
+            state = 'parkTop';
+            const count = Math.min(12, Math.floor(100 / table));
+            parkFrom = cellCentre(v);
+            parkU = count;
+            const entryPt = slotPos(count);
+            segFrom = parkFrom;
+            segTo = entryPt;
+            segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+            segProg = 0;
+            parkApproach = true;
+            return;
+          }
+          segFrom = cellCentre(v);
+          segTo = cellCentre(collectTargets[targetIdx]);
+          segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+          segProg = overshoot;
+        }
+        if (state === 'collect') stepWriggleLeg();
+      } else if (state === 'parkTop') {
+        const spd = PARK_SPEED * cell;
+        if (parkApproach) {
+          segProg += spd * dt;
+          if (segProg >= segDist) {
+            parkApproach = false;
+            head.x = segTo.x;
+            head.y = segTo.y;
+            pushTrail(head);
+          } else {
+            const u = segProg / segDist;
+            const px = segFrom.x + (segTo.x - segFrom.x) * u;
+            const py = segFrom.y + (segTo.y - segFrom.y) * u;
+            heading = Math.atan2(py - head.y, px - head.x);
+            head.x = px;
+            head.y = py;
+            pushTrail(head);
+          }
+        } else {
+          // Slither leftward along slotPos(u) from u=count down to u=0 so the
+          // entire 12-segment body lays itself right onto slotPos(1..count)
+          const stepU = (spd / (cell * SEG_SPACE)) * dt;
+          parkU = Math.max(0, parkU - stepU);
+          const pos = slotPos(parkU);
+          if (Math.hypot(pos.x - head.x, pos.y - head.y) > 0.1) {
+            heading = Math.atan2(pos.y - head.y, pos.x - head.x);
+          }
+          head.x = pos.x;
+          head.y = pos.y;
+          pushTrail(head);
+          if (parkU <= 1e-4) {
+            state = 'play';
+            buildPlaySnake(now);
+          }
+        }
+      } else if (state === 'play') {
+        for (const sg of playSegs) {
+          if (sg.state === 'return' && (now - sg.retT0) / 1000 >= RETURN_SECS) {
+            sg.state = 'idle';
+          }
+        }
+        if (hintV > 0 && (now - hintT0) / 1000 >= HINT_DUR_S) {
+          hintV = -1;
+          lastAct = now;
+        }
+        if (!dragSeg && hintV < 0 && playSegs.length > 0) {
+          const waitS = hintFirstDone ? HINT_IDLE_S : HINT_FIRST_S;
+          if ((now - lastAct) / 1000 >= waitS) {
+            const pick = !hintFirstDone && playSegs.length >= 3
+              ? playSegs[2]
+              : playSegs[Math.floor(Math.random() * playSegs.length)];
+            hintV = pick.v;
+            hintT0 = now;
+            hintFirstDone = true;
+          }
+        }
+      } else if (state === 'endFloat') {
+        const age = (now - bounceT0) / 1000;
+        const k = age / FLOAT_SECS;
+        if (k >= 1) {
+          state = 'reveal';
+          revealT0 = now;
+          return;
+        }
+        if (age > FLOAT_SECS * 0.45 && age < FLOAT_SECS * 0.55 && blinkT0 < 0 && nextBlinkAt > now + 300) {
+          nextBlinkAt = now;
+        }
+        // Playful buoyant float across and off the top strip with a blink or two
+        const sway = Math.sin(k * Math.PI * 2.4 + bounceStart.phase) * bounceStart.amp1 * cell * 0.9;
+        const bob = Math.sin(k * Math.PI * 4) * cell * 0.35;
+        const nx = bounceStart.x + bounceStart.driftX * k + sway;
+        const ny = bounceStart.y - cell * 1.8 * (k * k) + bob;
+        heading = -Math.PI / 2 + Math.cos(k * Math.PI * 2.4 + bounceStart.phase) * 0.6;
+        head.x = nx;
+        head.y = ny;
+      } else if (state === 'reveal') {
+        const age = (now - revealT0) / 1000;
+        if (!doneShown && age >= SEQ_FADE_S + HOLD_BEFORE_REST + REST_FADE_S) {
+          doneShown = true;
+          state = 'done';
+          chipRow.classList.add('hidden');
+          doneBar.classList.add('show');
+        }
+      }
+    }
+
+    /* ---------- draw ---------- */
+    function blinkScale(now) {
+      if (blinkT0 < 0) {
+        if (now < nextBlinkAt) return 1;
+        blinkT0 = now;
+      }
+      const k = (now - blinkT0) / 1000 / BLINK_SECS;
+      if (k >= 1) {
+        blinkT0 = -1;
+        nextBlinkAt = now + (BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN)) * 1000;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+
+    function drawHead(x, y, ang, r, now) {
+      const hue = (table * 31 + 200) % 360;
+      const g = ctx.createRadialGradient(
+        x - r * 0.33, y - r * 0.33, r * 0.2, x, y, r);
+      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+      ctx.stroke();
+
+      const ex = Math.cos(ang), ey = Math.sin(ang);
+      const px = -ey, py = ex;
+      const sq = blinkScale(now);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(
+          x + ex * r * 0.38 + px * side * r * 0.36,
+          y + ey * r * 0.38 + py * side * r * 0.36,
+          r * 0.16, Math.max(r * 0.16 * sq, r * 0.03), ang, 0, Math.PI * 2);
+        ctx.fillStyle = '#101418';
+        ctx.fill();
+      }
+    }
+
+    /* Draw the table numeral in the top-left corner at completion-animation
+       scale, tinted in the table's colour with an intermittent cue halo
+       while waiting for the user to tap it */
+    function drawTopNumeral(tbl, alpha, now) {
+      if (!tbl || alpha <= 0.01) return;
+      const numSize = Math.round(cell * 1.05 * (tbl >= 10 ? 0.85 : 1.05));
+      const tn = topNumPos();
+      const nx = tn.x, ny = tn.y;
+      const hue = (tbl * 31 + 200) % 360;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Intermittent halo cue while waiting for user to tap top-left numeral
+      let pulse = 0;
+      if (state === 'waitCollect' && now !== undefined) {
+        const waitAge = (now - waitCollectT0) / 1000;
+        if (waitAge >= PRE_NUM_FADE_S * 0.6) {
+          const cyc = ((waitAge - PRE_NUM_FADE_S * 0.6) % NUM_HALO_CYCLE_S);
+          if (cyc < NUM_HALO_ON_S) {
+            pulse = Math.sin((cyc / NUM_HALO_ON_S) * Math.PI);
+          }
+        }
+      }
+
+      const haloR = numSize * (0.95 + 0.55 * pulse);
+      const g = ctx.createRadialGradient(nx, ny, haloR * 0.12, nx, ny, haloR);
+      if (pulse > 0.01) {
+        g.addColorStop(0, 'rgba(255,245,205,' + (0.38 + 0.48 * pulse) + ')');
+        g.addColorStop(0.55, 'hsla(' + hue + ',75%,62%,' + (0.28 + 0.38 * pulse) + ')');
+      } else {
+        g.addColorStop(0, 'hsla(' + hue + ',70%,60%,0.38)');
+      }
+      g.addColorStop(1, 'hsla(' + hue + ',70%,60%,0)');
+      ctx.beginPath();
+      ctx.arc(nx, ny, haloR, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      if (pulse > 0.02) {
+        ctx.beginPath();
+        ctx.arc(nx, ny, numSize * (0.68 + 0.22 * pulse), 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,245,205,' + (0.75 * pulse) + ')';
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+      }
+
+      const scale = 1 + 0.12 * pulse;
+      ctx.font = '800 ' + Math.round(numSize * scale) + 'px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = pulse > 0.05 ? 'hsl(' + hue + ',78%,72%)' : 'hsl(' + hue + ',68%,62%)';
+      ctx.fillText(tbl, nx, ny);
+      ctx.restore();
+    }
+
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+
+      if (state === 'choose') {
+        const da = (now - demoT0) / 1000;
+        const env = (da >= 0 && da < DEMO_HOLD_S)
+          ? Math.min(1, da / DEMO_FADE_S, (DEMO_HOLD_S - da) / DEMO_FADE_S)
+          : 0;
+        syncChips(demoTable, env);
+        const dCol = demoTable ? tableColour(demoTable) : '#4da3ff';
+
+        for (let r = 0; r < 10; r++) {
+          for (let c = 0; c < 10; c++) {
+            const v = r * 10 + c + 1;
+            const x = bX + c * cell;
+            const y = bY + r * cell;
+            ctx.fillStyle = '#1a2430';
+            ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+              cell - CELL_GAP, cell - CELL_GAP);
+
+            if (demoTable && v % demoTable === 0 && env > 0.01) {
+              const isSolid = v <= demoTable * 12;
+              ctx.globalAlpha = env * (isSolid ? SOLID_ALPHA : PALE_ALPHA);
+              ctx.fillStyle = dCol;
+              ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+                cell - CELL_GAP, cell - CELL_GAP);
+              ctx.globalAlpha = 1;
+            }
+          }
+        }
+        drawTopNumeral(demoTable, env, now);
+        return;
+      }
+
+      drawTopNumeral(table, 1, now);
+
+      let paleDimK = 0;
+      if (state === 'play' || state === 'parkTop' || state === 'endFloat') {
+        paleDimK = 1;
+      } else if (state === 'reveal' || state === 'done') {
+        const ra = (now - revealT0) / 1000;
+        paleDimK = Math.max(0, 1 - ra / SEQ_FADE_S);
+      }
+
+      let seqNumAlpha = 0, restNumAlpha = 0;
+      if (state === 'waitCollect') {
+        const wa = (now - waitCollectT0) / 1000;
+        seqNumAlpha = Math.max(0, Math.min(1, wa / PRE_NUM_FADE_S));
+      } else if (state === 'collect') {
+        // Fade the preview numbers out over 0.35s once collection begins
+        const ca = (now - collectStartT0) / 1000;
+        seqNumAlpha = Math.max(0, 1 - ca / 0.35);
+      } else if (state === 'reveal' || state === 'done') {
+        const age = (now - revealT0) / 1000;
+        seqNumAlpha = Math.max(0, Math.min(1, age / SEQ_FADE_S));
+        restNumAlpha = Math.max(0, Math.min(1,
+          (age - SEQ_FADE_S - HOLD_BEFORE_REST) / REST_FADE_S));
+      }
+
+      const col = tableColour(table);
+      const hue = (table * 31 + 200) % 360;
+
+      let hintPulse = 0;
+      if (state === 'play' && hintV > 0) {
+        const ha = (now - hintT0) / 1000;
+        if (ha >= 0 && ha < HINT_DUR_S) {
+          const env = Math.min(1, ha / 0.35, (HINT_DUR_S - ha) / 0.45);
+          const wave = 0.5 - 0.5 * Math.cos((ha / HINT_PULSE_S) * Math.PI * 2);
+          hintPulse = env * (0.25 + 0.75 * wave);
+        }
+      }
+
+      // 10 × 10 grid
+      for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 10; c++) {
+          const v = r * 10 + c + 1;
+          const x = bX + c * cell;
+          const y = bY + r * cell;
+          const p = painted.get(v);
+          const plAt = placed.get(v);
+          const isHintCell = state === 'play' && v === hintV && hintPulse > 0;
+
+          ctx.fillStyle = '#1a2430';
+          ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+            cell - CELL_GAP, cell - CELL_GAP);
+
+          if (plAt !== undefined) {
+            const age = (now - plAt) / 1000;
+            const pop = age < POP_SECS ? Math.sin((age / POP_SECS) * Math.PI) * 0.08 * cell : 0;
+            ctx.fillStyle = col;
+            ctx.fillRect(
+              x + CELL_GAP / 2 - pop,
+              y + CELL_GAP / 2 - pop,
+              cell - CELL_GAP + 2 * pop,
+              cell - CELL_GAP + 2 * pop
+            );
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '700 ' + Math.round(cell * NUM_FONT) + 'px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
+          } else if (p) {
+            const age = (now - p.at) / 1000;
+            const pop = (age < POP_SECS ? Math.sin((age / POP_SECS) * Math.PI) * 0.08 * cell : 0)
+              + (isHintCell ? hintPulse * 0.07 * cell : 0);
+            let cellA = SOLID_ALPHA;
+            if (p.kind === 'faint') {
+              cellA = FAINT_SOLID;
+            } else if (p.kind === 'pale') {
+              cellA = PALE_ALPHA + (FAINT_PALE - PALE_ALPHA) * paleDimK;
+            }
+            if (isHintCell) cellA = Math.min(1, cellA + hintPulse * 0.62);
+            ctx.globalAlpha = cellA;
+            ctx.fillStyle = isHintCell ? 'hsl(' + hue + ',72%,56%)' : col;
+            ctx.fillRect(
+              x + CELL_GAP / 2 - pop,
+              y + CELL_GAP / 2 - pop,
+              cell - CELL_GAP + 2 * pop,
+              cell - CELL_GAP + 2 * pop
+            );
+            ctx.globalAlpha = 1;
+            if (isHintCell) {
+              ctx.strokeStyle = 'rgba(255,245,210,' + (0.9 * hintPulse) + ')';
+              ctx.lineWidth = 2.5;
+              ctx.strokeRect(
+                x + CELL_GAP / 2 - pop,
+                y + CELL_GAP / 2 - pop,
+                cell - CELL_GAP + 2 * pop,
+                cell - CELL_GAP + 2 * pop
+              );
+            }
+          }
+
+          if (plAt === undefined) {
+            const numA = p ? seqNumAlpha : restNumAlpha;
+            if (numA > 0.01) {
+              ctx.globalAlpha = numA;
+              ctx.fillStyle = p ? '#ffffff' : '#8a97a3';
+              ctx.font = (p && p.kind !== 'pale' ? '700 ' : '500 ') +
+                Math.round(cell * NUM_FONT) + 'px -apple-system, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
+              ctx.globalAlpha = 1;
+            }
+          }
+        }
+      }
+
+      if (state === 'choose') {
+        ctx.fillStyle = 'rgba(200,215,230,0.65)';
+        ctx.font = '16px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('pick a table below', bX + bS / 2, bY + bS / 2);
+        return;
+      }
+
+      const segR = (cell * SEG_DIAM) / 2;
+      const sp = cell * SEG_SPACE;
+
+      if (state === 'run' || state === 'waitCollect' || state === 'collect' || state === 'parkTop') {
+        if (state === 'waitCollect' && targets.length) {
+          const lastC = cellCentre(targets[targets.length - 1]);
+          head.x = lastC.x;
+          head.y = bY + bS + cell * 0.56;
+          const tn = topNumPos();
+          heading = Math.atan2(tn.y - head.y, tn.x - head.x);
+        }
+        for (let i = segsLeft; i >= 1; i--) {
+          const sm = sampleTrail(i * sp);
+          ctx.beginPath();
+          ctx.arc(sm.x, sm.y, segR, 0, Math.PI * 2);
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'hsl(' + hue + ',55%,34%)';
+          ctx.stroke();
+          // As the snake parks into the top strip, fade up the numbers on its segments
+          if (state === 'parkTop' && !parkApproach) {
+            const count = Math.min(12, Math.floor(100 / table));
+            const numFade = Math.max(0, Math.min(1, 1 - parkU / (count * 0.6)));
+            if (numFade > 0.02) {
+              ctx.globalAlpha = numFade;
+              ctx.fillStyle = '#ffffff';
+              ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(table * i, sm.x, sm.y + 1);
+              ctx.globalAlpha = 1;
+            }
+          }
+        }
+        drawHead(head.x, head.y, heading, segR * 1.08, now);
+      } else if (state === 'endFloat') {
+        const age = (now - bounceT0) / 1000;
+        const alpha = Math.max(0, 1 - Math.max(0, (age / FLOAT_SECS - 0.78) / 0.22));
+        ctx.globalAlpha = alpha;
+        drawHead(head.x, head.y, heading, segR * 1.08, now);
+        ctx.globalAlpha = 1;
+      } else if (state === 'play') {
+        const hp = slotPos(0);
+
+        // Faint spine connecting head and remaining idle segments on the top snake
+        ctx.beginPath();
+        ctx.moveTo(hp.x, hp.y);
+        for (const sg of playSegs) {
+          if (sg === dragSeg) continue;
+          const pos = segCurrentPos(sg, now);
+          ctx.lineTo(pos.x, pos.y);
+        }
+        ctx.strokeStyle = 'rgba(90,110,130,.28)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        let hintedSeg = null;
+        for (let i = playSegs.length - 1; i >= 0; i--) {
+          const sg = playSegs[i];
+          if (sg === dragSeg) continue;
+          if (sg.v === hintV && hintPulse > 0) { hintedSeg = sg; continue; }
+          const pos = segCurrentPos(sg, now);
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, segR, 0, Math.PI * 2);
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'hsl(' + hue + ',55%,34%)';
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(sg.v, pos.x, pos.y + 1);
+        }
+
+        if (hintedSeg) {
+          const pos = segCurrentPos(hintedSeg, now);
+          const rr = segR * (1 + 0.16 * hintPulse);
+          const halo = ctx.createRadialGradient(pos.x, pos.y, rr * 0.4, pos.x, pos.y, rr * 1.65);
+          halo.addColorStop(0, 'rgba(255,245,210,' + (0.65 * hintPulse) + ')');
+          halo.addColorStop(1, 'rgba(255,245,210,0)');
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, rr * 1.65, 0, Math.PI * 2);
+          ctx.fillStyle = halo;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, rr, 0, Math.PI * 2);
+          ctx.fillStyle = 'hsl(' + hue + ',72%,56%)';
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = 'rgba(255,245,210,' + (0.4 + 0.6 * hintPulse) + ')';
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 ' + Math.round(rr * 0.94) + 'px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(hintedSeg.v, pos.x, pos.y + 1);
+        }
+
+        // Head at slot 0 above the grid — eyes glance down toward the square
+        // (or follow the dragged / hinted segment)
+        let targetAng = Math.PI / 2;
+        if (dragSeg) {
+          targetAng = Math.atan2(dragSeg.y - hp.y, dragSeg.x - hp.x);
+        } else if (hintedSeg) {
+          const hCell = cellCentre(hintedSeg.v);
+          targetAng = Math.atan2(hCell.y - hp.y, hCell.x - hp.x);
+        }
+        let dAng = targetAng - gaze;
+        while (dAng > Math.PI) dAng -= 2 * Math.PI;
+        while (dAng < -Math.PI) dAng += 2 * Math.PI;
+        gaze += dAng * 0.18;
+        drawHead(hp.x, hp.y, gaze, segR * 1.08, now);
+
+        if (dragSeg) {
+          const dr = segR * 1.12;
+          ctx.beginPath();
+          ctx.arc(dragSeg.x, dragSeg.y, dr, 0, Math.PI * 2);
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 ' + Math.round(dr * 0.92) + 'px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(dragSeg.v, dragSeg.x, dragSeg.y + 1);
+        }
+      }
+    }
+
+    let lastT = performance.now();
+    let timeOffset = 0;
+    function frame(now) {
+      const simNow = now + timeOffset;
+      const dt = Math.min((simNow - lastT) / 1000, 0.05);
+      lastT = simNow;
+      step(dt, simNow);
+      try { draw(simNow); } catch (e) { /* keep loop alive */ }
+      requestAnimationFrame(frame);
+    }
+
+    const qs = new URLSearchParams(location.search);
+    const t0 = performance.now();
+    lastT = t0;
+    if (qs.has('t')) {
+      const initT = Math.min(12, Math.max(2, +qs.get('t') || 3));
+      startTable(initT, t0);
+    } else {
+      enterChoose(t0);
+    }
+    if (qs.has('advance')) {
+      const adv = parseFloat(qs.get('advance')) || 0;
+      const steps = Math.ceil(adv / 0.016);
+      for (let k = 1; k <= steps; k++) {
+        const tn = t0 + k * 16;
+        step(0.016, tn);
+        lastT = tn;
+      }
+      timeOffset = adv * 1000;
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=8"></script>
+</body>
+
+</html>

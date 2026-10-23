@@ -16,6 +16,8 @@
     { label: 'Tilt Snake', href: 'tilt-snake.html' },
     { label: 'Snake Puzzle', href: 'snake-puzzle.html' },
     { label: 'Patterns', href: 'patterns.html' },
+    { label: 'Pattern Snake', href: 'pattern-snake.html' },
+    { label: 'Lattice', href: 'lattice.html' },
     { label: 'Honeycomb Search', href: 'honeycomb.html' },
     { label: 'Tilt Ball', href: 'tilt-ball.html' },
     { label: 'Rationale', href: 'rationale.html' },

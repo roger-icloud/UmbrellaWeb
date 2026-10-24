@@ -97,22 +97,20 @@
 
   <div id="rotOverlay" class="overlay hidden">
     <div class="title">Rotate back</div>
-    <div class="sub">Tilt maths assumes portrait — paused until you're upright again.</div>
+    <div class="sub">The game waits for you.</div>
   </div>
 
   <div id="tableOverlay" class="overlay">
     <div class="title">Tilt Snake</div>
-    <div class="sub">Choose a table. Steer the snake to collect its multiples
-      <b>in order</b> — each one becomes a tail segment.
-    </div>
+    <div class="sub">Pick a table, then collect <b>in order</b>.</div>
     <div id="tableRow"></div>
   </div>
 
   <div id="overlay" class="overlay hidden">
     <div class="title" id="tableLabel"></div>
-    <div class="sub">Tilt steers the snake. Dragging a finger steers it too.</div>
+    <div class="sub">Tilt, or drag a finger, to steer.</div>
     <button class="go" id="go">Tap to enable tilt</button>
-    <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
+    <div class="sub" id="why"></div>
   </div>
 
   <div id="doneOverlay" class="overlay hidden">
@@ -350,7 +348,7 @@
     });
     if (!motionNeedsPermission()) {
       document.getElementById('go').textContent = 'Play';
-      whyEl.textContent = 'This browser does not gate motion behind a permission prompt.';
+      whyEl.textContent = 'No tap needed here.';
     }
 
     function startPlay() {

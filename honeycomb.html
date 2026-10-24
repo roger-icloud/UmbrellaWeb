@@ -132,8 +132,7 @@
 
   <div id="rotOverlay" class="overlay hidden">
     <div class="title">Turn upright</div>
-    <div class="sub">The comb is far easier to read in portrait — the
-      game waits for you.</div>
+    <div class="sub">The game waits for you.</div>
   </div>
 
   <div id="doneOverlay" class="overlay hidden">
@@ -542,7 +541,7 @@
     function draw() {
       ctx.clearRect(0, 0, W, H);
       if (state === 'idle') {
-        hud.textContent = 'pick one, two or three tables below —\ntheir multiples hide as connected\npaths in the comb; a common cell\ncan belong to more than one path';
+        hud.textContent = 'pick 1–3 tables —\nfind their paths';
         return;
       }
       hud.textContent = '';

@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Pose Lab — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    .row {
+      position: fixed;
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #famRow {
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 60px);
+    }
+
+    #actRow {
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    }
+
+    .row button {
+      min-width: 44px;
+      height: 40px;
+      font-size: 14px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+      padding: 0 12px;
+    }
+
+    .row button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    #cap {
+      font-size: 12px;
+      color: #5f6e7c;
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="famRow" class="row"></div>
+  <div id="actRow" class="row">
+    <span id="cap">pose lab</span>
+    <button id="deal">Deal</button>
+    <button id="depart">Depart</button>
+    <button id="lap">Lap</button>
+    <button id="tour">Tour</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    const N = 13;               // head + twelve body segments
+    const BLANK_COUNT = 4;      // dashed cells, as in Snake Puzzle
+    const SPACING_K = 0.78;     // adjacent centre spacing / segD — under 1
+    // keeps the body contiguous; over ~0.6 keeps numerals readable
+    const PAIR_MIN = 0.62;      // min centre distance between ANY pair
+    const FIT_MARGIN = 0.07;    // pose margin, fraction of board square
+    const SETTLE_SECS = 0.45;   // per-segment ease onto the rail on a deal
+    const SETTLE_STAGGER = 0.05;
+    const LIFE_AMP = 0.10;      // idle sway amplitude, fraction of segD
+    const LIFE_FREQ = 1.7;      // rad/s — travelling wave along the spine
+    const LIFE_STEP = 0.55;     // wave phase advance per segment
+    const LIFE_FADE = 1.6;      // s for the sway to grow in after a deal
+    const BLINK_MIN = 2.4, BLINK_MAX = 6, BLINK_SECS = 0.28;
+    const BEAT_STAGGER = 0.11;  // s between member highlights, head → tail
+    const BEAT_HOLD = 0.45;     // each highlight lingers this long
+    const DEPART_SPEED = 3.2;   // segD per second along the rail
+    const DEPART_AMP = 0.5;     // sway grows to this while departing
+    const DEPART_FREQ = 3.4;    // faster wriggle while departing
+    const DEPART_RAMP = 0.7;    // s for sway to reach DEPART_AMP
+    /* departure sentences — each a list of phrases the head performs
+       in order. A phrase is {extent, turn, deg, speed, seek, dive, spin}:
+         extent: segDs of arc to run
+         turn:   deg/s of steering wheel (0 or omitted = cruise)
+         deg:    total degrees for a turn phrase — extent auto-computed
+         speed:  multiplier of DEPART_SPEED (default 1)
+         seek:   steer toward the hole until arrived
+         dive:   cruise on; the body shrinks away as it passes the hole
+         spin:   orbit the hole `turns` times, radius decaying to centre
+       Joints are free: each phrase inherits the heading the last left.
+       ?depart=dive picks the other ending. */
+    const DEPART_SCRIPTS = {
+      spin: [
+        { extent: 5 },                     // cruise out along its facing
+        { seek: true },                    // a hole appears; head steers for it
+        { spin: true, turns: 3 },          // whirlpool: circle in, shrinking
+      ],
+      dive: [
+        { extent: 5 },
+        { seek: true },
+        { dive: true, extent: 40, speed: 1.45 },  // poured out a broken window
+      ],
+      edge: [                                // no room for a hole ahead —
+        { extent: 40 },                      // the snake just leaves the
+      ],                                     // way it was already facing
+      lap: [                          // the lap of honour — the one exit
+        { laptrack: true },           // that ends whole, not gone: join the
+        { ring: true },               // nearest edge, one circuit, leave at
+        { glow: true },               // the entry point, wind into a closed
+      ],                              // ring of its own length, halo, fade
+      tour: [                         // the lap stripped bare — a plain
+        { laptrack: true, calm: true },  // circuit of the screen, then
+        { ring: true, calm: true },      // ring + halo as usual; `calm`
+        { glow: true, calm: true },      // suppresses the wriggle
+      ],
+      still: [                        // the no-motion ending (macOS):
+        { still: true, calm: true },  // body fades where it lies, then
+      ],                              // halo + numeral fade up in place
+    };
+    const HOLE_TURN = 210;    // max steering rate (deg/s) while seeking
+    const HOLE_GAIN = 4.5;    // steering eagerness per radian of error
+    const HOLE_ORBIT = 2.6;   // segDs out where the vortex catches the head
+    const DIVE_LEN = 1.3;     // segDs of trail over which a member sinks
+    const SINK_LEN = 2.4;     // whirlpool version — a slide, not a gulp
+    const LAP_INSET = 0.55;   // segD — the lap track sits this far in-board
+    const LAP_LOOKAHEAD = 2.2;// segD — the carrot's lead along the track
+    const LAP_TURN = 170;     // deg/s steering onto and around the track
+    const LAP_GAIN = 4.0;     // steering eagerness per radian of error
+    const LAP_SPEED = 1.3;    // × DEPART_SPEED — a lap is exuberant
+    const GLOW_SECS = 1.1;    // halo holds at full bloom
+    const FADE_SECS = 1.8;    // then the slow fade
+    const STILL_FADE = 0.9;   // s for the body to fade on the still path
+    const NUM_RISE = 0.8;     // s for the numeral to gather from the halo
+    const NUM_LINGER = 0.7;   // it outlives the ring's fade by this much
+    const NUM_FADE = 1.0;     // then dims in its own time — the message
+    // stays a moment after the messenger departs
+    const TOP_RESERVE = 80;
+    const BOT_RESERVE = 128;
+    const BOARD_PAD = 14;
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bX = 0, bY = 0, bW = 0, bH = 0;
+    let segD = 48, SQ = 300;    // SQ = the square the pose lives in
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      bX = BOARD_PAD; bY = TOP_RESERVE;
+      bW = W - 2 * BOARD_PAD; bH = H - TOP_RESERVE - BOT_RESERVE;
+      if (FIXED_BOARD) {                       // pinned board for
+        bW = FIXED_BOARD.w; bH = FIXED_BOARD.h;  // cross-machine runs
+        bX = (W - bW) / 2;
+      }
+      SQ = Math.min(bW, bH);
+      segD = Math.max(34, Math.min(72, SQ * 0.15));
+      layout();
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    /* ---------- colours (same table-coding as the family) ---------- */
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+
+    /* ---------- poses ----------
+       A heading walk (the Swift grammar): from the head, twelve steps of
+       exactly `spacing` px, each step's heading given by the family.
+       Equal step length by construction — numerals cannot crowd. Then
+       mirrored / flipped / reversed at random and fitted to the board. */
+    const FAMILIES = {
+      diagonal: () => Math.PI / 4,
+      wave: i => Math.PI / 4 + 0.6 * Math.sin(i * 0.85),
+      zigzag: i => Math.PI / 4 + (i % 2 ? -0.6 : 0.6),
+      scurve: i => Math.PI / 4 + 0.7 * Math.sin(i * 2 * Math.PI / (N - 1)),
+      coil: i => Math.PI / 2 + 0.45 + i * 0.28,
+    };
+    const FAMILY_NAMES = Object.keys(FAMILIES);
+
+    function walkRail(family) {
+      // normalized coordinates: the walk runs in units of a board square,
+      // so spacing is isotropic regardless of screen aspect
+      const sp = SPACING_K * segD / SQ;
+      let pts = [{ x: 0, y: 0 }];
+      for (let i = 0; i < N - 1; i++) {
+        const h = FAMILIES[family](i);
+        const last = pts[pts.length - 1];
+        pts.push({ x: last.x + Math.cos(h) * sp, y: last.y + Math.sin(h) * sp });
+      }
+      if (Math.random() < 0.5) pts = pts.map(p => ({ x: -p.x, y: p.y }));
+      if (Math.random() < 0.5) pts = pts.map(p => ({ x: p.x, y: -p.y }));
+      if (Math.random() < 0.5) pts.reverse();
+      // centre + fit inside the margin square
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const avail = 1 - FIT_MARGIN * 2;
+      const k = Math.min(1,
+        avail / Math.max(Math.max(...xs) - Math.min(...xs), 0.001),
+        avail / Math.max(Math.max(...ys) - Math.min(...ys), 0.001));
+      return pts.map(p => ({ x: 0.5 + (p.x - cx) * k, y: 0.5 + (p.y - cy) * k }));
+    }
+
+    /* normalized rail point -> board px (square centred in the board) */
+    function toPx(p) {
+      return {
+        x: bX + (bW - SQ) / 2 + p.x * SQ,
+        y: bY + (bH - SQ) / 2 + p.y * SQ
+      };
+    }
+
+    /* ---------- state ---------- */
+    let table = 3;
+    let rail = [];               // normalized 0..1, head-first
+    let segs = [];               // {rx,ry} rail positions in px + expected/blank
+    let from = [];               // settle-from positions on a deal
+    let family = 'any';
+    let state = 'idle';          // idle | beat | depart | gone
+    let dealT = 0, beatT = 0, departT = 0;
+    let gaze = 0, nextBlinkAt = 0, blinkT0 = -1;
+
+    /* ---------- the trail ----------
+       The unified motion model: the head's position history is a
+       polyline of breadcrumbs (oldest → newest, last = the head's
+       current spot). The body is sampled back along it at fixed
+       arc-length spacing — every segment retraces the head's exact
+       path. At rest the trail is simply the pose rail itself, so a
+       departure is the head writing fresh trail while the body slides
+       off the recorded pose onto the live line. No mode switch. */
+    let trail = [];              // px points, tail-ward → head-ward
+    let headPos = { x: 0, y: 0 };
+    let heading = 0;             // radians — the steering state
+    let script = [];             // phrases remaining, each with .arc (px)
+    let phraseArc = 0;           // px consumed in the current phrase
+    let tipArc = 0;              // total px of trail the head has written
+    let hole = null;             // {x,y} the dive target
+    let holeArc = null;          // trail arc-length where the hole lives
+    let holeShowArc = 0;         // arc when the hole appeared (for pop-in)
+    let spinning = false;        // true while the whirlpool phrase runs
+    let whirlpool = false;       // true from spin entry on — radial taper
+    // stays live through the sink, else the
+    // ring would pop back to full size
+    let spinProg = 0;            // 0→1 through the orbit — shrinks the
+    // whole wreath as the turns complete
+    let stillK = 1;              // body alpha on the still path (1 = solid)
+    let ring = null;             // {x,y,r,dir,ang,arc,orbiting} the lap's
+    // closing coil — wound to exactly the snake's length where it fits
+    let glowT0 = -1;             // ring completed → halo blooms, then fades
+    let nextDepart = null;       // which script the next Depart runs (UI)
+    let prevNow = 0;
+    const CRUMB_STEP = 3;        // px of head travel per breadcrumb
+    let METRICS = false, metRows = [], metEl = null;   // ?metrics=1 flight
+    // recorder for blind debugging
+    let metPhase = '', metMarks = [];
+    let FIXED_HOLE = null;          // ?hole=x,y pins the spawn for
+    // repeatable diagnostic runs
+    let FIXED_BOARD = null;         // ?board=WxH pins the board so two
+    // machines run the identical experiment
+    let pendingHole = null;         // cone-probed hole chosen at depart
+    // start — resolution decided before the first phrase runs
+
+    function pushHead(p) {
+      const l = trail[trail.length - 1];
+      const prev = trail[trail.length - 2];
+      if (trail.length < 2 || Math.hypot(p.x - prev.x, p.y - prev.y) >= CRUMB_STEP)
+        trail.push({ x: p.x, y: p.y });
+      else { l.x = p.x; l.y = p.y; }   // the very tip stays exact
+      if (trail.length > 4000) trail.splice(0, trail.length - 4000);
+    }
+
+    /* the point + tangent a distance `d` back along the trail */
+    function sampleTrail(d) {
+      let acc = 0;
+      for (let i = trail.length - 1; i > 0; i--) {
+        const a = trail[i], b = trail[i - 1];
+        const seg = Math.hypot(a.x - b.x, a.y - b.y);
+        if (acc + seg >= d) {
+          const f = seg ? (d - acc) / seg : 0;
+          return {
+            x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f,
+            tx: (a.x - b.x) / (seg || 1), ty: (a.y - b.y) / (seg || 1)
+          };
+        }
+        acc += seg;
+      }
+      const t0 = trail[0], t1 = trail[1] || t0;
+      const seg = Math.hypot(t1.x - t0.x, t1.y - t0.y) || 1;
+      return { x: t0.x, y: t0.y, tx: (t1.x - t0.x) / seg, ty: (t1.y - t0.y) / seg };
+    }
+
+    function pickRail() {
+      // retry until the pose keeps every numeral readable
+      let best = null, bestD = 0, bestFam = family;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const f = family === 'any'
+          ? FAMILY_NAMES[Math.floor(Math.random() * FAMILY_NAMES.length)]
+          : family;
+        const norm = walkRail(f);
+        const cand = norm.map(toPx);
+        let worst = Infinity;
+        for (let i = 0; i < N; i++)
+          for (let j = i + 1; j < N; j++)
+            worst = Math.min(worst,
+              Math.hypot(cand[i].x - cand[j].x, cand[i].y - cand[j].y));
+        if (worst > bestD) { bestD = worst; best = norm; bestFam = f; }
+        if (worst >= PAIR_MIN * segD) return { pts: norm, fam: f };
+      }
+      return { pts: best, fam: bestFam };
+    }
+
+    function deal() {
+      const picked = pickRail();
+      rail = picked.pts;            // normalized — layout() maps to px
+      segs = rail.map((p, i) => ({
+        rx: 0, ry: 0,
+        expected: i === 0 ? 0 : i * table,
+        blank: false
+      }));
+      layout();
+      // four blanks, never head or first multiple (the foothold) — as Puzzle
+      const pool = [];
+      for (let i = 2; i < N; i++) pool.push(i);
+      for (let k = 0; k < BLANK_COUNT && pool.length; k++)
+        segs[pool.splice(Math.floor(Math.random() * pool.length), 1)[0]].blank = true;
+      // settle in from a loose line — the snake assembles itself
+      from = segs.map((s, i) => ({
+        x: bX + bW * 0.12 + i * segD * 0.8,
+        y: bY + bH * 0.85 - i * segD * 0.15
+      }));
+      // the trail IS the pose rail, read tail→head (oldest → newest)
+      trail = segs.map(s => ({ x: s.rx, y: s.ry })).reverse();
+      headPos = { x: segs[0].rx, y: segs[0].ry };
+      tipArc = 0; hole = null; holeArc = null; script = [];
+      pendingHole = null;
+      spinning = false; whirlpool = false; spinProg = 0;
+      ring = null; glowT0 = -1;
+      state = 'idle';
+      dealT = performance.now();
+      gaze = Math.atan2(segs[0].ry - segs[1].ry, segs[0].rx - segs[1].rx);
+      nextBlinkAt = dealT + 2000 + Math.random() * 2000;
+      blinkT0 = -1;
+      syncFam();
+      cap.textContent = 'pose lab — ' + picked.fam + '  ×' + table;
+    }
+
+    function startBeat() {
+      if (state !== 'idle') return;
+      state = 'beat';
+      beatT = performance.now();
+    }
+    function startDepart(kind) {
+      state = 'depart';
+      departT = performance.now();
+      metRows = []; metPhase = ''; metMarks = [];
+      // the script drive begins where the trail's last stride pointed
+      const a = trail[trail.length - 1], b = trail[trail.length - 2];
+      heading = Math.atan2(a.y - b.y, a.x - b.x);
+      phraseArc = 0;
+      kind = kind || nextDepart || (qs.get('depart') || 'spin');
+      nextDepart = null;
+      if (!MOTION) kind = 'still';     // macOS: the celebration keeps its
+      //   meaning minus the motion — beat, body fade, halo + numeral
+      pendingHole = null;
+      ring = null; glowT0 = -1; stillK = 1;
+      let cruiseCap = Infinity;
+      if (kind === 'spin' || kind === 'dive') {
+        // look ahead along the facing: if the nose is already at the
+        // wall, the honest departure is straight off the edge. Else the
+        // cruise shortens to the room available and the hole is probed
+        // from where the cruise will actually end.
+        const room = rayToBoard(headPos.x, headPos.y, heading);
+        const cruiseArc = Math.min(
+          (DEPART_SCRIPTS[kind][0].extent || 0) * segD,
+          Math.max(0, room - segD * 1.5));
+        cruiseCap = cruiseArc;
+        // probe the cone from where the cruise will end — first the
+        // forward ±100°, then a wider ±160° before giving up to the edge
+        const px = headPos.x + Math.cos(heading) * cruiseArc;
+        const py = headPos.y + Math.sin(heading) * cruiseArc;
+        pendingHole = coneHole(px, py) || coneHole(px, py, 2.8);
+        if (!pendingHole) kind = 'edge';
+      }
+      if (METRICS) console.log('DECIDE kind=' + kind +
+        ' hole=' + JSON.stringify(pendingHole));
+      script = (DEPART_SCRIPTS[kind] || DEPART_SCRIPTS.spin).map(p => ({
+        ...p,
+        arc: p.deg
+          ? DEPART_SPEED * segD * (p.speed || 1) * Math.abs(p.deg) / Math.abs(p.turn || 1)
+          : (p.extent || 0) * segD
+      }));
+      if (isFinite(cruiseCap))
+        script[0].arc = Math.min(script[0].arc, cruiseCap);
+    }
+
+    /* a hole: in the forward cone of the snake's facing, so the seek
+       reads as "spotted it over there" — a graceful arc, not a hairpin */
+    /* how far along a heading until the board's edge — used to decide
+       whether a cruise leg can even finish before the snake is out */
+    function rayToBoard(x, y, a) {
+      const cx = Math.cos(a), sy = Math.sin(a);
+      let t = Infinity;
+      if (cx > 0) t = Math.min(t, (bX + bW - x) / cx);
+      if (cx < 0) t = Math.min(t, (bX - x) / cx);
+      if (sy > 0) t = Math.min(t, (bY + bH - y) / sy);
+      if (sy < 0) t = Math.min(t, (bY - y) / sy);
+      return t;
+    }
+
+    /* cone-hole probe: null when no board room lies ahead — the signal
+       that the honest departure is off the edge, not into a hole */
+    function coneHole(px, py, half) {
+      if (px === undefined) { px = headPos.x; py = headPos.y; }
+      if (half === undefined) half = 1.75;               // ±100° default
+      if (FIXED_HOLE) return { x: FIXED_HOLE.x, y: FIXED_HOLE.y };
+      for (let k = 0; k < 30; k++) {
+        const a = heading + (Math.random() - 0.5) * 2 * half;
+        const r = segD * (4 + Math.random() * 5);
+        const p = {
+          x: px + Math.cos(a) * r,
+          y: py + Math.sin(a) * r
+        };
+        // keep at least half the orbit radius on-board, else the
+        // wreath would wind half off-screen
+        const m = Math.max(bW * 0.12, HOLE_ORBIT * segD * 0.5);
+        const my = Math.max(bH * 0.12, HOLE_ORBIT * segD * 0.5);
+        if (p.x > bX + m && p.x < bX + bW - m &&
+          p.y > bY + my && p.y < bY + bH - my)
+          return p;
+      }
+      return null;
+    }
+
+    function pickHole() {
+      const c = coneHole();
+      if (c) return c;
+      // fall back to anywhere forward-ish that's on the board
+      for (let k = 0; k < 30; k++) {
+        const p = {
+          x: bX + bW * (0.2 + Math.random() * 0.6),
+          y: bY + bH * (0.2 + Math.random() * 0.6)
+        };
+        if (Math.hypot(p.x - headPos.x, p.y - headPos.y) > segD * 3.5)
+          return p;
+      }
+      return { x: bX + bW / 2, y: bY + bH / 2 };
+    }
+
+    /* ---------- the lap track ----------
+       A sharp-rect guide, LAP_INSET inside the board, parametrised by
+       arc length s (top L→R, right T→B, bottom R→L, left B→T). The
+       corners are square on the track; the head's finite turn rate is
+       what rounds them — steering guides need no fillets. */
+    function lapGeom() {
+      const x0 = bX + LAP_INSET * segD, y0 = bY + LAP_INSET * segD;
+      const x1 = bX + bW - LAP_INSET * segD, y1 = bY + bH - LAP_INSET * segD;
+      const w = x1 - x0, h = y1 - y0;
+      if (w < segD * 3 || h < segD * 3) return null;   // no room to lap
+      return { x0, y0, x1, y1, w, h, P: 2 * (w + h) };
+    }
+    function lapPt(t, s) {
+      s = ((s % t.P) + t.P) % t.P;
+      if (s < t.w) return { x: t.x0 + s, y: t.y0 };
+      s -= t.w;
+      if (s < t.h) return { x: t.x1, y: t.y0 + s };
+      s -= t.h;
+      if (s < t.w) return { x: t.x1 - s, y: t.y1 };
+      s -= t.w;
+      return { x: t.x0, y: t.y1 - s };
+    }
+    /* arc position of the point on the track nearest p */
+    function lapNearest(t, p) {
+      let x = Math.min(Math.max(p.x, t.x0), t.x1);
+      let y = Math.min(Math.max(p.y, t.y0), t.y1);
+      const c = [
+        { s: x - t.x0, d: Math.abs(p.y - t.y0) + Math.abs(p.x - x) },
+        { s: t.w + (y - t.y0), d: Math.abs(p.x - t.x1) + Math.abs(p.y - y) },
+        { s: t.w + t.h + (t.x1 - x), d: Math.abs(p.y - t.y1) + Math.abs(p.x - x) },
+        { s: 2 * t.w + t.h + (t.y1 - y), d: Math.abs(p.x - t.x0) + Math.abs(p.y - y) }
+      ];
+      c.sort((a, b) => a.d - b.d);
+      return c[0].s;
+    }
+
+    function phaseName(ph) {
+      if (!ph) return 'end';
+      return ph.seek ? 'seek' : ph.spin ? 'spin' : ph.dive ? 'dive'
+        : ph.laptrack ? 'lap' : ph.ring ? 'ring' : ph.glow ? 'glow'
+          : ph.still ? 'still' : 'cruise';
+    }
+
+    /* the script drive: integrate the head through its phrases.
+       heading is persistent — joints need no matching code.
+       depAge = seconds since departure began (for the wriggle). */
+    function driveHead(dt, depAge) {
+      let budget = dt, guard = 32;
+      while (budget > 1e-9 && guard--) {
+        const ph = script[0];
+        if (METRICS) {                    // boundary marks in sim-time —
+          const pn = phaseName(ph);       // true even under ?departAt bakes
+          if (pn !== metPhase) {
+            metPhase = pn;
+            metMarks.push(pn + '=' + depAge.toFixed(2));
+          }
+        }
+        const v = DEPART_SPEED * segD * ((ph && ph.speed) || 1);
+        if (ph && ph.spin) {
+          // the whirlpool: orbit the hole, radius decaying to centre
+          if (ph.r0 === undefined) {
+            const rx = headPos.x - hole.x, ry = headPos.y - hole.y;
+            ph.r0 = Math.hypot(rx, ry);
+            ph.ang = Math.atan2(ry, rx);
+            // orbit the way the seek already committed to
+            ph.dir = hole.spinDir || 1;
+            ph.done = 0;
+            ph.total = ph.turns * Math.PI * 2;
+            spinning = true; whirlpool = true;
+          }
+          let r = ph.r0 * Math.max(0, 1 - ph.done / ph.total);
+          let dth = v / Math.max(r, segD * 0.25) * budget;
+          dth = Math.min(dth, ph.total - ph.done);
+          const spent = dth * Math.max(r, segD * 0.25) / v;
+          ph.done += dth;
+          ph.ang += ph.dir * dth;
+          spinProg = ph.done / ph.total;
+          r = ph.r0 * Math.max(0, 1 - ph.done / ph.total);
+          headPos.x = hole.x + Math.cos(ph.ang) * r;
+          headPos.y = hole.y + Math.sin(ph.ang) * r;
+          tipArc += v * spent;
+          budget -= spent;
+          if (ph.done >= ph.total - 1e-9) {
+            headPos.x = hole.x; headPos.y = hole.y;
+            holeArc = tipArc;
+            script.shift(); phraseArc = 0; spinning = false;
+          }
+          continue;
+        }
+        if (ph && ph.laptrack) {
+          // the lap of honour: join the nearest edge tangentially (a
+          // carrot runs ahead on the track), one full circuit, leave
+          // the edge where it was joined
+          if (ph.t === undefined) {
+            ph.t = lapGeom();
+            if (!ph.t) { script.shift(); phraseArc = 0; continue; }
+            ph.s = lapNearest(ph.t, headPos);
+            const tp = lapPt(ph.t, ph.s + 4), tm = lapPt(ph.t, ph.s - 4);
+            ph.dir = (Math.cos(heading) * (tp.x - tm.x) +
+              Math.sin(heading) * (tp.y - tm.y)) >= 0 ? 1 : -1;
+            ph.prog = 0;
+          }
+          const sNew = lapNearest(ph.t, headPos);
+          let dlt = sNew - ph.s;
+          if (dlt > ph.t.P / 2) dlt -= ph.t.P;
+          if (dlt < -ph.t.P / 2) dlt += ph.t.P;
+          ph.prog += Math.max(0, ph.dir * dlt);
+          ph.s = sNew;
+          const c = lapPt(ph.t, ph.s + ph.dir * LAP_LOOKAHEAD * segD);
+          const err = wrapAngle(Math.atan2(c.y - headPos.y,
+            c.x - headPos.x) - heading);
+          const w = Math.max(-LAP_TURN, Math.min(LAP_TURN,
+            err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
+          heading += w * budget;
+          const step = v * budget;
+          headPos.x += Math.cos(heading) * step;
+          headPos.y += Math.sin(heading) * step;
+          tipArc += step; phraseArc += step;
+          budget = 0;
+          if (ph.prog >= ph.t.P * 0.985) { script.shift(); phraseArc = 0; }
+          continue;
+        }
+        if (ph && ph.ring) {
+          // the closing coil: approach the ring's rim tangentially
+          // (the same ghost-point trick as the whirlpool), then wind
+          // until the whole body lies on the circle — head meets tail
+          if (!ring) {
+            const L = (N - 1) * SPACING_K * segD;
+            ring = {
+              x: bX + bW / 2, y: bY + bH / 2,
+              r: Math.min(L / (2 * Math.PI), Math.min(bW, bH) * 0.38),
+              dir: 0, ang: 0, arc: 0, orbiting: false
+            };
+          }
+          const dx = headPos.x - ring.x, dy = headPos.y - ring.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          if (!ring.orbiting) {
+            if (ring.dir === 0) {
+              const ox = dx / dist, oy = dy / dist;
+              ring.dir =
+                (ox * Math.sin(heading) - oy * Math.cos(heading)) > 0 ? -1 : 1;
+            }
+            const ox = dx / dist, oy = dy / dist, s = ring.dir;
+            const ax = ring.x + (s > 0 ? -oy : oy) * ring.r;
+            const ay = ring.y + (s > 0 ? ox : -ox) * ring.r;
+            const err = wrapAngle(Math.atan2(ay - headPos.y,
+              ax - headPos.x) - heading);
+            const w = Math.max(-LAP_TURN, Math.min(LAP_TURN,
+              err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
+            heading += w * budget;
+            const step = v * budget;
+            headPos.x += Math.cos(heading) * step;
+            headPos.y += Math.sin(heading) * step;
+            tipArc += step; phraseArc += step;
+            budget = 0;
+            if (dist <= ring.r) {
+              ring.orbiting = true;
+              ring.ang = Math.atan2(dy, dx);
+            }
+            continue;
+          }
+          const dth = v / ring.r * budget;
+          ring.ang += ring.dir * dth;
+          ring.arc += v * budget;
+          headPos.x = ring.x + Math.cos(ring.ang) * ring.r;
+          headPos.y = ring.y + Math.sin(ring.ang) * ring.r;
+          heading = ring.ang + ring.dir * Math.PI / 2; // tangent — keeps
+          // the wobble axis and the eyes honest while winding
+          tipArc += v * budget; phraseArc += v * budget;
+          budget = 0;
+          if (ring.arc >= (N - 1) * SPACING_K * segD) {
+            script.shift(); phraseArc = 0;
+            glowT0 = depAge;         // sim-time, so ?departAt stays honest
+          }
+          continue;
+        }
+        if (ph && ph.glow) {
+          // head parked on the closed ring — the halo blooms, the
+          // fade is handled at draw time
+          if (glowT0 < 0) glowT0 = depAge;
+          budget = 0;
+          break;
+        }
+        if (ph && ph.still) {
+          // the no-motion ending: the body fades where it lies, then
+          // the usual halo + numeral fade up at board centre — the
+          // ring exists as halo geometry only, no body ever winds it
+          if (!ring) {
+            const L = (N - 1) * SPACING_K * segD;
+            ring = {
+              x: bX + bW / 2, y: bY + bH / 2,
+              r: Math.min(L / (2 * Math.PI), Math.min(bW, bH) * 0.38),
+              dir: 0, ang: 0, arc: 0, orbiting: false
+            };
+          }
+          if (ph.t0 === undefined) ph.t0 = depAge;
+          stillK = 1 - Math.min(1, (depAge - ph.t0) / STILL_FADE);
+          if (stillK <= 0 && glowT0 < 0) glowT0 = depAge;
+          budget = 0;
+          break;
+        }
+        let w = ((ph && ph.turn) || 0) * Math.PI / 180;
+        let step;
+        if (ph && ph.seek) {
+          if (!hole) { hole = pendingHole || pickHole(); holeShowArc = tipArc; }
+          const dx = hole.x - headPos.x, dy = hole.y - headPos.y;
+          const dist = Math.hypot(dx, dy);
+          let ax = hole.x, ay = hole.y;
+          if (script[1] && script[1].spin) {
+            // aim at a ghost point on the rim, 90° ahead in the orbit
+            // direction, so the head arrives moving tangentially —
+            // no baulk at the jump
+            if (hole.spinDir === undefined) {
+              const ox = -dx / dist, oy = -dy / dist;   // head rel. hole
+              hole.spinDir = (ox * Math.sin(heading) - oy * Math.cos(heading)) > 0 ? -1 : 1;
+            }
+            const ox = -dx / dist, oy = -dy / dist;
+            const s = hole.spinDir, R = HOLE_ORBIT * segD;
+            ax = hole.x + (s > 0 ? -oy : oy) * R;
+            ay = hole.y + (s > 0 ? ox : -ox) * R;
+          }
+          const err = wrapAngle(Math.atan2(ay - headPos.y, ax - headPos.x) - heading);
+          w = Math.max(-HOLE_TURN, Math.min(HOLE_TURN, err * HOLE_GAIN * 180 / Math.PI)) * Math.PI / 180;
+          // a spin next phrase catches the head at the rim, not the centre
+          if (script[1] && script[1].spin && dist <= HOLE_ORBIT * segD) {
+            script.shift(); phraseArc = 0;
+            continue;
+          }
+          step = Math.min(dist, v * budget);
+          if (step >= dist) {          // arrived: land on the hole
+            headPos.x = hole.x; headPos.y = hole.y;
+            tipArc += dist; budget -= dist / v;
+            holeArc = tipArc;
+            script.shift(); phraseArc = 0;
+            continue;
+          }
+        } else if (!ph) {
+          if (holeArc !== null) {        // tip parked in the hole — the
+            // front accelerates into the drain rather than jolting on
+            const back = tipArc - holeArc;
+            const pace = 1 + 0.45 * Math.min(1, back / (segD * 2));
+            tipArc += v * pace * budget;
+            break;                       // keeps sinking in after it
+          }
+          step = v * budget;
+        } else {
+          step = Math.min(ph.arc - phraseArc, v * budget);
+        }
+        const dtStep = step / v;
+        heading += w * dtStep;
+        headPos.x += Math.cos(heading) * step;
+        headPos.y += Math.sin(heading) * step;
+        tipArc += step;
+        phraseArc += step;
+        budget -= dtStep;
+        if (ph && !ph.seek && phraseArc >= ph.arc - 1e-6) {
+          script.shift(); phraseArc = 0;
+        }
+      }
+      // the wriggle is baked into the trail: the head swims, the body
+      // retraces the wiggly path — nothing to add at draw time
+      const amp = (LIFE_AMP + (DEPART_AMP - LIFE_AMP) * Math.min(1, depAge / DEPART_RAMP)) * segD;
+      let wob = Math.sin(depAge * DEPART_FREQ) * amp;
+      // a `calm` phrase runs straight — the tour's whole point
+      if (script[0] && script[0].calm) wob = 0;
+      // under the hole's pull the wriggle dies quickly: the snake
+      // straightens up and commits (covers seek, orbit and sink)
+      if (hole)
+        wob *= Math.max(0, Math.min(1,
+          1 - (tipArc - holeShowArc) / (segD * 1.2)));
+      if (ring && ring.orbiting)           // winding the ring is
+        wob *= Math.max(0, 1 - ring.arc / (segD * 1.2)); // concentration too
+      pushHead({
+        x: headPos.x - Math.sin(heading) * wob,
+        y: headPos.y + Math.cos(heading) * wob
+      });
+    }
+
+    /* ---------- controls ---------- */
+    const famRow = document.getElementById('famRow');
+    const cap = document.getElementById('cap');
+    const famBtns = [];
+    ['any'].concat(FAMILY_NAMES).forEach(f => {
+      const b = document.createElement('button');
+      b.textContent = f === 'scurve' ? 's-curve' : f;
+      b.addEventListener('click', () => { family = f; deal(); });
+      famBtns.push(b); famRow.appendChild(b);
+    });
+    function syncFam() {
+      famBtns.forEach((b, i) => b.classList.toggle('on',
+        (i === 0 ? 'any' : FAMILY_NAMES[i - 1]) === family));
+    }
+    document.getElementById('deal').addEventListener('click', () => {
+      table = table >= 12 ? 2 : table + 1;
+      deal();
+    });
+    document.getElementById('depart').addEventListener('click', () => {
+      nextDepart = null; startBeat();
+    });
+    document.getElementById('lap').addEventListener('click', () => {
+      nextDepart = 'lap'; startBeat();
+    });
+    document.getElementById('tour').addEventListener('click', () => {
+      nextDepart = 'tour'; startBeat();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'd') document.getElementById('deal').click();
+      if (e.key === 'x') { nextDepart = null; startBeat(); }
+      if (e.key === 'l') { nextDepart = 'lap'; startBeat(); }
+      if (e.key === 't') { nextDepart = 'tour'; startBeat(); }
+    });
+
+    function layout() {
+      // recompute the rail in px after a resize — re-derive from the
+      // normalized form so the pose itself doesn't drift
+      if (!rail.length || !segs.length) return;
+      segs.forEach((s, i) => {
+        const p = toPx(rail[i]);
+        s.rx = p.x; s.ry = p.y;
+      });
+    }
+
+    /* ---------- head grammar (shared with the games) ---------- */
+    function wrapAngle(d) {
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    }
+    function blinkScale(now) {
+      if (blinkT0 < 0) {
+        if (now < nextBlinkAt) return 1;
+        blinkT0 = now;
+      }
+      const k = (now - blinkT0) / 1000 / BLINK_SECS;
+      if (k >= 1) {
+        blinkT0 = -1;
+        nextBlinkAt = now + (BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN)) * 1000;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+    function drawHead(s, facing, now, sc) {
+      const r = segD / 2 * (sc === undefined ? 1 : sc);
+      const hue = (table * 31 + 200) % 360;
+      const g = ctx.createRadialGradient(
+        s.x - r * 0.33, s.y - r * 0.33, r * 0.2,
+        s.x, s.y, r);
+      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
+      ctx.fillStyle = g; ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+      ctx.stroke();
+
+      gaze += wrapAngle(facing - gaze) * 0.14;
+      const ex = Math.cos(gaze), ey = Math.sin(gaze);
+      const px = -ey, py = ex;
+      const sq = blinkScale(now);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s.x + ex * r * 0.38 + px * side * r * 0.36,
+          s.y + ey * r * 0.38 + py * side * r * 0.36,
+          r * 0.16, Math.max(r * 0.16 * sq, r * 0.03), gaze, 0, 7);
+        ctx.fillStyle = '#101418'; ctx.fill();
+      }
+    }
+
+    function numeral(v, cx, cy, size, colour) {
+      ctx.font = '700 ' + size + 'px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = colour;
+      ctx.fillText(v, cx, cy);
+    }
+
+    /* ---------- animate ---------- */
+    function frame(now) {
+      try { draw(now); } catch (e) { }
+      requestAnimationFrame(frame);
+    }
+
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+      if (state === 'gone' || !segs.length) return;
+
+      // one mechanism for every state: the head writes trail, the body
+      // reads it back twelve notes behind
+      const dt = Math.min((now - prevNow) / 1000 || 0.016, 0.05);
+      prevNow = now;
+      const t = now / 1000;
+      const settleAge = (now - dealT) / 1000;
+      const lifeK = Math.min(1, settleAge / LIFE_FADE);       // sway grows in
+
+      const departAge = state === 'depart' ? (now - departT) / 1000 : 0;
+      if (state === 'depart') driveHead(dt, departAge + dt);
+      if (state === 'beat' &&
+        now - beatT > (N - 1) * BEAT_STAGGER * 1000 + BEAT_HOLD * 1000 + 250)
+        startDepart();
+
+      // the hole, if there is one, under everything — a flat sandy
+      // circle: the board is a plane, the only depth trick allowed is
+      // the snake's own shading
+      if (hole) {
+        const grow = Math.min(1, (tipArc - holeShowArc) / (segD * 0.8));
+        const r = segD * 0.85 * grow;
+        if (r > 0.5) {
+          const g = ctx.createRadialGradient(hole.x, hole.y, 0,
+            hole.x, hole.y, r);
+          g.addColorStop(0, '#6e5f42');       // burrow-dark centre
+          g.addColorStop(0.75, '#b7a273');
+          g.addColorStop(1, '#d9c49a');       // beige edge
+          ctx.beginPath();
+          ctx.arc(hole.x, hole.y, r, 0, 7);
+          ctx.fillStyle = g; ctx.fill();
+          ctx.beginPath();
+          ctx.arc(hole.x, hole.y, r * 0.97, 0, 7);
+          ctx.strokeStyle = 'rgba(140,120,80,.45)';
+          ctx.lineWidth = 2; ctx.stroke();
+        }
+      }
+
+      // the lap's ending is the new kind: not gone but *whole* — the
+      // closed ring blooms a halo, holds, then everything fades
+      let fadeK = 1, numA = 0;
+      if (glowT0 >= 0 && ring) {
+        const ga = departAge - glowT0;     // seconds into the glow
+        const bloom = Math.max(0, Math.min(1, ga / 0.35));
+        fadeK = ga <= GLOW_SECS ? 1
+          : Math.max(0, 1 - (ga - GLOW_SECS) / FADE_SECS);
+        // the light gathers into the numeral: halo tightens and dims
+        // as the digit resolves — the statement the round was about
+        const nk = Math.max(0, Math.min(1, (ga - 0.7) / NUM_RISE));
+        const held = ga <= GLOW_SECS + FADE_SECS + NUM_LINGER;
+        numA = nk * nk * (3 - 2 * nk) *
+          (held ? 1 : Math.max(0, 1 -
+            (ga - GLOW_SECS - FADE_SECS - NUM_LINGER) / NUM_FADE));
+        const haloR = ring.r + segD * 2 * (1 - 0.55 * nk);
+        const haloA = bloom * fadeK * (1 - 0.35 * nk);
+        const g = ctx.createRadialGradient(ring.x, ring.y,
+          ring.r * 0.2, ring.x, ring.y, haloR);
+        g.addColorStop(0, 'rgba(255,240,200,' + 0.55 * haloA + ')');
+        g.addColorStop(0.65, 'rgba(255,215,130,' + 0.28 * haloA + ')');
+        g.addColorStop(1, 'rgba(255,215,130,0)');
+        ctx.beginPath();
+        ctx.arc(ring.x, ring.y, haloR, 0, 7);
+        ctx.fillStyle = g; ctx.fill();
+      }
+
+      // sway amplitude — rest states only now; during depart the wriggle
+      // is already written into the trail itself
+      const amp = NOLIFE ? 0 : LIFE_AMP * segD * lifeK *
+        (state === 'beat' ? 0.4 : 1);
+
+      // body sampled back along the trail
+      const sp = SPACING_K * segD;
+      const pos = [];
+      let allGone = true;
+      for (let i = 0; i < N; i++) {
+        const sm = sampleTrail(i * sp);
+        let sc = 1, dHole = NaN;
+        if (state === 'depart') {
+          if (sm.x < -segD || sm.x > W + segD || sm.y < -segD || sm.y > H + segD) {
+            pos[i] = null; continue;
+          }
+          if (whirlpool && hole) {         // whirlpool: shrink with radius —
+            let dx = sm.x - hole.x, dy = sm.y - hole.y;   // but members keep
+            const d = Math.hypot(dx, dy) || 1;            // their true trail
+            dHole = d;
+            sc = Math.max(0, Math.min(1, d / (HOLE_ORBIT * segD)))
+              * (1 - 0.7 * spinProg);     // positions (no spokes!)
+            if (holeArc !== null) {        // sink: the ring keeps winding
+              const a = (hole.spinDir || 1) * (tipArc - holeArc) /
+                Math.max(d, segD * 0.35);   // inner rings whip faster
+              const ca = Math.cos(a), sa = Math.sin(a);
+              const rx = dx * ca - dy * sa, ry = dx * sa + dy * ca;
+              dx = rx; dy = ry;
+              const depth = (tipArc - holeArc) - i * sp;
+              if (depth > 0) {             // pulled centre-ward only when
+                const f = Math.min(1, depth / (SINK_LEN * segD)); // the sink
+                const s2 = 1 - f * f * (3 - 2 * f);               // front
+                sc = Math.min(sc, s2);                            // reaches it
+                dx *= s2; dy *= s2;
+              }
+              sm.x = hole.x + dx; sm.y = hole.y + dy;
+            }
+          } else if (holeArc !== null) {   // dive: past the hole = sinking
+            const depth = (tipArc - holeArc) - i * sp;
+            if (depth > 0) {
+              const f = Math.min(1, depth / (DIVE_LEN * segD));
+              sc = Math.min(sc, 1 - f);
+              sm.x += (hole.x - sm.x) * f * f;
+              sm.y += (hole.y - sm.y) * f * f;
+            }
+          }
+          if (sc <= 0.02) { pos[i] = null; }
+          else {
+            allGone = false;
+            if (METRICS) metRows.push(
+              Math.round(now - departT) + ',' + i + ',' +
+              sm.x.toFixed(1) + ',' + sm.y.toFixed(1) + ',' +
+              sc.toFixed(3) + ',' + (isNaN(dHole) ? '' : dHole.toFixed(1)) +
+              ',' + sm.tx.toFixed(2) + ',' + sm.ty.toFixed(2) +
+              ',' + phaseName(script[0]));
+          }
+        }
+        if (state !== 'depart') allGone = false;
+        if (pos[i] === null && state === 'depart') continue;
+        let bx = sm.x, by = sm.y;
+        if (state !== 'depart') {
+          // settle ease blends the loose line onto the trail
+          const st = Math.max(0, Math.min(1,
+            (settleAge - i * SETTLE_STAGGER) / SETTLE_SECS));
+          const e = st * st * (3 - 2 * st);
+          bx = from[i].x + (sm.x - from[i].x) * e;
+          by = from[i].y + (sm.y - from[i].y) * e;
+          const w = Math.sin(i * LIFE_STEP - t * LIFE_FREQ);
+          bx -= sm.ty * w * amp; by += sm.tx * w * amp;
+        }
+        pos[i] = { x: bx, y: by, sc };
+      }
+      if (METRICS) {
+        if (!metEl) {
+          metEl = document.createElement('pre');
+          metEl.id = 'metrics'; metEl.style.display = 'none';
+          document.body.appendChild(metEl);
+        }
+        metEl.textContent = metRows.join('\n');
+      }
+      if (state === 'depart' && (allGone || (glowT0 >= 0 &&
+        departAge - glowT0 > GLOW_SECS + FADE_SECS + NUM_LINGER + NUM_FADE))) {
+        state = 'gone';
+        const dg = 'departed ' + metMarks.join(' ') +
+          ' T=' + ((now - departT) / 1000).toFixed(1) +
+          ' [' + Math.round(bW) + 'x' + Math.round(bH) +
+          ' s' + segD.toFixed(0) + ']';
+        cap.textContent = METRICS ? dg : 'departed — Deal for another';
+        if (METRICS) document.title = dg;
+        return;
+      }
+      const headTip = sampleTrail(0);
+      const headFacing = Math.atan2(headTip.ty, headTip.tx);
+
+      ctx.globalAlpha = fadeK * stillK;   // ring fade; stillK fades the
+      //   body early on the no-motion path (stays 1 everywhere else)
+      // faint spine thread so the pose reads as one animal // the whole snake
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < N; i++) {
+        if (!pos[i]) continue;
+        if (!started) { ctx.moveTo(pos[i].x, pos[i].y); started = true; }
+        else ctx.lineTo(pos[i].x, pos[i].y);
+      }
+      ctx.strokeStyle = 'rgba(90,110,130,.25)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // segments back-to-front
+      for (let i = N - 1; i >= 0; i--) {
+        if (!pos[i]) continue;
+        const s = segs[i], r = segD / 2;
+        if (i === 0) { drawHead(pos[0], headFacing, now, pos[0].sc); continue; }
+        // reinforcement beat: members light in sequence
+        let pop = 0;
+        if (state === 'beat') {
+          const k = (now - beatT) / 1000 - i * BEAT_STAGGER;
+          if (k > 0 && k < BEAT_HOLD) pop = Math.sin(k / BEAT_HOLD * Math.PI);
+        }
+        const rr = r * (1 + pop * 0.12) * pos[i].sc;
+        if (s.blank && state !== 'depart' && state !== 'beat') {
+          ctx.beginPath(); ctx.arc(pos[i].x, pos[i].y, rr, 0, 7);
+          ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();
+          ctx.setLineDash([5, 4]);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = tableColour(table);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          ctx.beginPath(); ctx.arc(pos[i].x, pos[i].y, rr, 0, 7);
+          ctx.fillStyle = tableColour(table); ctx.fill();
+          if (pop > 0) {
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * pop) + ')';
+            ctx.stroke();
+          }
+          numeral(s.expected, pos[i].x, pos[i].y, segD * 0.34 * pos[i].sc, '#fff');
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // the numeral the ring resolved into — drawn last, on its own
+      // alpha, so it stands a moment after the snake has faded
+      if (numA > 0.01 && ring) {
+        ctx.font = '800 ' + (segD * (table >= 10 ? 0.8 : 1.05)) +
+          'px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(255,240,200,' + numA + ')';
+        ctx.fillText(table, ring.x, ring.y);
+      }
+    }
+
+    /* ---------- boot ---------- */
+    resize();
+    // optional jumps for headless checks: ?pose=coil&departAt=1.2&life=0
+    const qs = new URLSearchParams(location.search);
+    if (qs.get('pose') && FAMILIES[qs.get('pose')]) family = qs.get('pose');
+    const NOLIFE = qs.get('life') === '0';
+    METRICS = qs.get('metrics') === '1';
+    /* macOS omits motion — its compositing renders the engine's paths
+       differently (bounded, parked 2026-10-18). The celebration keeps
+       its meaning: beat, body fade, halo + numeral in place. iPad also
+       reports MacIntel — maxTouchPoints is what gives it away. */
+    const IS_MAC = navigator.platform === 'MacIntel' &&
+      navigator.maxTouchPoints <= 1;
+    let MOTION = !IS_MAC;
+    if (qs.get('motion') === '0') MOTION = false;  // audition either
+    if (qs.get('motion') === '1') MOTION = true;   // path anywhere
+    const hp = qs.get('hole');
+    if (hp) {
+      const ha = hp.split(',').map(Number);
+      if (ha.length === 2 && isFinite(ha[0]) && isFinite(ha[1]))
+        FIXED_HOLE = { x: ha[0], y: ha[1] };
+    }
+    const bp = qs.get('board');
+    if (bp) {
+      const ba = bp.split('x').map(Number);
+      if (ba.length === 2 && isFinite(ba[0]) && isFinite(ba[1]))
+        FIXED_BOARD = { w: ba[0], h: ba[1] };
+    }
+    const sd = qs.get('seed');                 // seeded RNG: same deal,
+    if (sd) {                                  // same hole, every run
+      let rs = (+sd >>> 0) || 1;
+      Math.random = () => {
+        rs = (rs * 1664525 + 1013904223) >>> 0;
+        return rs / 0x100000000;
+      };
+    }
+    if (FIXED_BOARD) resize();                 // re-layout on the pinned
+    deal();                                    // board before the deal
+    if (qs.get('life') === '0') dealT = performance.now() - 1e9; // settle done
+    if (qs.get('departAt')) {
+      // jump mid-departure: bake the head's trail forward so the body
+      // reads it back correctly
+      const at = parseFloat(qs.get('departAt'));
+      startDepart();
+      departT = performance.now() - at * 1000;
+      const steps = Math.ceil(at / 0.016);
+      for (let k = 0; k < steps; k++) driveHead(0.016, k * 0.016);
+    } else if (qs.get('beatAt')) {
+      state = 'beat';
+      beatT = performance.now() - parseFloat(qs.get('beatAt')) * 1000;
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=9"></script>
+</body>
+
+</html>

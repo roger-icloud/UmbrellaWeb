@@ -635,6 +635,22 @@ work; this is its return on the new invariant).
        steering and split-colour cells, and using the sliding-grid
        superposition as the payoff.
 
+**2026-10-24 — Rebrand to `NumberFun` + handover for pre-launch polish.**
+- Replaced working title `Umbrella` with `NumberFun` across all pages
+  (`<title>`, `<h1>`, `<footer>`, `feedback.html` email subjects,
+  `manifest.json`, and `nav.js` comment), keeping only literal repo/folder
+  paths (`UmbrellaWeb`, `~/Developer/Umbrella`) in docs.
+- Roger updated `rationale.html` with his new prose.
+- **Immediate next agenda (for the fresh session):**
+  1. **Radically reduce on-screen text** across the activities and landing
+     cards — the app is for young learners who are into *doing* rather
+     than reading (strip or shrink instructional HUD text, verbose
+     subtitles on overlays/cards, etc.).
+  2. **Finish the remaining couple of pages** (`Patterns` / `Pattern Snake`
+     / `Lattice` consolidation + `Tilt Ball` polish) and retire diagnostic
+     leftovers (`#buildTag` on Snake Puzzle, `DEBUG_GRID` on `patterns.html`).
+  3. **Commit and push to `main`** to publish live on `number-fun.uk`.
+
 **ACTION POINT (Roger, 2026-10-21):** table choice is currently free;
 an enhancement should *guide* users to appropriate tables for their
 skill — track miss/refusal and completion-time stats per device and

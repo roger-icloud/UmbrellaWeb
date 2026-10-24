@@ -174,11 +174,14 @@
     const DEMO_HOLD_S = 2.0;      // s each random table's pattern shows before a choice is made
     const DEMO_FADE_S = 0.38;     // fade-in / fade-out envelope inside DEMO_HOLD_S
     const DEPOSIT_SPEED = 3.8;    // cells/s while depositing 1×t .. 12×t
-    const UPPER_SPEED = 6.2;      // cells/s while lone head paints >12×t
+    const DART_MOVE_S = 0.11;     // s for lone head to zip between >12×t squares
+    const DART_WRAP_S = 0.15;     // s when darting across to a new row on >12×t
+    const DART_PAUSE_S = 0.045;   // brief hover on each >12×t square as it lights up
     const PRE_NUM_FADE_S = 0.8;   // s to fade up numbers on coloured squares after distribution
     const NUM_HALO_CYCLE_S = 2.2; // s between intermittent halo pulses on top-left numeral
     const NUM_HALO_ON_S = 1.3;    // s duration of each halo pulse on top-left numeral
-    const COLLECT_SPEED = 5.4;    // cells/s while head wanders back collecting 1×..12×
+    const COLLECT_COUNT = 4;      // how many random numbers the snake scoops up from the 12
+    const COLLECT_SPEED = 5.4;    // cells/s while head wanders back collecting the chosen squares
     const PARK_SPEED = 5.0;       // cells/s while completed snake parks above the square
     const WRIG_AMP = 0.50;        // lateral wriggle amplitude (in cells)
     const SEG_DIAM = 0.78;        // snake segment diameter as a fraction of cell
@@ -271,7 +274,8 @@
     let waitCollectT0 = 0;      // timestamp when distribution finished and numbers began fading up
     let collectStartT0 = 0;     // timestamp when user clicked top-left numeral to start collection
     let targets = [];           // ascending multiples of table from 1×t up to ≤100
-    let collectTargets = [];    // randomised bottom-to-top order of 1×t..12×t to collect back
+    let collectTargets = [];    // randomised bottom-to-top order of COLLECT_COUNT multiples
+    let collectedVals = [];     // values scooped up so far during 'collect'
     let targetIdx = 0;          // index in targets / collectTargets currently being approached
     let segsLeft = 12;          // body segments attached to head during 'run' / 'collect' / 'parkTop'
     let painted = new Map();    // v -> { kind: 'pale' | 'solid' | 'faint', at: now }
@@ -279,8 +283,11 @@
     let head = { x: 0, y: 0 };
     let heading = 0;
     let trail = [];
+    let dartTrail = [];         // short fading motion trail behind the darting lone head
     let segFrom = null, segTo = null;
     let segDist = 0, segProg = 0;
+    let dartElapsed = 0;        // time spent on the current >12×t dart+pause leg
+    let dartPainted = false;    // whether current >12×t square has been lit during the hover pause
     let parkFrom = null, parkApproach = true;
     let parkU = 12;             // u from count down to 0 along slotPos(u)
     let bounceT0 = 0;
@@ -329,20 +336,21 @@
       return { x: t0.x, y: t0.y };
     }
 
-    /* Build a randomised bottom-to-top collection order for the 1×t..count×t
-       solid squares so the lone head wanders playfully around the grid
-       picking them back up, finishing near the top-right ready to park
-       in the strip above the 100-square. */
+    /* Pick COLLECT_COUNT (4) random multiples from 1×t..count×t and order
+       them bottom-to-top so the lone head visits just those 4 squares on
+       its way up to the resting strip above the 100-square. */
     function buildCollectOrder(t, count) {
-      const list = [];
-      for (let i = 1; i <= count; i++) list.push(t * i);
-      // Score each value by its row (bottom rows first) plus random jitter
-      // of ±2.5 rows so it darts across rows rather than marching in order
-      const scored = list.map(v => {
+      const pool = [];
+      for (let i = 1; i <= count; i++) pool.push(t * i);
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+      }
+      const picked = pool.slice(0, Math.min(COLLECT_COUNT, count));
+      const scored = picked.map(v => {
         const row = Math.floor((v - 1) / 10);
         const col = (v - 1) % 10;
-        const isTopRight = row <= 1 && col >= 4;
-        const score = isTopRight ? -20 + Math.random() : row + (Math.random() - 0.5) * 4.8;
+        const score = row + (Math.random() - 0.5) * 2.2 - col * 0.08;
         return { v, score };
       });
       scored.sort((a, b) => b.score - a.score);
@@ -350,20 +358,20 @@
     }
 
     function buildPlaySnake(now) {
-      const count = Math.min(12, Math.floor(100 / table));
-      playSegs = [];
-      for (let i = 1; i <= count; i++) {
-        playSegs.push({
-          v: table * i,
-          slot: i,
-          fromSlot: i,
-          slideT0: 0,
-          state: 'idle',
-          x: 0, y: 0,
-          rx: 0, ry: 0,
-          retT0: 0
-        });
-      }
+      // Only the collected multiples are solid draggable segments; each sits
+      // in its true ordinal slot (v / table) along the 12-place snake, while
+      // the remaining slots are drawn as hollow dashed socket rings!
+      const sorted = collectTargets.slice().sort((a, b) => a - b);
+      playSegs = sorted.map(v => ({
+        v,
+        slot: v / table,
+        fromSlot: v / table,
+        slideT0: 0,
+        state: 'idle',
+        x: 0, y: 0,
+        rx: 0, ry: 0,
+        retT0: 0
+      }));
       dragSeg = null;
       playStartT = now;
       lastAct = now;
@@ -400,6 +408,7 @@
       const count = Math.min(12, targets.length);
       segsLeft = count;
       collectTargets = buildCollectOrder(t, count);
+      collectedVals = [];
       targetIdx = 0;
       const firstP = cellCentre(targets[0]);
       // Enter at the top-left of the grid, slithering into 1×t
@@ -419,6 +428,9 @@
       segTo = firstP;
       segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
       segProg = 0;
+      dartElapsed = 0;
+      dartPainted = false;
+      dartTrail = [];
       doneShown = false;
       state = 'run';
       nextBlinkAt = tNow + 1500 + Math.random() * 2000;
@@ -593,16 +605,9 @@
         placed.set(sg.v, now);
         const removedIdx = playSegs.indexOf(sg);
         if (removedIdx >= 0) {
+          // Removing this segment leaves its slot on the 12-place snake as a
+          // hollow socket ring (all other segments stay in their true slots!)
           playSegs.splice(removedIdx, 1);
-          for (let i = 0; i < playSegs.length; i++) {
-            const item = playSegs[i];
-            const newSlot = i + 1;
-            if (item.slot !== newSlot) {
-              item.fromSlot = item.slot;
-              item.slot = newSlot;
-              item.slideT0 = now;
-            }
-          }
         }
         if (playSegs.length === 0) {
           const hp = slotPos(0);
@@ -661,37 +666,106 @@
       if (state === 'run') {
         const curV = targets[targetIdx];
         const isSolid = curV <= table * 12;
-        const spd = (isSolid ? DEPOSIT_SPEED : UPPER_SPEED) * cell;
-        segProg += spd * dt;
+        if (isSolid) {
+          const spd = DEPOSIT_SPEED * cell;
+          segProg += spd * dt;
 
-        while (segProg >= segDist && state === 'run') {
-          const v = targets[targetIdx];
-          const solid = v <= table * 12;
-          painted.set(v, { kind: solid ? 'solid' : 'pale', at: now });
-          if (solid && segsLeft > 0) segsLeft--;
-          const overshoot = segProg - segDist;
-          targetIdx++;
-          if (targetIdx >= targets.length) {
-            // Reached the bottom of the grid as a lone head — step just
-            // below the bottom edge so every numbered cell is uncovered,
-            // fade up the numbers on the coloured squares, and wait for the
-            // user to tap the top-left table numeral (with its intermittent
-            // halo) to initiate collection!
-            state = 'waitCollect';
-            waitCollectT0 = now;
-            const lastC = cellCentre(v);
-            head.x = lastC.x;
-            head.y = bY + bS + cell * 0.52;
-            const tn = topNumPos();
-            heading = Math.atan2(tn.y - head.y, tn.x - head.x);
-            return;
+          while (segProg >= segDist && state === 'run') {
+            const v = targets[targetIdx];
+            if (v > table * 12) {
+              // Hand over to the rapid dart-and-pause mode for >12×t
+              dartElapsed = 0;
+              dartPainted = false;
+              dartTrail = [{ x: head.x, y: head.y, t: now }];
+              break;
+            }
+            painted.set(v, { kind: 'solid', at: now });
+            if (segsLeft > 0) segsLeft--;
+            const overshoot = segProg - segDist;
+            targetIdx++;
+            if (targetIdx >= targets.length) {
+              state = 'waitCollect';
+              waitCollectT0 = now;
+              const lastC = cellCentre(v);
+              head.x = lastC.x;
+              head.y = bY + bS + cell * 0.52;
+              const tn = topNumPos();
+              heading = Math.atan2(tn.y - head.y, tn.x - head.x);
+              return;
+            }
+            segFrom = cellCentre(v);
+            segTo = cellCentre(targets[targetIdx]);
+            segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+            if (targets[targetIdx] > table * 12) {
+              segProg = 0;
+              dartElapsed = 0;
+              dartPainted = false;
+              dartTrail = [{ x: segFrom.x, y: segFrom.y, t: now }];
+              break;
+            }
+            segProg = overshoot;
           }
-          segFrom = cellCentre(v);
-          segTo = cellCentre(targets[targetIdx]);
-          segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
-          segProg = overshoot;
+          if (state === 'run' && targets[targetIdx] <= table * 12) {
+            stepWriggleLeg();
+          }
+        } else {
+          // Lone head darts rapidly from square to square (>12×t), with the
+          // briefest hover over each multiple square as it lights up!
+          let rem = dt;
+          while (rem > 1e-6 && state === 'run') {
+            const moveS = segDist > cell * 3.5 ? DART_WRAP_S : DART_MOVE_S;
+            const totalS = moveS + DART_PAUSE_S;
+            const take = Math.min(rem, totalS - dartElapsed);
+            dartElapsed += take;
+            rem -= take;
+
+            const v = targets[targetIdx];
+            if (dartElapsed >= moveS && !dartPainted) {
+              // Arrived at the square — light it up during the brief hover!
+              painted.set(v, { kind: 'pale', at: now });
+              dartPainted = true;
+              head.x = segTo.x;
+              head.y = segTo.y;
+              dartTrail.push({ x: head.x, y: head.y, t: now });
+            } else if (dartElapsed < moveS) {
+              const u = Math.max(0, Math.min(1, dartElapsed / moveS));
+              // Fast ease-out dart with a slight graceful arc
+              const e = 1 - Math.pow(1 - u, 2.6);
+              const dx = segTo.x - segFrom.x, dy = segTo.y - segFrom.y;
+              const nx = -dy / segDist, ny = dx / segDist;
+              const bow = Math.sin(u * Math.PI) * cell * 0.22 * (targetIdx % 2 ? 1 : -1);
+              const px = segFrom.x + dx * e + nx * bow;
+              const py = segFrom.y + dy * e + ny * bow;
+              if (Math.hypot(px - head.x, py - head.y) > 0.1) {
+                heading = Math.atan2(py - head.y, px - head.x);
+              }
+              head.x = px;
+              head.y = py;
+              dartTrail.push({ x: head.x, y: head.y, t: now });
+            }
+
+            if (dartElapsed >= totalS - 1e-6) {
+              targetIdx++;
+              if (targetIdx >= targets.length) {
+                state = 'waitCollect';
+                waitCollectT0 = now;
+                dartTrail = [];
+                const lastC = cellCentre(v);
+                head.x = lastC.x;
+                head.y = bY + bS + cell * 0.52;
+                const tn = topNumPos();
+                heading = Math.atan2(tn.y - head.y, tn.x - head.x);
+                return;
+              }
+              segFrom = cellCentre(v);
+              segTo = cellCentre(targets[targetIdx]);
+              segDist = Math.hypot(segTo.x - segFrom.x, segTo.y - segFrom.y) || 1;
+              dartElapsed = 0;
+              dartPainted = false;
+            }
+          }
+          dartTrail = dartTrail.filter(pt => (now - pt.t) / 1000 < 0.22);
         }
-        if (state === 'run') stepWriggleLeg();
       } else if (state === 'collect') {
         const spd = COLLECT_SPEED * cell;
         segProg += spd * dt;
@@ -701,12 +775,13 @@
           // Picking up this solid square softens it to the faint pattern trace
           // and adds one segment back onto the snake's tail!
           painted.set(v, { kind: 'faint', at: now });
+          collectedVals.push(v);
           segsLeft++;
           const overshoot = segProg - segDist;
           targetIdx++;
           if (targetIdx >= collectTargets.length) {
-            // All 12 segments collected — glide directly up into the resting
-            // strip above the 100-square!
+            // All 4 chosen segments collected — glide up to the right end of
+            // the top strip and unfurl the 12-place snake (4 solid + 8 hollow)!
             state = 'parkTop';
             const count = Math.min(12, Math.floor(100 / table));
             parkFrom = cellCentre(v);
@@ -773,8 +848,8 @@
         if (!dragSeg && hintV < 0 && playSegs.length > 0) {
           const waitS = hintFirstDone ? HINT_IDLE_S : HINT_FIRST_S;
           if ((now - lastAct) / 1000 >= waitS) {
-            const pick = !hintFirstDone && playSegs.length >= 3
-              ? playSegs[2]
+            const pick = !hintFirstDone
+              ? playSegs[0]
               : playSegs[Math.floor(Math.random() * playSegs.length)];
             hintV = pick.v;
             hintT0 = now;
@@ -959,7 +1034,8 @@
         const wa = (now - waitCollectT0) / 1000;
         seqNumAlpha = Math.max(0, Math.min(1, wa / PRE_NUM_FADE_S));
       } else if (state === 'collect') {
-        // Fade the preview numbers out over 0.35s once collection begins
+        // Fade the >12× pale preview numbers out over 0.35s once collection begins;
+        // the 8 uncollected solid squares keep their numbers on the grid!
         const ca = (now - collectStartT0) / 1000;
         seqNumAlpha = Math.max(0, 1 - ca / 0.35);
       } else if (state === 'reveal' || state === 'done') {
@@ -1044,7 +1120,19 @@
           }
 
           if (plAt === undefined) {
-            const numA = p ? seqNumAlpha : restNumAlpha;
+            // The 8 uncollected solid squares keep their numbers visible on the
+            // grid from waitCollect onward; faint (collected) squares stay blank
+            // until the user drags their segment home!
+            let numA = restNumAlpha;
+            if (p) {
+              if (p.kind === 'solid' && state !== 'run') {
+                numA = state === 'waitCollect' ? seqNumAlpha : 1;
+              } else if (p.kind === 'pale') {
+                numA = seqNumAlpha;
+              } else if (p.kind === 'faint') {
+                numA = (state === 'reveal' || state === 'done') ? seqNumAlpha : 0;
+              }
+            }
             if (numA > 0.01) {
               ctx.globalAlpha = numA;
               ctx.fillStyle = p ? '#ffffff' : '#8a97a3';
@@ -1070,14 +1158,46 @@
 
       const segR = (cell * SEG_DIAM) / 2;
       const sp = cell * SEG_SPACE;
+      const count = Math.min(12, Math.floor(100 / table));
 
-      if (state === 'run' || state === 'waitCollect' || state === 'collect' || state === 'parkTop') {
+      function drawHollowSlot(cx, cy, alpha) {
+        if (alpha <= 0.01) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(cx, cy, segR, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(20,28,36,0.92)';
+        ctx.fill();
+        ctx.setLineDash([5, 4]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = col;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      if (state === 'run' || state === 'waitCollect' || state === 'collect') {
         if (state === 'waitCollect' && targets.length) {
           const lastC = cellCentre(targets[targets.length - 1]);
           head.x = lastC.x;
           head.y = bY + bS + cell * 0.56;
           const tn = topNumPos();
           heading = Math.atan2(tn.y - head.y, tn.x - head.x);
+        }
+        // Subtle fading comet-streak behind the darting lone head on >12×t
+        if (state === 'run' && segsLeft === 0 && dartTrail.length > 1) {
+          for (let i = 1; i < dartTrail.length; i++) {
+            const p0 = dartTrail[i - 1], p1 = dartTrail[i];
+            const age = (now - p1.t) / 1000;
+            const a = Math.max(0, (1 - age / 0.22) * 0.42);
+            if (a <= 0.01) continue;
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.strokeStyle = 'hsla(' + hue + ',70%,65%,' + a + ')';
+            ctx.lineWidth = segR * (0.4 + 0.6 * (1 - age / 0.22));
+            ctx.lineCap = 'round';
+            ctx.stroke();
+          }
         }
         for (let i = segsLeft; i >= 1; i--) {
           const sm = sampleTrail(i * sp);
@@ -1088,24 +1208,74 @@
           ctx.lineWidth = 1.5;
           ctx.strokeStyle = 'hsl(' + hue + ',55%,34%)';
           ctx.stroke();
-          // As the snake parks into the top strip, fade up the numbers on its segments
-          if (state === 'parkTop' && !parkApproach) {
-            const count = Math.min(12, Math.floor(100 / table));
-            const numFade = Math.max(0, Math.min(1, 1 - parkU / (count * 0.6)));
-            if (numFade > 0.02) {
-              ctx.globalAlpha = numFade;
-              ctx.fillStyle = '#ffffff';
-              ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(table * i, sm.x, sm.y + 1);
-              ctx.globalAlpha = 1;
-            }
+          if (state === 'collect' && collectedVals[segsLeft - i] !== undefined) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(collectedVals[segsLeft - i], sm.x, sm.y + 1);
           }
+        }
+        drawHead(head.x, head.y, heading, segR * 1.08, now);
+      } else if (state === 'parkTop') {
+        // As the head glides across the top strip from slot(count) to slot(0),
+        // it lays down the 12-place spine in its wake: hollow dashed rings
+        // bloom at the 8 uncollected slots while the 4 collected solid discs
+        // part and glide smoothly into their true ordinal slots!
+        const unfurlK = parkApproach ? 0 : Math.max(0, Math.min(1, 1 - parkU / count));
+        const ease = unfurlK * unfurlK * (3 - 2 * unfurlK);
+        const collectedSet = new Set(collectTargets);
+
+        if (!parkApproach) {
+          ctx.beginPath();
+          ctx.moveTo(head.x, head.y);
+          for (let s = Math.max(1, Math.ceil(parkU)); s <= count; s++) {
+            const p = slotPos(s);
+            ctx.lineTo(p.x, p.y);
+          }
+          ctx.strokeStyle = 'rgba(90,110,130,' + (0.28 * unfurlK) + ')';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          for (let s = count; s >= 1; s--) {
+            if (collectedSet.has(table * s)) continue;
+            const ringA = Math.max(0, Math.min(1, (s - parkU) / 1.8));
+            const p = slotPos(s);
+            drawHollowSlot(p.x, p.y, ringA);
+          }
+        }
+
+        // Draw the 4 collected solid discs interpolating from trail to their ordinal slots
+        for (let i = segsLeft; i >= 1; i--) {
+          const v = collectedVals[segsLeft - i];
+          const sm = sampleTrail(i * sp);
+          const ordSlot = v / table;
+          const dst = slotPos(ordSlot);
+          const cx = sm.x + (dst.x - sm.x) * ease;
+          const cy = sm.y + (dst.y - sm.y) * ease;
+          ctx.beginPath();
+          ctx.arc(cx, cy, segR, 0, Math.PI * 2);
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'hsl(' + hue + ',55%,34%)';
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(v, cx, cy + 1);
         }
         drawHead(head.x, head.y, heading, segR * 1.08, now);
       } else if (state === 'endFloat') {
         const age = (now - bounceT0) / 1000;
+        const ringFade = Math.max(0, 1 - age / 0.45);
+        if (ringFade > 0.01) {
+          for (let s = count; s >= 1; s--) {
+            const p = slotPos(s);
+            drawHollowSlot(p.x, p.y, ringFade);
+          }
+        }
         const alpha = Math.max(0, 1 - Math.max(0, (age / FLOAT_SECS - 0.78) / 0.22));
         ctx.globalAlpha = alpha;
         drawHead(head.x, head.y, heading, segR * 1.08, now);
@@ -1113,17 +1283,24 @@
       } else if (state === 'play') {
         const hp = slotPos(0);
 
-        // Faint spine connecting head and remaining idle segments on the top snake
+        // Spine through all 12 places on the top snake
         ctx.beginPath();
         ctx.moveTo(hp.x, hp.y);
-        for (const sg of playSegs) {
-          if (sg === dragSeg) continue;
-          const pos = segCurrentPos(sg, now);
-          ctx.lineTo(pos.x, pos.y);
+        for (let s = 1; s <= count; s++) {
+          const p = slotPos(s);
+          ctx.lineTo(p.x, p.y);
         }
         ctx.strokeStyle = 'rgba(90,110,130,.28)';
         ctx.lineWidth = 3;
         ctx.stroke();
+
+        // Draw all 12 places as hollow dashed sockets first (any slot with an
+        // idle solid segment will draw on top of its socket; when dragged away
+        // or placed onto the grid, its hollow socket remains visible!)
+        for (let s = count; s >= 1; s--) {
+          const p = slotPos(s);
+          drawHollowSlot(p.x, p.y, 1);
+        }
 
         let hintedSeg = null;
         for (let i = playSegs.length - 1; i >= 0; i--) {
@@ -1228,6 +1405,9 @@
       const steps = Math.ceil(adv / 0.016);
       for (let k = 1; k <= steps; k++) {
         const tn = t0 + k * 16;
+        if (qs.has('collect') && state === 'waitCollect' && (tn - waitCollectT0) / 1000 >= 1.2) {
+          beginCollect(tn);
+        }
         step(0.016, tn);
         lastT = tn;
       }
@@ -1236,7 +1416,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=8"></script>
+  <script src="nav.js?v=9"></script>
 </body>
 
 </html>

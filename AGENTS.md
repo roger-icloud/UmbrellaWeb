@@ -579,39 +579,61 @@ work; this is its return on the new invariant).
     1. **Stage 1a (`run`, top-down `1×t → 100` → `waitCollect`):** The
        12-segment snake enters at the top-left (`1`), visits `1×t .. 12×t`
        first — leaving a 100%-solid square and shedding one body segment
-       per multiple until at `12×t` only the light round head remains —
-       then zips down the remaining multiples (`> 12×t` up to `100`),
-       leaving 50%-opaque (`PALE_ALPHA = 0.48`) continuation squares. At
-       the bottom, the lone head steps just below the grid (`waitCollect`),
-       the numbers fade up over all coloured squares (`PRE_NUM_FADE_S =
-       0.8s`), and the top-left table numeral pulses an intermittent halo
-       ring (`NUM_HALO_CYCLE_S = 2.2s`). Tapping the top-left numeral
-       initiates the collection.
-    2. **Stage 1b (`collect` → `parkTop`):** Once the top-left numeral is
-       tapped, the preview numbers fade out and the lone head wanders back
-       up through the `1×t .. 12×t` solid squares in a randomised order
-       (`buildCollectOrder`). Each square it visits softens to a faint
-       pattern trace (`FAINT_SOLID = 0.28`) while the snake grows back by
-       one segment (`0 → 12`). Finishing near the top-right of the grid,
-       the reassembled snake slithers directly into its S-wave resting
-       strip **above** the 100-square (`parkTop`), and the multiples fade
-       up on its segments.
-    3. **Stage 2 (`play`, drag down from above the 100-square):**
-       **Synchronous pair-glow hint:** `1.5s` after parking (`HINT_FIRST_S`,
-       picking the 3rd segment, e.g. `9`, first — and after any `6.5s`
-       idle pause `HINT_IDLE_S`), a segment on the snake above and its
-       corresponding square on the grid below pulse in lockstep
-       (`HINT_DUR_S = 3.2s`) while the snake's eyes glance toward that
-       square. Dragging down from above the square makes the top-row
-       multiples a short, easy reach. Each valid drop lights the square
-       solid with its white numeral and shortens the snake by one segment;
-       any other drop returns silently and uncritically to its slot.
+       per multiple until at `12×t` only the light round head remains.
+       Once tail-less, the lone head switches to a rapid dart-and-pause
+       flight (`DART_MOVE_S = 0.11s`, `DART_WRAP_S = 0.15s`, `DART_PAUSE_S =
+       0.045s`) with a soft fading motion streak (`dartTrail`), zipping
+       from square to square across `> 12×t` up to `100` and hovering for
+       a split-second on each square as it blooms to 50% opacity
+       (`PALE_ALPHA = 0.48`). At the bottom, the lone head steps just
+       below the grid (`waitCollect`), the numbers fade up over all
+       coloured squares (`PRE_NUM_FADE_S = 0.8s`), and the top-left table
+       numeral pulses an intermittent halo ring (`NUM_HALO_CYCLE_S = 2.2s`).
+       Tapping the top-left numeral initiates the collection.
+    2. **Stage 1b (`collect` → `parkTop`, `COLLECT_COUNT = 4`):** Once the
+       top-left numeral is tapped, the `>12×` preview numbers fade out and
+       the lone head visits **only `COLLECT_COUNT` (4) random multiples**
+       from `1×t .. 12×t` (`buildCollectOrder`). The other 8 multiples stay
+       solid and numbered on the grid as stepping-stones; the 4 visited
+       squares lose their numbers and soften to `FAINT_SOLID = 0.28` as the
+       snake scoops them up (`0 → 4` segments). As the head then glides
+       across the resting strip **above** the 100-square from `slot 12` to
+       `slot 0` (`parkTop`), it unfurls the full 12-place spine in its
+       wake: the 8 uncollected slots bloom as hollow dashed socket rings
+       while the 4 collected discs part and glide into their true ordinal
+       slots (`v / table`).
+    3. **Stage 2 (`play`, drag down from the 12-place snake):**
+       Above the square sits the 12-place snake (8 hollow rings + 4 solid
+       numbered discs in their true sequence places); below on the square
+       sit the 8 solid numbered stepping-stone cells and 4 faint empty
+       target cells — exact complements. **Synchronous pair-glow hint:**
+       `1.5s` after parking (`HINT_FIRST_S`, and after any `6.5s` idle
+       pause `HINT_IDLE_S`), one of the 4 solid segments on the snake and
+       its matching faint square on the grid pulse in lockstep. Each valid
+       drop turns that grid square solid + numbered and leaves its slot on
+       the snake as a hollow dashed ring; any other drop returns silently
+       and uncritically to its ordinal slot on the snake.
     4. **Conclusion (`endFloat` → `reveal` → `done`):** When the last
        segment is placed, the lone head above the grid floats playfully
        upward with a blink, the `>12×` multiples fade up over their
        coloured squares (`SEQ_FADE_S`), followed 1s later by a slow
        fade-in of the remaining unpatterned grid numbers (`REST_FADE_S`),
        holding with `Another pattern? Yes / No` at the bottom.
+  - **Evening mull — Pattern Snake completion & multi-table `Patterns`
+    (Roger, 2026-10-23):**
+    1. **Sliding-grid superposition ("overhead transparencies"):**
+       Two smaller `10 × 10` grids appear side-by-side showing two tables'
+       patterns, then slide over each other until perfectly superimposed;
+       at exact alignment, the cells belonging to *both* tables flare up
+       (split-colour / bright rim + numeral), showing visually that the
+       intersection of `×A` and `×B` is itself a regular pattern (`×lcm(A,B)`).
+    2. **Role of `patterns.html` vs `pattern-snake.html`:**
+       Since `pattern-snake.html` now carries the single-table 100-square
+       experience richly, `patterns.html` (or Stage 2 after a Pattern Snake
+       round) can focus on **two-table coexistence and common multiples**
+       on the 100-square — sharing Honeycomb Search's kin-glow chip
+       steering and split-colour cells, and using the sliding-grid
+       superposition as the payoff.
 
 **ACTION POINT (Roger, 2026-10-21):** table choice is currently free;
 an enhancement should *guide* users to appropriate tables for their

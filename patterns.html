@@ -124,8 +124,7 @@
 
   <div id="rotOverlay" class="overlay hidden">
     <div class="title">Turn upright</div>
-    <div class="sub">The square is far easier to read in portrait — the
-      game waits for you.</div>
+    <div class="sub">The game waits for you.</div>
   </div>
 
   <div id="doneOverlay" class="overlay hidden">
@@ -344,7 +343,7 @@
       // the box doubles as the only onboarding text — it speaks while a
       // table is being picked, then stays out of the way
       hud.textContent = state === 'idle'
-        ? 'pick a table below,\nthen tap its multiples on the square'
+        ? 'pick a table —\ntap its multiples'
         : '';
     }
 

@@ -31,6 +31,10 @@ attention" — never "still pending" for something broken).
 - **Steering, never forcing** — e.g. Honeycomb's kin glow (a chip glows
   only if it shares ≥2 multiples with a selected table; the bare product
   doesn't count — ×7 and ×11 correctly glow nobody).
+- **On-screen text is for young learners** — a few words, never
+  instructional prose. Explanation lives in `rationale.html` and
+  `help.html` (which are adult-facing); the index intro and footers
+  stay to a line or two. Tile descriptions are one short phrase.
 - **Tunables live at the top of each file** in a `/* tunables */` block —
   Roger adjusts behaviour through named constants, not code spelunking.
 - The snake is one character everywhere: green head, eyes that face the

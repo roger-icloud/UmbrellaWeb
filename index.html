@@ -64,6 +64,18 @@
       text-decoration: none;
     }
 
+    .tile.has-icon {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .tile .icon {
+      width: 44px;
+      height: 44px;
+      flex: none;
+    }
+
     .tile .name {
       font-size: 18px;
       font-weight: 600;
@@ -101,31 +113,47 @@
     <!-- ============ END OF ROGERS INTRO TEXT ============ -->
 
     <div class="tiles">
-      <a class="tile" href="tilt-snake.html">
-        <div class="name">Tilt Snake</div>
-        <div class="desc">Collect the multiples in order.</div>
+      <a class="tile has-icon" href="tilt-snake.html">
+        <img class="icon" src="icons/tilt.png" alt="">
+        <div>
+          <div class="name">Tilt Snake</div>
+          <div class="desc">Collect the multiples in order.</div>
+        </div>
       </a>
-      <a class="tile" href="snake-puzzle.html">
-        <div class="name">Snake Puzzle</div>
-        <div class="desc">Drag the missing numbers home.</div>
+      <a class="tile has-icon" href="snake-puzzle.html">
+        <img class="icon" src="icons/snake-puzzle.png" alt="">
+        <div>
+          <div class="name">Snake Puzzle</div>
+          <div class="desc">Drag the missing numbers home.</div>
+        </div>
       </a>
-      <a class="tile" href="patterns.html">
-        <div class="name">Patterns</div>
-        <div class="desc">Find the twelve multiples.</div>
+      <a class="tile has-icon" href="patterns.html">
+        <img class="icon" src="icons/patterns.png" alt="">
+        <div>
+          <div class="name">Patterns</div>
+          <div class="desc">Find the twelve multiples.</div>
+        </div>
       </a>
-      <a class="tile" href="tilt-ball.html">
-        <div class="name">Tilt Ball</div>
-        <div class="desc">How does the device feel to steer?</div>
+      <a class="tile has-icon" href="tilt-ball.html">
+        <img class="icon" src="icons/tilt-ball.png" alt="">
+        <div>
+          <div class="name">Tilt Ball</div>
+          <div class="desc">How does the device feel to steer?</div>
+        </div>
       </a>
-      <a class="tile" href="honeycomb.html">
-        <div class="name">Honeycomb Search</div>
-        <div class="desc">Find the hiding paths.</div>
+      <a class="tile has-icon" href="honeycomb.html">
+        <img class="icon" src="icons/honeycomb.png" alt="">
+        <div>
+          <div class="name">Honeycomb Search</div>
+          <div class="desc">Find the hiding paths.</div>
+        </div>
       </a>
     </div>
   </main>
 
   <footer>
-    Umbrella — small games about number and shape.
+    Umbrella — small games about number and shape.<br>
+    Icons by Flaticon.
   </footer>
 
   <script src="nav.js?v=8"></script>

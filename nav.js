@@ -81,7 +81,7 @@
   style.textContent = css;
   document.head.appendChild(style);
 
-  /* an umbrella glyph rather than the standard ≡ — the browser's own
+  /* a snake glyph rather than the standard ≡ — the browser's own
      menu button sits just above ours on some devices and two burgers
      stacked reads as clutter. Inline SVG keeps it crisp everywhere. */
   /* the glyph: a chunky S-bodied snake (after Roger's reference) — bold

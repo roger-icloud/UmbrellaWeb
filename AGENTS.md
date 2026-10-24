@@ -1,4 +1,4 @@
-# UmbrellaWeb — project context for Devin
+# NumberFun (repo: UmbrellaWeb) — project context for Devin
 
 ## What this is
 

@@ -1,6 +1,6 @@
 {
-  "name": "Umbrella — Number Fun",
-  "short_name": "Umbrella",
+  "name": "NumberFun",
+  "short_name": "NumberFun",
   "description": "Numbers you can catch, move and discover — tilt and touch activities for exploring multiplication.",
   "start_url": "index.html",
   "scope": "./",
@@ -9,7 +9,16 @@
   "background_color": "#101418",
   "theme_color": "#101418",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ]
 }

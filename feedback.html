@@ -10,7 +10,7 @@
   <meta name="theme-color" content="#101418">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <title>Feedback — Umbrella</title>
+  <title>Feedback — NumberFun</title>
   <style>
     html,
     body {
@@ -170,7 +170,7 @@
         const res = await fetch('https://formsubmit.co/ajax/' + encodeURIComponent(FEEDBACK_EMAIL), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ _subject: 'Umbrella feedback — ' + data.activity, ...data }),
+          body: JSON.stringify({ _subject: 'NumberFun feedback — ' + data.activity, ...data }),
         });
         if (!res.ok) throw new Error(res.status);
         form.reset();
@@ -179,14 +179,14 @@
         thanks.style.color = '#e0a53a';
         thanks.innerHTML = 'Could not send automatically — ' +
           '<a style="color:#4da3ff" href="mailto:' + FEEDBACK_EMAIL +
-          '?subject=Umbrella feedback&body=' +
+          '?subject=NumberFun feedback&body=' +
           encodeURIComponent('Activity: ' + data.activity + '\nRole: ' + (data.role || '—') +
             '\n\n' + data.message) + '">send it by email instead</a>.';
       }
     });
   </script>
 
-  <script src="nav.js?v=8"></script>
+  <script src="nav.js?v=9"></script>
 </body>
 
 </html>

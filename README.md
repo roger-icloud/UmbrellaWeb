@@ -1,4 +1,4 @@
-# UmbrellaWeb — standalone web activities
+# NumberFun — standalone web activities
 
 Static site, no build step. Live at
 **https://roger-icloud.github.io/UmbrellaWeb/** (GitHub Pages, auto-rebuilds
@@ -81,5 +81,5 @@ motion data flows; Android needs no prompt.
 - Verified on iPhone 8 (snake + probe) via HTTPS. Android untested —
   expect sensor-feel tuning (`TILT_DEAD`, `SMOOTHING`) rather than bugs.
 - Actual `motion events`/s on device still unmeasured (HUD shows it).
-- Parked Umbrella objective "password-free web prototype" — this repo is
+- Parked NumberFun objective "password-free web prototype" — this repo is
   its realisation.

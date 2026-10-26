@@ -31,20 +31,6 @@
       inset: 0;
     }
 
-    #hud {
-      position: fixed;
-      top: calc(env(safe-area-inset-top, 8px) + 52px);
-      left: 8px;
-      color: #7f9bb0;
-      font-size: 11px;
-      line-height: 1.5;
-      background: rgba(10, 14, 18, .55);
-      padding: 8px 10px;
-      border-radius: 8px;
-      pointer-events: none;
-      white-space: pre;
-    }
-
     #overlay {
       position: fixed;
       inset: 0;
@@ -97,20 +83,6 @@
       max-width: 340px;
     }
 
-    #modeBtn {
-      position: fixed;
-      top: calc(env(safe-area-inset-top, 8px) + 46px);
-      right: 8px;
-      font-size: 13px;
-      font-family: inherit;
-      padding: 8px 14px;
-      border-radius: 8px;
-      border: 1px solid #3a4a58;
-      background: rgba(20, 28, 36, .8);
-      color: #b9c8d4;
-      z-index: 5;
-    }
-
     .hidden {
       display: none !important;
     }
@@ -120,8 +92,6 @@
 <body>
 
   <canvas id="c"></canvas>
-  <div id="hud">waiting…</div>
-  <button id="modeBtn">VELOCITY</button>
 
   <div id="rotOverlay" class="hidden">
     <div style="font-size:22px">Rotate back</div>
@@ -130,8 +100,7 @@
 
   <div id="overlay">
     <div style="font-size:22px">Tilt Ball</div>
-    <div class="sub">Steer the numbered ball into a hole that divides it —
-      2, 3, 5, 7, or the prime hole for numbers none of them fit.
+    <div class="sub">Steer the numbered ball into a hole that divides it.
       Tilt steers; so does dragging a finger.</div>
     <button id="go">Tap to enable tilt</button>
     <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
@@ -140,38 +109,41 @@
   <script>
     'use strict';
 
-    /* ---------- tunables ---------- */
+    /* ---------- tunables ----------
+       Steering matches the tilt-snake head: tilt (or a dragged finger)
+       sets a target heading, the ball turns toward it proportionally
+       capped by TURN_RATE, and speed scales with tilt magnitude. */
     const SMOOTHING = 0.18;   // low-pass on gravity input (0=none … 1=frozen)
-    const TILT_ACCEL = 900;    // px/s² per unit of gravity (FORCE mode)
-    const VEL_SPEED = 150;    // px/s per unit of gravity (VELOCITY mode)
-    const VEL_RESPOND = 10;     // how fast actual velocity chases target, /s
-    const STEER_SPEED = 500;    // px/s at full tilt (STEER mode)
-    const STEER_RATE = 7;      // rad/s the heading may turn
-    const STEER_DEAD = 0.5;    // tilt magnitude below which heading holds
-    const TOUCH_ACCEL = 1400;   // px/s² toward the finger when dragging
-    const FRICTION = 0.35;   // velocity damping per second (FORCE mode)
+    const BALL_SPEED = 150;   // design-px/s at full drive — same as SNAKE_SPEED
+    const TURN_RATE = 5.0;    // rad/s hard cap on heading change
+    const TURN_RESPOND = 6;   // /s proportional approach to target heading
+    const TILT_DEAD = 0.4;    // gravity magnitude below which heading holds
+    const FULL_TILT = 3.5;    // gravity magnitude giving full speed
+    const IDLE_DRIVE = 0.15;  // fraction of speed while level / holding
+    const TOUCH_FULL = 120;   // drag distance (design-px) giving full speed
+    const EJECT_SECS = 0.45;  // coast after a refusal before steering resumes
+    const FRICTION = 0.35;    // eject-coast damping per second
     const RESTITUTION = 0.55;   // wall bounciness 0..1
     const BALL_R = 26;
     const MAX_SPEED = 2600;   // safety cap
 
     /* ---------- bar-billiards holes ----------
-       ROGER NOTE — first cut of the factors idea, deliberately kept
-       simple so the mechanic can be judged live:
-       · Holes carry the small primes 2,3,5,7 (the factor-vocabulary)
-         plus one "prime" hole — any value 2..100 always has a home:
-         it either has a small prime factor or it doesn't divide down.
-         Every deal is winnable; ambiguity (42 → 2,3 or 7) is a
-         feature — the ball has more than one right hole.
+       ROGER NOTE —
+       · Holes are offered progressively (STAGES below); every deal is
+         guaranteed a home among the holes on the table. Ambiguity is a
+         feature — 35 can go into 5 or 7; the deeper fit twinkles and
+         counts toward unlocking the next stage.
        · Wrong hole = refusal (amber rim flash, ball pushed back out);
          right hole = the ball sinks and a fresh value fades in.
+       · Table reads like bar billiards: easy tests near the player,
+         hard tests remote. The "?" hole accepts whatever no offered
+         hole takes — it never claims primality, only "no match".
        · Things to consider/develop:
-         – hole set: {2,3,5,7} only? add 4,6,8,9,10 as composite
-           labels? make the hole set a chosen "table" instead?
-         – the prime hole label/wording — "prime" teaches the term
-           but may need discovering; alternative glyphs welcome.
-         – deal range (currently 2..100 uniform); could bias
-         – VELOCITY is the default steer mode — level = stop; is it
-           the best fit for billiards, or is FORCE-glide truer?
+         – twinkle graduation: more varied glints when >2 holes fit,
+           or for the experienced — parked as a later flourish
+         – steering settled (2026-10-25): snake-head heading drive;
+           the FORCE/VELOCITY/STEER modes and top-right button are
+           retired.
          – capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
     const HOLE_R = 30;        // hole rim radius
     const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
@@ -179,22 +151,58 @@
     const HOLE_FLASH = 0.6;   // s of amber rim on refusal
     const SINK_SECS = 0.55;   // right-hole sink animation
     const BALL_FADE = 0.8;    // s for a dealt ball to fade in
-    const DEAL_MIN = 2, DEAL_MAX = 100;
-    // {v:0} = the prime hole — accepts anything no small prime divides
+    const HOLE_FADE = 0.8;    // s for a newly-unlocked hole to fade in
+    const DEAL_MIN = 2;
+    /* the table reads like bar billiards: the easy tests sit nearest
+       the player (the ball is dealt low), the demanding ones are
+       furthest — remote = difficult. Approach angle, not tightness,
+       carries the difficulty; a rim is a rim.
+       {v:0} is the "?" hole — it accepts whatever no OFFERED hole
+       takes, so it can't lie: 49 fits 7 when 7 is out, else "?" —
+       the hole never claims primality, it just asks the question. */
     const HOLES = [
-      { v: 2, fx: 0.16, fy: 0.22 },
-      { v: 3, fx: 0.38, fy: 0.15 },
-      { v: 5, fx: 0.62, fy: 0.15 },
-      { v: 7, fx: 0.84, fy: 0.22 },
-      { v: 0, fx: 0.50, fy: 0.31, label: 'prime' },
+      // near row — last-digit and digit-sum tests, easy approach
+      { v: 2,  fx: 0.14, fy: 0.58 },
+      { v: 3,  fx: 0.38, fy: 0.58 },
+      { v: 5,  fx: 0.62, fy: 0.58 },
+      { v: 10, fx: 0.86, fy: 0.58 },
+      // middle row — table-membership tests, a deliberate aim
+      { v: 7,  fx: 0.25, fy: 0.38 },
+      { v: 8,  fx: 0.50, fy: 0.38 },
+      { v: 9,  fx: 0.75, fy: 0.38 },
+      // far row — the deep shots, cushion as backstop
+      { v: 13, fx: 0.50, fy: 0.19 },
+      { v: 0,  fx: 0.14, fy: 0.19, label: '?' },
     ];
-    const SMALL = [2, 3, 5, 7];
 
-    // FORCE    tilt = push, glides on        (what you just tried)
-    // VELOCITY tilt = speed, stops on level  (isolates sensor lag)
-    // STEER    tilt = direction of travel    (snake-like heading control)
-    const MODES = ['FORCE', 'VELOCITY', 'STEER'];
-    let steerMode = 1;          // VELOCITY default: level the phone = ball stops
+    /* ---------- curriculum: stages ----------
+       One scalar, `stage`, drives everything: which holes sit on the
+       table, which numbers can be dealt, and when the "?" goes live.
+       Rows open front-to-back — the table grows deeper as the
+       questions do. This table is the management surface — edit
+       rows, not code.
+       · every deal is guaranteed a home among the offered holes
+       · NEW_HOLE_BIAS of deals come from the newest hole's multiples
+         (stage 0 has no "newest" — both holes are new)
+       · MULTI_FIT_BIAS of deals carry a choice — values fitting >1
+         hole are the only deals that can twinkle or advance
+       · ADVANCE_STREAK consecutive sinks into the deepest fitting
+         hole advance the stage — shallow choices reset the streak,
+         forced (single-option) sinks neither advance nor reset
+       Session-only for now; a saved profile just restores `stage`. */
+    const STAGES = [
+      { holes: [2, 5], ceiling: 20 },                        // last-digit tests
+      { holes: [2, 3, 5], ceiling: 40 },                      // digit-sum arrives
+      { holes: [2, 3, 5, 10], ceiling: 50 },                  // near row complete
+      { holes: [2, 3, 5, 8, 9, 10], ceiling: 70 },            // mid row: membership
+      { holes: [2, 3, 5, 7, 8, 9, 10], ceiling: 80 },         // 7: real division
+      { holes: [2, 3, 5, 7, 8, 9, 10, 13], ceiling: 90 },     // far row: 26/39/52/78
+      { holes: [2, 3, 5, 7, 8, 9, 10, 13, 0], ceiling: 100 }, // "?" goes live
+    ];
+    const NEW_HOLE_BIAS = 0.4;   // deals from the newest hole's multiples
+    const MULTI_FIT_BIAS = 0.35; // deals offering a discrimination
+    const ADVANCE_STREAK = 3;    // deepest-choice sinks in a row to stage up
+    const TWINKLE_SECS = 0.7;    // glint marking a deepest-choice sink
 
     // Many Android devices report the motion axes with the opposite sign
     // convention to iOS. Auto-flip on Android; ?tilt=normal / ?tilt=invert
@@ -248,18 +256,64 @@
     let sink = null;           // {t0, hole} while a right hole swallows it
     let flashUntil = 0;        // wrong-hole amber rim timestamp
     let holeFlash = null;      // which hole is flashing
+    let stage = 0;             // curriculum level (index into STAGES)
+    let streak = 0;            // consecutive deepest-choice sinks
+    let twinkleHole = null;    // hole carrying the deepest-choice glint
+    let twinkleUntil = 0;
     resize();
     ball.x = Wd / 2; ball.y = Hd / 2;
 
     const holeX = h => h.fx * Wd, holeY = h => h.fy * Hd;
 
     function holeFits(h, n) {
-      return h.v === 0 ? !SMALL.some(d => n % d === 0) : n % h.v === 0;
+      return h.v === 0
+        ? !activeHoles().some(o => o.v !== 0 && n % o.v === 0)
+        : n % h.v === 0;
+    }
+
+    /* the holes on the table at this stage — index into HOLES */
+    const activeHoles = () =>
+      HOLES.filter(h => STAGES[stage].holes.includes(h.v));
+
+    /* which active holes would accept n — the fitting set */
+    function fitsSet(n) {
+      return activeHoles().filter(h => holeFits(h, n));
+    }
+
+    /* deepest fitting hole = the insight being tested —
+       the prime hole is excluded: it's never a discrimination */
+    function deepestHole(n) {
+      let best = null;
+      for (const h of fitsSet(n))
+        if (h.v !== 0 && (!best || h.v > best.v)) best = h;
+      return best;
     }
 
     function dealBall(now) {
-      do { ballNum = DEAL_MIN + Math.floor(Math.random() * (DEAL_MAX - DEAL_MIN + 1)); }
-      while (ballNum === lastNum);
+      const ceil = STAGES[stage].ceiling;
+      const act = activeHoles();
+      /* build the pool: every value guaranteed a home among the
+         offered holes; on the prime stage everything qualifies */
+      const pool = [];
+      for (let n = DEAL_MIN; n <= ceil; n++)
+        if (act.some(h => holeFits(h, n))) pool.push(n);
+      /* two biases, two jobs: NEW_HOLE_BIAS serves the just-unlocked
+         holes' multiples so each new test is discovered promptly —
+         computed as "added this stage" since a stage can open several
+         holes; MULTI_FIT_BIAS serves values fitting >1 offered hole —
+         the only deals that offer a discrimination, the only deals
+         that can twinkle or advance */
+      const prev = stage === 0 ? [] : STAGES[stage - 1].holes;
+      const newVs = STAGES[stage].holes.filter(v => !prev.includes(v));
+      const fresh = pool.filter(n => newVs.some(v => holeFits(HOLES.find(h => h.v === v), n)));
+      const multi = pool.filter(n => fitsSet(n).length > 1);
+      do {
+        const roll = Math.random();
+        const src = fresh.length && roll < NEW_HOLE_BIAS ? fresh
+          : multi.length && roll < NEW_HOLE_BIAS + MULTI_FIT_BIAS ? multi
+          : pool;
+        ballNum = src[Math.floor(Math.random() * src.length)];
+      } while (ballNum === lastNum && pool.length > 1);
       lastNum = ballNum;
       ball.x = Wd / 2 + (Math.random() - 0.5) * Wd * 0.3;
       ball.y = Hd * 0.72;
@@ -267,13 +321,17 @@
       ballBorn = now;
       sink = null;
     }
+
+    function advanceStage(now) {
+      stage = Math.min(stage + 1, STAGES.length - 1);
+      streak = 0;
+      for (const h of activeHoles()) if (h.born === undefined) h.born = now;
+    }
     let smX = 0, smY = 0;            // smoothed gravity
-    let rawX = 0, rawY = 0, rawZ = 0;
     let tiltOn = false;
     let touch = null;                // {x,y} while dragging
-    let motionHz = 0, motionCount = 0, lastHzT = performance.now();
-    let mode = 'none';
-    let heading = -Math.PI / 2;      // STEER mode: direction of travel
+    let heading = -Math.PI / 2;      // direction of travel
+    let ejectUntil = 0;              // timestamp: refusal coast ends
     let paused = false;              // true while rotated out of portrait
 
     /* ---------- motion permission (iOS 13+) ---------- */
@@ -328,12 +386,10 @@
     window.addEventListener('devicemotion', (e) => {
       const g = e.accelerationIncludingGravity;
       if (!g || g.x === null) return;
-      rawX = AXIS_FLIP ? -g.x : g.x;
-      rawY = AXIS_FLIP ? -g.y : g.y;
-      rawZ = g.z;
-      smX += (rawX - smX) * SMOOTHING;
-      smY += (rawY - smY) * SMOOTHING;
-      motionCount++;
+      const gx = AXIS_FLIP ? -g.x : g.x;
+      const gy = AXIS_FLIP ? -g.y : g.y;
+      smX += (gx - smX) * SMOOTHING;
+      smY += (gy - smY) * SMOOTHING;
     });
 
     /* ---------- touch steering ---------- */
@@ -343,15 +399,6 @@
     window.addEventListener('pointerup', () => touch = null);
     window.addEventListener('pointercancel', () => touch = null);
     cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
-
-    /* ---------- steering mode toggle ---------- */
-    const modeBtn = document.getElementById('modeBtn');
-    modeBtn.addEventListener('click', () => {
-      steerMode = (steerMode + 1) % MODES.length;
-      modeBtn.textContent = MODES[steerMode];
-      if (Math.hypot(ball.vx, ball.vy) > 10)
-        heading = Math.atan2(ball.vy, ball.vx);
-    });
 
     /* ---------- orientation guard ---------- */
     const rotOverlay = document.getElementById('rotOverlay');
@@ -374,57 +421,48 @@
       if (!document.hidden) { smX = smY = 0; lastT = performance.now(); }
     });
 
-    /* ---------- physics ---------- */
+    /* ---------- physics ----------
+       Same steering model as tilt-snake's head: tilt (or a dragged
+       finger) names a target heading, the ball turns toward it
+       proportionally capped by TURN_RATE, and speed scales with
+       tilt magnitude / drag distance. A refusal ejection coasts the
+       ball out under FRICTION for EJECT_SECS, then steering resumes. */
     let lastT = performance.now();
+
+    function wrapAngle(d) {
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    }
 
     function step(dt) {
       if (paused) return;
-      if (touch) {
-        const dx = touch.x - ball.x, dy = touch.y - ball.y;
-        const d = Math.hypot(dx, dy) || 1;
-        const pull = Math.min(d / 120, 1);          // ease off near the finger
-        ball.vx += (dx / d) * TOUCH_ACCEL * pull * dt;
-        ball.vy += (dy / d) * TOUCH_ACCEL * pull * dt;
-      }
 
-      if (tiltOn && !touch) {
-        // portrait assumption: gravity.x → screen right, gravity.y → up-screen,
-        // so tilt top-of-device away → ball should roll down-screen ⇒ use -y
-        const m = MODES[steerMode];
-
-        if (m === 'FORCE') {
-          ball.vx += smX * TILT_ACCEL * dt;
-          ball.vy += -smY * TILT_ACCEL * dt;
-          const damp = Math.exp(-FRICTION * dt);
-          ball.vx *= damp; ball.vy *= damp;
-
-        } else if (m === 'VELOCITY') {
-          const tx = smX * VEL_SPEED, ty = -smY * VEL_SPEED;
-          const k = Math.min(1, VEL_RESPOND * dt);
-          ball.vx += (tx - ball.vx) * k;
-          ball.vy += (ty - ball.vy) * k;
-
-        } else if (m === 'STEER') {
-          const mag = Math.hypot(smX, smY);
-          if (mag > STEER_DEAD) {
-            const target = Math.atan2(-smY, smX);
-            let d = target - heading;
-            while (d > Math.PI) d -= 2 * Math.PI;
-            while (d < -Math.PI) d += 2 * Math.PI;
-            heading += Math.max(-STEER_RATE * dt, Math.min(STEER_RATE * dt, d));
-          }
-          const spd = Math.max(0, Math.min(mag / 9.8, 1)) * STEER_SPEED;
-          if (mag > STEER_DEAD * 0.6) {
-            ball.vx = Math.cos(heading) * spd;
-            ball.vy = Math.sin(heading) * spd;
-          } else {
-            const fade = Math.exp(-4 * dt);   // ease to a stop when near level
-            ball.vx *= fade; ball.vy *= fade;
-          }
-        }
-      } else {
+      if (performance.now() < ejectUntil) {
         const damp = Math.exp(-FRICTION * dt);
         ball.vx *= damp; ball.vy *= damp;
+      } else {
+        let target = null, drive = IDLE_DRIVE;
+        if (touch) {
+          const dx = touch.x - ball.x, dy = touch.y - ball.y;
+          target = Math.atan2(dy, dx);
+          drive = Math.max(IDLE_DRIVE, Math.min(Math.hypot(dx, dy) / TOUCH_FULL, 1));
+        } else if (tiltOn) {
+          // portrait assumption: gravity.x → screen right, gravity.y →
+          // up-screen, so tilt top-of-device away → roll down ⇒ use -y
+          const mag = Math.hypot(smX, smY);
+          if (mag > TILT_DEAD) {
+            target = Math.atan2(-smY, smX);
+            drive = Math.max(IDLE_DRIVE, Math.min(mag / FULL_TILT, 1));
+          }
+        }
+        if (target !== null) {
+          const d = wrapAngle(target - heading);
+          const amt = d * Math.min(1, TURN_RESPOND * dt);
+          heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, amt));
+        }
+        ball.vx = Math.cos(heading) * BALL_SPEED * drive;
+        ball.vy = Math.sin(heading) * BALL_SPEED * drive;
       }
 
       const sp = Math.hypot(ball.vx, ball.vy);
@@ -433,10 +471,12 @@
       ball.x += ball.vx * dt;
       ball.y += ball.vy * dt;
 
-      if (ball.x < BALL_R) { ball.x = BALL_R; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
-      if (ball.x > Wd - BALL_R) { ball.x = Wd - BALL_R; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
-      if (ball.y < BALL_R) { ball.y = BALL_R; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
-      if (ball.y > Hd - BALL_R) { ball.y = Hd - BALL_R; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
+      /* walls: reflect heading (the drive) AND velocity (the eject
+         coast) — whichever mode the ball is in, it comes back in play */
+      if (ball.x < BALL_R) { ball.x = BALL_R; heading = Math.PI - heading; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.x > Wd - BALL_R) { ball.x = Wd - BALL_R; heading = Math.PI - heading; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.y < BALL_R) { ball.y = BALL_R; heading = -heading; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
+      if (ball.y > Hd - BALL_R) { ball.y = Hd - BALL_R; heading = -heading; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
 
       /* holes: the ball sinks only where its number belongs */
       if (sink) {
@@ -448,16 +488,30 @@
         ball.vx = ball.vy = 0;
         if (e >= 1) dealBall(performance.now());
       } else {
-        for (const h of HOLES) {
+        for (const h of activeHoles()) {
           const dx = ball.x - holeX(h), dy = ball.y - holeY(h);
           const d = Math.hypot(dx, dy);
           if (d < HOLE_R - CAPTURE_IN) {
             if (holeFits(h, ballNum)) {
               sink = { hole: h, k: 0 };
               ball.vx = ball.vy = 0;
+              /* deepest-choice detection: a discrimination only exists
+                 when more than one hole fits — forced sinks are neutral */
+              const fits = fitsSet(ballNum);
+              if (fits.length > 1) {
+                if (h === deepestHole(ballNum)) {
+                  streak++;
+                  twinkleHole = h;
+                  twinkleUntil = performance.now() + TWINKLE_SECS * 1000;
+                  if (streak >= ADVANCE_STREAK) advanceStage(performance.now());
+                } else {
+                  streak = 0;
+                }
+              }
             } else {
               flashUntil = performance.now() + HOLE_FLASH * 1000;
               holeFlash = h;
+              ejectUntil = performance.now() + EJECT_SECS * 1000;
               const ux = dx / (d || 1), uy = dy / (d || 1);
               const sp = Math.max(Math.hypot(ball.vx, ball.vy), HOLE_PUSH);
               ball.vx = ux * sp; ball.vy = uy * sp;
@@ -470,15 +524,17 @@
       }
     }
 
-    /* ---------- draw + HUD ---------- */
-    const hud = document.getElementById('hud');
-
+    /* ---------- draw ---------- */
     function draw(now) {
       ctx.clearRect(0, 0, Wd, Hd);
 
-      /* the holes — sunken dark circles, rim, factor numeral */
+      /* the holes — sunken dark circles, rim, factor numeral; only the
+         stage's offered set, each fading in on the frame it's unlocked */
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      for (const h of HOLES) {
+      for (const h of activeHoles()) {
+        const appear = h.born === undefined ? 1
+          : Math.min((now - h.born) / (HOLE_FADE * 1000), 1);
+        ctx.globalAlpha = appear;
         const hx = holeX(h), hy = holeY(h);
         const flashing = h === holeFlash && now < flashUntil;
         ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
@@ -491,6 +547,26 @@
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
           ' -apple-system, system-ui, sans-serif';
         ctx.fillText(h.label || String(h.v), hx, hy);
+        ctx.globalAlpha = 1;
+      }
+
+      /* the deepest-choice glint — a brief sparkle on the hole that
+         took the ball, marking "there was a deeper answer and you
+         found it"; never fires on a forced (single-fit) sink */
+      if (twinkleHole && now < twinkleUntil) {
+        const k = 1 - (twinkleUntil - now) / (TWINKLE_SECS * 1000);
+        const a = Math.sin(k * Math.PI);          // 0→1→0 fade
+        const gx = holeX(twinkleHole) + HOLE_R * 0.55;
+        const gy = holeY(twinkleHole) - HOLE_R * 0.55;
+        const s = 6 + 4 * a;                      // arm length swells mid-glint
+        ctx.strokeStyle = `rgba(255,244,196,${a * 0.9})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(gx - s, gy); ctx.lineTo(gx + s, gy);
+        ctx.moveTo(gx, gy - s); ctx.lineTo(gx, gy + s);
+        ctx.moveTo(gx - s * 0.45, gy - s * 0.45); ctx.lineTo(gx + s * 0.45, gy + s * 0.45);
+        ctx.moveTo(gx + s * 0.45, gy - s * 0.45); ctx.lineTo(gx - s * 0.45, gy + s * 0.45);
+        ctx.stroke();
       }
 
       /* the ball — fades/scales in on deal, shrinks away on sinking */
@@ -516,35 +592,18 @@
       ctx.globalAlpha = 1;
     }
 
-    function hudUpdate(now) {
-      if (now - lastHzT >= 500) {
-        motionHz = Math.round(motionCount * 1000 / (now - lastHzT));
-        motionCount = 0; lastHzT = now;
-      }
-      mode = touch ? 'TOUCH' : (tiltOn ? 'TILT' : 'none');
-      hud.textContent =
-        'mode ' + mode +
-        '\nsteer ' + MODES[steerMode] + '  (button top-right cycles)' +
-        '\nraw  x ' + rawX.toFixed(2) + '  y ' + rawY.toFixed(2) + '  z ' + rawZ.toFixed(2) +
-        '\nsmth x ' + smX.toFixed(2) + '  y ' + smY.toFixed(2) +
-        '\nmotion events ' + motionHz + '/s' + (AXIS_FLIP ? '  tilt-flip' : '') +
-        '\nball ' + Math.round(Math.hypot(ball.vx, ball.vy)) + ' px/s' +
-        '\nnum ' + ballNum + (sink ? '  sinking' : '');
-    }
-
     function frame(now) {
       const dt = Math.min((now - lastT) / 1000, 0.05);
       lastT = now;
       step(dt);
       draw(now);
-      hudUpdate(now);
       requestAnimationFrame(frame);
     }
     dealBall(performance.now());
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=9"></script>
+  <script src="nav.js?v=11"></script>
 </body>
 
 </html>

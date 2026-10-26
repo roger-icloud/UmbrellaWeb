@@ -9,22 +9,22 @@
   /* launched via "Add to Home Screen" the app already has no browser
      chrome, so a fullscreen toggle would be a no-op — drop the row */
   const standalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.matchMedia('(display-mode: fullscreen)').matches
     || window.navigator.standalone === true;
 
+  /* mirrors the main menu's tile order; housekeeping rows at the bottom */
   const ITEMS = [
     { label: 'Home', href: 'index.html' },
     { label: 'Tilt Snake', href: 'tilt-snake.html' },
     { label: 'Snake Puzzle', href: 'snake-puzzle.html' },
-    { label: 'Patterns', href: 'patterns.html' },
-    { label: 'Pattern Snake', href: 'pattern-snake.html' },
-    { label: 'Lattice', href: 'lattice.html' },
-    { label: 'Honeycomb Search', href: 'honeycomb.html' },
+    { label: 'Snake Patterns', href: 'pattern-snake.html' },
     { label: 'Tilt Ball', href: 'tilt-ball.html' },
-    { label: 'Rationale', href: 'rationale.html' },
-    { label: 'Help', href: 'help.html' },
+    { label: 'Find Tables', href: 'honeycomb.html' },
     { type: 'sep' },
     ...(standalone ? [] : [{ label: 'Fullscreen', action: 'fullscreen' }]),
     { label: 'Feedback', href: 'feedback.html' },
+    { label: 'Help', href: 'help.html' },
+    { label: 'Rationale', href: 'rationale.html' },
   ];
 
   const css = `
@@ -103,15 +103,35 @@
   panel.id = 'navPanel';
   panel.className = 'hidden';
 
+  /* fullscreen is per-page: navigation drops it, so remember the intent
+     and re-request on the next page — immediately where the browser
+     allows, else on the first touch there. The flag is cleared only by
+     choosing "Exit fullscreen" here, not by Esc or by navigating. */
+  const FS_KEY = 'nf-fs';
+  const fsActive = () =>
+    document.fullscreenElement || document.webkitFullscreenElement;
+
+  function requestFS() {
+    if (fsActive()) return;
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) Promise.resolve(req.call(el)).catch(() => { });
+  }
+
   function toggleFullscreen() {
     const d = document;
-    if (d.fullscreenElement || d.webkitFullscreenElement) {
+    if (fsActive()) {
+      sessionStorage.removeItem(FS_KEY);
       (d.exitFullscreen || d.webkitExitFullscreen).call(d);
     } else {
-      const el = d.documentElement;
-      const req = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (req) Promise.resolve(req.call(el)).catch(() => { });
+      sessionStorage.setItem(FS_KEY, '1');
+      requestFS();
     }
+  }
+
+  if (!standalone && sessionStorage.getItem(FS_KEY)) {
+    requestFS();
+    window.addEventListener('pointerdown', requestFS, { once: true });
   }
 
   /* the fullscreen row doubles as a state indicator: its label says what
@@ -124,6 +144,11 @@
   }
   document.addEventListener('fullscreenchange', syncFSLabel);
   document.addEventListener('webkitfullscreenchange', syncFSLabel);
+  /* any fullscreen entry counts as intent — including the games' own
+     enable-tilt buttons — so the flag survives whatever put us there */
+  const fsNote = () => { if (fsActive()) sessionStorage.setItem(FS_KEY, '1'); };
+  document.addEventListener('fullscreenchange', fsNote);
+  document.addEventListener('webkitfullscreenchange', fsNote);
 
   /* mark the row for the page we're standing on */
   const here = location.pathname.split('/').pop() || 'index.html';

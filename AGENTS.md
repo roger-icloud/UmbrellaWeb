@@ -78,13 +78,15 @@ attention" — never "still pending" for something broken).
   drag (or tap) each home to its socket on the hundred square.
   On the main menu since 2026-10-21 — "earned its place" though the
   idea isn't fully thought through; no departure yet.
-- `tilt-ball.html` — bar-billiards factors game (first cut 2026-10-21,
-  from the tilt probe): holes carry 2,3,5,7 plus a `prime` hole for
-  values none of them divide; ball deals 2..100, fades in, sinks in a
-  hole that divides it, refused (amber + ejection) elsewhere.
-  ROGER-NOTE block in the file lists open design questions — hole set,
-  prime-hole wording, deal bias, best steer mode (default VELOCITY =
-  level-to-stop), capture feel. Steer-mode button kept for now.
+- `tilt-ball.html` — bar-billiards factors game. Steering = snake-head
+  heading drive (tilt or drag). STAGES curriculum table: holes unlock
+  progressively in rows (near = easy tests, far = hard), every deal
+  guaranteed a home; NEW_HOLE_BIAS + MULTI_FIT_BIAS weight the pool;
+  ADVANCE_STREAK deepest-choice sinks advance the stage; deepest valid
+  sink twinkles (binary — marks "a deeper fit existed and you found
+  it"). "?" hole accepts whatever no offered hole takes. Open design
+  thread in SessionNotes-2026-10-25.md — full-hole rounds, hole-set
+  ordering (4 and 6 before 13), "?" always central.
 - `rationale.html`, `help.html`, `feedback.html` — human-facing pages
 - `snake.html`/`search.html`/`ball.html` — redirect stubs, kept
 

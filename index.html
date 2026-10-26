@@ -81,14 +81,30 @@
       font-weight: 600;
     }
 
-    .tile .desc {
-      font-size: 13px;
-      color: #8a97a3;
-      margin-top: 4px;
-    }
-
     .tile.soon {
       opacity: .45;
+    }
+
+    .tile {
+      -webkit-touch-callout: none;
+    }
+
+    /* long-press / hover tooltip — the tile's data-tip text, shown
+       above the tile; the same words work on mouse and touch */
+    #tip {
+      position: fixed;
+      max-width: 260px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: #243244;
+      border: 1px solid #3a4a58;
+      color: #cfd8e0;
+      font-size: 13px;
+      line-height: 1.4;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .15s;
+      z-index: 20;
     }
 
     footer {
@@ -108,66 +124,110 @@
 
     <!-- ============ ROGERS INTRO TEXT — edit between the markers ============ -->
     <p class="intro">
-      Small games about number and shape. Pick one.
+      Games about number and sequence. Pick one.
     </p>
     <!-- ============ END OF ROGERS INTRO TEXT ============ -->
 
+    <!-- ============ ROGERS TILE TOOLTIPS ============
+         The title="…" text on each tile is the hover tooltip — plain
+         words, edit freely. ============ END OF TOOLTIPS ============ -->
     <div class="tiles">
-      <a class="tile has-icon" href="tilt-snake.html">
+      <a class="tile has-icon" href="tilt-snake.html"
+        title="Collect the multiples in order.">
         <img class="icon" src="icons/tilt.png" alt="">
         <div>
           <div class="name">Tilt Snake</div>
-          <div class="desc">Collect the multiples in order.</div>
         </div>
       </a>
-      <a class="tile has-icon" href="snake-puzzle.html">
+      <a class="tile has-icon" href="snake-puzzle.html"
+        title="Drag the missing numbers home.">
         <img class="icon" src="icons/snake-puzzle.png" alt="">
         <div>
           <div class="name">Snake Puzzle</div>
-          <div class="desc">Drag the missing numbers home.</div>
         </div>
       </a>
-      <a class="tile has-icon" href="patterns.html">
+      <a class="tile has-icon" href="pattern-snake.html"
+        title="Place the snake's numbers home.">
         <img class="icon" src="icons/patterns.png" alt="">
         <div>
-          <div class="name">Patterns</div>
-          <div class="desc">Find the twelve multiples.</div>
+          <div class="name">Snake Patterns</div>
         </div>
       </a>
-      <a class="tile" href="pattern-snake.html">
-        <div class="name">Pattern Snake</div>
-        <div class="desc">The snake sheds its twelve segments onto the hundred
-          square, floats up, then waits below for you to place its numbers home.</div>
+      <a class="tile has-icon" href="honeycomb.html"
+        title="Find the hiding table paths.">
+        <img class="icon" src="icons/honeycomb.png" alt="">
+        <div>
+          <div class="name">Find Tables</div>
+        </div>
       </a>
-      <a class="tile" href="lattice.html">
-        <div class="name">Lattice</div>
-        <div class="desc">Loose multiples wait on the ground — carry each home
-          to its socket on the hundred square.</div>
-      </a>
-      <a class="tile has-icon" href="tilt-ball.html">
+      <a class="tile has-icon" href="tilt-ball.html"
+        title="Find the largest multiplier">
         <img class="icon" src="icons/tilt-ball.png" alt="">
         <div>
           <div class="name">Tilt Ball</div>
-          <div class="desc">Steer the ball into a hole that divides it —
-            bar billiards with factors.</div>
-        </div>
-      </a>
-      <a class="tile has-icon" href="honeycomb.html">
-        <img class="icon" src="icons/honeycomb.png" alt="">
-        <div>
-          <div class="name">Honeycomb Search</div>
-          <div class="desc">Find the hiding paths.</div>
         </div>
       </a>
     </div>
   </main>
 
   <footer>
-    NumberFun — small games about number and shape.<br>
-    Icons by Flaticon.
+    NumberFun — Number and sequence made fun.<br>
+
   </footer>
 
-  <script src="nav.js?v=9"></script>
+  <div id="tip"></div>
+
+  <script>
+    /* tile tooltips: the editable text lives in each tile's title="…"
+       attribute (marked region above); here it's moved to data-tip so
+       the native tooltip never doubles ours. Hover (mouse) or
+       press-and-hold (touch) shows it after TIP_DELAY ms; a held touch
+       that showed the tip doesn't navigate on release. */
+    const TIP_DELAY = 450;
+    const tipEl = document.getElementById('tip');
+    let tipTimer = 0, tipShown = false, tipFromTouch = false;
+
+    document.querySelectorAll('.tile[title]').forEach(t => {
+      t.dataset.tip = t.getAttribute('title');
+      t.removeAttribute('title');
+    });
+
+    function showTip(t, fromTouch) {
+      tipEl.textContent = t.dataset.tip;
+      tipEl.style.left = '0px';
+      tipEl.style.opacity = '1';
+      const r = t.getBoundingClientRect();
+      const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+      let x = Math.min(Math.max(r.left + r.width / 2 - tw / 2, 8), innerWidth - tw - 8);
+      let y = r.top - th - 8;
+      if (y < 8) y = r.bottom + 8;
+      tipEl.style.left = x + 'px';
+      tipEl.style.top = y + 'px';
+      tipShown = true;
+      tipFromTouch = fromTouch;
+    }
+
+    function hideTip() {
+      clearTimeout(tipTimer);
+      tipEl.style.opacity = '0';
+      tipShown = false;
+    }
+
+    document.querySelectorAll('.tile[data-tip]').forEach(t => {
+      t.addEventListener('pointerenter', (e) => {
+        tipTimer = setTimeout(() => showTip(t, e.pointerType !== 'mouse'), TIP_DELAY);
+      });
+      t.addEventListener('pointerleave', hideTip);
+      t.addEventListener('pointercancel', hideTip);
+      t.addEventListener('contextmenu', (e) => e.preventDefault());
+      t.addEventListener('click', (e) => {
+        if (tipShown && tipFromTouch) { e.preventDefault(); hideTip(); }
+      });
+    });
+    window.addEventListener('scroll', hideTip, { passive: true });
+  </script>
+
+  <script src="nav.js?v=11"></script>
 </body>
 
 </html>

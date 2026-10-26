@@ -4,7 +4,7 @@
   "description": "Numbers you can catch, move and discover — tilt and touch activities for exploring multiplication.",
   "start_url": "index.html",
   "scope": "./",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "portrait",
   "background_color": "#101418",
   "theme_color": "#101418",

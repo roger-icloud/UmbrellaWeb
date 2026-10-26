@@ -1,0 +1,24 @@
+/* Andika by SIL International — made for beginning readers (single-storey
+   a and g). Kept in the site so it works offline and in the installed app.
+   Latin subset from Google Fonts; licence: SIL Open Font License, see
+   OFL.txt in this folder. */
+@font-face {
+  font-family: 'Andika';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(andika-400.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Andika';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(andika-700.woff2) format('woff2');
+}
+
+/* buttons and form fields don't inherit the page font by default */
+button, input, select, textarea {
+  font-family: inherit;
+}

@@ -22,7 +22,7 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
-      font-family: -apple-system, system-ui, sans-serif;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
     }
 
     canvas {
@@ -75,6 +75,9 @@
       color: #5f6e7c;
     }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -855,7 +858,7 @@
     }
 
     function numeral(v, cx, cy, size, colour) {
-      ctx.font = '700 ' + size + 'px -apple-system, system-ui, sans-serif';
+      ctx.font = '700 ' + size + 'px Andika, -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = colour;
       ctx.fillText(v, cx, cy);
@@ -1080,7 +1083,7 @@
       // alpha, so it stands a moment after the snake has faded
       if (numA > 0.01 && ring) {
         ctx.font = '800 ' + (segD * (table >= 10 ? 0.8 : 1.05)) +
-          'px -apple-system, system-ui, sans-serif';
+          'px Andika, -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillStyle = 'rgba(255,240,200,' + numA + ')';
         ctx.fillText(table, ring.x, ring.y);
@@ -1141,7 +1144,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

@@ -54,10 +54,10 @@ window.Anim = (function () {
   const SHRINK_TO = 1.0;      // stop when perimeter ≈ body length × this
   const WIND_TURNS = 3;       // circuits of the closed loop before rest
   const WIND_ACCEL = 2.18;    // bell-curve speed boost across WIND_TURNS (3 turns in ~1.5-turn time)
-  const GLOW_SECS = 1.1;      // halo holds at full bloom
+  const GLOW_SECS = 1.1;      // coil holds at full bloom
   const FADE_SECS = 1.8;      // then the slow fade
   const STILL_FADE = 0.9;     // s for the body to fade on the still path
-  const NUM_RISE = 0.8;       // s for the numeral to gather from the halo
+  const NUM_RISE = 0.8;       // s for the numeral to rise as the glow fades
   const NUM_LINGER = 0.7;     // it outlives the ring's fade by this much
   const NUM_FADE = 1.0;       // then dims in its own time
   const BLINK_MIN = 2.4, BLINK_MAX = 6, BLINK_SECS = 0.28;
@@ -796,7 +796,7 @@ window.Anim = (function () {
     }
   }
   function numeral(v, cx, cy, size, colour) {
-    ctx.font = '700 ' + size + 'px -apple-system, system-ui, sans-serif';
+    ctx.font = '700 ' + size + 'px Andika, -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = colour;
     ctx.fillText(v, cx, cy);
@@ -888,13 +888,16 @@ window.Anim = (function () {
       }
     }
 
-    // the halo ending: bloom, hold, slow fade — the numeral gathers the
-    // light and outlives the ring by a beat (unless holdCoil is set, in
-    // which case the coil, halo and numeral stay visible at full bloom)
+    // the glow ending: a warm glow fills the coil's inner circle, then
+    // fades down as the numeral fades up; the numeral outlives the ring
+    // by a beat (unless holdCoil is set, in which case the coil and
+    // numeral stay visible)
     let fadeK = 1, numA = 0, haloR = 0, haloA = 0;
     if (glowT0 >= 0 && ring) {
       const ga = departAge - glowT0;
-      const bloom = Math.max(0, Math.min(1, ga / 0.35));
+      // blooms in with a bright swell, settling to full by ~0.7 s
+      const bloom = Math.max(0, Math.min(1, ga / 0.35))
+        * (1 + 0.35 * Math.sin(Math.PI * Math.max(0, Math.min(1, ga / 0.7))));
       fadeK = holdCoil ? 1 : (ga <= GLOW_SECS ? 1
         : Math.max(0, 1 - (ga - GLOW_SECS) / FADE_SECS));
       const nk = Math.max(0, Math.min(1, (ga - 0.7) / NUM_RISE));
@@ -902,16 +905,9 @@ window.Anim = (function () {
       numA = nk * nk * (3 - 2 * nk) *
         (held ? 1 : Math.max(0, 1 -
           (ga - GLOW_SECS - FADE_SECS - NUM_LINGER) / NUM_FADE));
-      haloR = ring.r + segD * 2 * (1 - 0.55 * nk);
-      haloA = bloom * fadeK * (1 - 0.35 * nk);
-      const g = ctx.createRadialGradient(ring.x, ring.y,
-        ring.r * 0.2, ring.x, ring.y, haloR);
-      g.addColorStop(0, 'rgba(255,240,200,' + 0.55 * haloA + ')');
-      g.addColorStop(0.65, 'rgba(255,215,130,' + 0.28 * haloA + ')');
-      g.addColorStop(1, 'rgba(255,215,130,0)');
-      ctx.beginPath();
-      ctx.arc(ring.x, ring.y, haloR, 0, 7);
-      ctx.fillStyle = g; ctx.fill();
+      haloR = innerGlowR(ring, segD);
+      haloA = bloom * fadeK * (1 - nk * nk * (3 - 2 * nk));
+      drawInnerGlow(ring.x, ring.y, haloR, haloA);
       if (!fadeFired && !held) {   // the numeral's terminal dim — the
         fadeFired = true;          // end-card fades up over it
         if (onFade) onFade();
@@ -1026,7 +1022,7 @@ window.Anim = (function () {
     // the numeral the ring resolved into — drawn last, on its own alpha
     if (numA > 0.01 && ring) {
       ctx.font = '800 ' + (segD * (table >= 10 ? 0.8 : 1.05)) +
-        'px -apple-system, system-ui, sans-serif';
+        'px Andika, -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255,240,200,' + numA + ')';
       ctx.fillText(table, ring.x, ring.y);
@@ -1053,19 +1049,33 @@ window.Anim = (function () {
 
   function snapshot() { return lastSnap; }
 
+  // warm glow filling the coil up to the body's inner edge (segments have
+  // radius segD / 2, and are drawn over the glow's rim)
+  function innerGlowR(rg, sd) {
+    return Math.max(sd * 0.3, rg.r - sd * 0.5);
+  }
+
+  function drawInnerGlow(x, y, r, a) {
+    if (a <= 0.005 || r <= 0) return;
+    const k = f => Math.min(1, f * a);
+    // near-white heart into warm gold, added to the background as light
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,250,225,' + k(0.95) + ')');
+    g.addColorStop(0.35, 'rgba(255,220,130,' + k(0.8) + ')');
+    g.addColorStop(0.75, 'rgba(255,175,60,' + k(0.55) + ')');
+    g.addColorStop(1, 'rgba(255,150,40,' + k(0.3) + ')');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 7);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.restore();
+  }
+
   function drawCoil(snap, now) {
     if (!snap || !ctx) return;
     const { table: tbl, segD: sd, segs: sgs, pos, ring: rg, haloR, haloA } = snap;
-    if (rg && haloR > 0) {
-      const g = ctx.createRadialGradient(rg.x, rg.y,
-        rg.r * 0.2, rg.x, rg.y, haloR);
-      g.addColorStop(0, 'rgba(255,240,200,' + 0.55 * haloA + ')');
-      g.addColorStop(0.65, 'rgba(255,215,130,' + 0.28 * haloA + ')');
-      g.addColorStop(1, 'rgba(255,215,130,0)');
-      ctx.beginPath();
-      ctx.arc(rg.x, rg.y, haloR, 0, 7);
-      ctx.fillStyle = g; ctx.fill();
-    }
+    if (rg) drawInnerGlow(rg.x, rg.y, haloR, haloA);
     ctx.beginPath();
     let started = false;
     for (let i = 0; i < sgs.length; i++) {
@@ -1124,7 +1134,7 @@ window.Anim = (function () {
     }
     if (rg) {
       ctx.font = '800 ' + (sd * (tbl >= 10 ? 0.8 : 1.05)) +
-        'px -apple-system, system-ui, sans-serif';
+        'px Andika, -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255,240,200,1)';
       ctx.fillText(tbl, rg.x, rg.y);

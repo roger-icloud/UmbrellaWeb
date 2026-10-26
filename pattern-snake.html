@@ -22,7 +22,7 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
-      font-family: -apple-system, system-ui, sans-serif;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
     }
 
     canvas {
@@ -138,6 +138,9 @@
       display: none !important;
     }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -976,7 +979,7 @@
       }
 
       const scale = 1 + 0.12 * pulse;
-      ctx.font = '800 ' + Math.round(numSize * scale) + 'px -apple-system, system-ui, sans-serif';
+      ctx.font = '800 ' + Math.round(numSize * scale) + 'px Andika, -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = pulse > 0.05 ? 'hsl(' + hue + ',78%,72%)' : 'hsl(' + hue + ',68%,62%)';
@@ -1083,7 +1086,7 @@
               cell - CELL_GAP + 2 * pop
             );
             ctx.fillStyle = '#ffffff';
-            ctx.font = '700 ' + Math.round(cell * NUM_FONT) + 'px -apple-system, sans-serif';
+            ctx.font = '700 ' + Math.round(cell * NUM_FONT) + 'px Andika, -apple-system, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
@@ -1137,7 +1140,7 @@
               ctx.globalAlpha = numA;
               ctx.fillStyle = p ? '#ffffff' : '#8a97a3';
               ctx.font = (p && p.kind !== 'pale' ? '700 ' : '500 ') +
-                Math.round(cell * NUM_FONT) + 'px -apple-system, sans-serif';
+                Math.round(cell * NUM_FONT) + 'px Andika, -apple-system, sans-serif';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
@@ -1149,7 +1152,7 @@
 
       if (state === 'choose') {
         ctx.fillStyle = 'rgba(200,215,230,0.65)';
-        ctx.font = '16px -apple-system, system-ui, sans-serif';
+        ctx.font = '16px Andika, -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('pick a table below', bX + bS / 2, bY + bS / 2);
@@ -1210,7 +1213,7 @@
           ctx.stroke();
           if (state === 'collect' && collectedVals[segsLeft - i] !== undefined) {
             ctx.fillStyle = '#ffffff';
-            ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+            ctx.font = '700 ' + Math.round(segR * 0.92) + 'px Andika, -apple-system, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(collectedVals[segsLeft - i], sm.x, sm.y + 1);
@@ -1261,7 +1264,7 @@
           ctx.strokeStyle = 'hsl(' + hue + ',55%,34%)';
           ctx.stroke();
           ctx.fillStyle = '#ffffff';
-          ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+          ctx.font = '700 ' + Math.round(segR * 0.92) + 'px Andika, -apple-system, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(v, cx, cy + 1);
@@ -1316,7 +1319,7 @@
           ctx.strokeStyle = 'hsl(' + hue + ',55%,34%)';
           ctx.stroke();
           ctx.fillStyle = '#ffffff';
-          ctx.font = '700 ' + Math.round(segR * 0.92) + 'px -apple-system, sans-serif';
+          ctx.font = '700 ' + Math.round(segR * 0.92) + 'px Andika, -apple-system, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(sg.v, pos.x, pos.y + 1);
@@ -1341,7 +1344,7 @@
           ctx.strokeStyle = 'rgba(255,245,210,' + (0.4 + 0.6 * hintPulse) + ')';
           ctx.stroke();
           ctx.fillStyle = '#ffffff';
-          ctx.font = '700 ' + Math.round(rr * 0.94) + 'px -apple-system, sans-serif';
+          ctx.font = '700 ' + Math.round(rr * 0.94) + 'px Andika, -apple-system, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(hintedSeg.v, pos.x, pos.y + 1);
@@ -1372,7 +1375,7 @@
           ctx.strokeStyle = 'rgba(255,255,255,0.55)';
           ctx.stroke();
           ctx.fillStyle = '#ffffff';
-          ctx.font = '700 ' + Math.round(dr * 0.92) + 'px -apple-system, sans-serif';
+          ctx.font = '700 ' + Math.round(dr * 0.92) + 'px Andika, -apple-system, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(dragSeg.v, dragSeg.x, dragSeg.y + 1);
@@ -1416,7 +1419,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

@@ -22,7 +22,7 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
-      font-family: -apple-system, system-ui, sans-serif;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
     }
 
     canvas {
@@ -178,6 +178,9 @@
       z-index: 40;
     }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -197,7 +200,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=11"></script>
+  <script src="anim.js?v=14"></script>
 
   <script>
     'use strict';
@@ -488,7 +491,7 @@
 
     /* ---------- draw ---------- */
     function numeral(v, cx, cy, size, colour) {
-      ctx.font = '700 ' + size + 'px -apple-system, system-ui, sans-serif';
+      ctx.font = '700 ' + size + 'px Andika, -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = colour;
       ctx.fillText(v, cx, cy);
@@ -567,7 +570,7 @@
         ctx.fillStyle = '#101418';
         ctx.fillRect(0, 0, W, H);
         ctx.fillStyle = 'rgba(120,140,160,.45)';
-        ctx.font = '15px -apple-system, system-ui, sans-serif';
+        ctx.font = '15px Andika, -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('pick a table', bX + bW / 2, bY + bH / 2);
         return;
@@ -681,7 +684,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

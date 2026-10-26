@@ -22,7 +22,7 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
-      font-family: -apple-system, ui-monospace, Menlo, monospace;
+      font-family: Andika, -apple-system, ui-monospace, Menlo, monospace;
     }
 
     canvas {
@@ -145,6 +145,9 @@
       display: none !important;
     }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -175,7 +178,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=11"></script>
+  <script src="anim.js?v=14"></script>
 
   <script>
     'use strict';
@@ -200,11 +203,33 @@
     const EAT_DIST = HEAD_R + NUM_R - 4;
     const TARGET_GLOW = true; // soft pulse on the next numeral to collect
     const HINT_AFTER = 10;     // s idle before the target pulses harder
-    const HINT_ARROW_AFTER = 25;   // s idle before a direction arrow appears
-    const HINT_INTERVAL = 6;      // s between arrow flashes
-    const HINT_ARROW_SECS = 2.5;   // how long each arrow flash lasts
+    // s without a catch before the next numeral is marked, by game of this
+    // visit; later games have no marking at all
+    const HINT_DELAYS = [0, 3, 6];
     const TAP_PAD = 10;     // extra tap tolerance around numerals, px
     const MANUAL_TILT = 1.5;    // tilt magnitude that cancels tap-autopilot
+    // after a tapped catch the snake dithers — heads for one number, changes
+    // its mind for another, then gives way slowly to the slope — which
+    // leaves time for the next tap to land
+    const FEINT_DIST = 35;      // design-px travelled toward each feint number (about a segment)
+    const FEINT_MAX = 1.2;      // s cap on each feint, in case a wall stops it
+    const FEINT_DRIVE = 0.35;   // fraction of speed while dithering
+    const SETTLE_TURN = 1.4;    // rad/s — the slow turn downhill
+    const SETTLE_MAX = 2.5;     // s cap on that turn
+    const BUMP_SECS = 1.1;      // s of puzzled wobble after the head meets a wall
+    const BUMP_DRIVE = 0.3;     // fraction of speed during it
+    const BUMP_WOBBLE = 0.4;    // rad of the head-shake
+    const BUMP_INWARD = 0.35;   // rad the path along a wall leans away from it
+    const BUMP_LOOP = 0.6;      // rad past straight-out when looping out of a corner
+    const BUMP_CORNER = 60;     // design-px from a wall's end that counts as a corner
+    // propped and left alone, the snake sleepwalks a slow figure of eight
+    // along the downhill wall instead of pressing into it
+    const SLEEP_DRIVE = 0.3;    // fraction of speed while sleepwalking
+    const SLEEP_LOOP = 45;      // design-px each loop of the eight reaches off the wall
+    const SLEEP_END = 20;       // design-px kept clear of the wall's ends
+    const SLEEP_BAND = 60;      // how near the wall it must slide before it starts
+    const SLEEP_LEAD = 40;      // design-px ahead on the path it steers for
+    const SLEEP_EYES = 0.5;     // drowsy eyelids, as a share of open
     const BLINK_MIN = 2.4, BLINK_MAX = 6;  // s between blinks
     const BLINK_SECS = 0.28;               // lid dip duration
 
@@ -222,6 +247,7 @@
     let head = { x: 0, y: 0 };   // positioned by reset() before play
     let heading = -Math.PI / 2;
     let segs = [];               // collected tail segments, index 0 = nearest head (×1..×12)
+    let trail = [];              // the head's recent path, newest first; the tail follows it
     let nums = [];               // {v, x, y, flashUntil}
     let nextIdx = 0;             // next multiple ordinal to collect
     let startT = 0, doneMs = 0, misses = 0;
@@ -229,6 +255,14 @@
     let tiltBase = null;         // lean held when the tap landed — a deliberate
     //   re-tilt cancels the autopilot; the resting angle must not
     let lastCollectT = 0;        // performance.now() of last collection / start
+    let gamesDone = 0;           // games finished this visit, for hint fading
+    let holdPhase = 0;           // dither after a tapped catch: 0 off, 1-2 feints, 3 turning downhill
+    let holdT0 = 0;              // when the current phase began
+    let feintFrom = null;        // where the current feint began
+    let feintTo = null;          // the numeral the snake is pretending to head for
+    let bumpUntil = 0, bumpT0 = 0, bumpTarget = 0;  // puzzled spell after meeting a wall
+    let sleepy = false, sleepWall = null, sleepT = 0;  // sleepwalk state; sleepT runs along the eight
+    let lastDrive = 0;           // last frame's drive, so sleepwalking slows in gently
     let nextBlinkAt = 0, blinkT0 = -1;
 
     /* ---------- canvas: virtual resolution ----------
@@ -347,7 +381,7 @@
       table = tbl;
       head = { x: Wd / 2, y: Hd * 0.62 };
       heading = -Math.PI / 2;
-      segs = [];
+      segs = []; trail = [];
       nextIdx = 0;
       misses = 0;
       dealNumerals();
@@ -415,6 +449,8 @@
 
     function startPlay() {
       state = 'play';
+      holdPhase = 0;
+      bumpUntil = 0;
       startT = performance.now();
       lastCollectT = performance.now();
       logEvent('start', { table });
@@ -426,6 +462,7 @@
       touch = null;
       autoTarget = null;
       logEvent('complete', { table, ms: doneMs, misses });
+      gamesDone++;
       const fullSegs = [
         { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
         ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
@@ -449,7 +486,7 @@
 
     document.getElementById('againYes').addEventListener('click', () => {
       doneBar.classList.remove('show');
-      segs = []; nums = [];
+      segs = []; nums = []; trail = [];
       tableOverlay.classList.remove('hidden');
       state = 'menu';
     });
@@ -529,8 +566,75 @@
       return d;
     }
 
+    // a random uncollected numeral other than the one wanted next (and other
+    // than the last feint), preferring ones roughly ahead so the snake
+    // doesn't fold back over its own body — null when none is left
+    function pickFeint(not) {
+      const pool = nums.filter((n, i) => !n.collected && i !== nextIdx && n !== not);
+      const ahead = pool.filter(n =>
+        Math.abs(wrapAngle(Math.atan2(n.y - head.y, n.x - head.x) - heading)) < 1.6);
+      const from = ahead.length ? ahead : pool;
+      return from.length ? from[Math.floor(Math.random() * from.length)] : null;
+    }
+
+    // the head meets a wall (hx/hy: inward direction of the wall touched):
+    // blink, and plan a puzzled wobble that carries on along the wall, or
+    // loops out near a corner, instead of a bounce
+    function bump(hx, hy, now) {
+      if (blinkT0 < 0) blinkT0 = now;
+      const ex = Math.cos(heading), ey = Math.sin(heading);
+      // in a corner, deal with the wall the head is driving into hardest
+      let nx = hx, ny = hy;
+      if (nx && ny) { if (-ex * nx > -ey * ny) ny = 0; else nx = 0; }
+      // the way along the wall closest to the current heading
+      let tx = -ny, ty = nx;
+      if (tx * ex + ty * ey < 0) { tx = -tx; ty = -ty; }
+      const along = Math.atan2(ty, tx), inward = Math.atan2(ny, nx);
+      const side = Math.sign(wrapAngle(along - inward)) || 1;
+      const room = (tx > 0 ? Wd - head.x : tx < 0 ? head.x : ty > 0 ? Hd - head.y : head.y) - HEAD_R;
+      bumpTarget = room < BUMP_CORNER
+        ? inward - side * BUMP_LOOP      // loop out and back the other way
+        : along - side * BUMP_INWARD;    // carry on, leaning off the wall
+      bumpT0 = now;
+      bumpUntil = now + BUMP_SECS * 1000;
+    }
+
+    // steering for the sleepwalk, or null when the snake isn't down at the
+    // downhill wall (fresh: it wasn't sleepwalking last frame)
+    function sleepwalk(fresh) {
+      const mag = Math.hypot(smX, smY);
+      if (mag <= TILT_DEAD) return null;
+      const gx = smX / mag, gy = -smY / mag;   // downhill, as tilt steering reads it
+      const m = HEAD_R + 12, B = SLEEP_LOOP;
+      let wall, ux, uy, nx, ny, cx, cy, A;
+      if (Math.abs(gx) > Math.abs(gy)) {
+        wall = gx > 0 ? 'R' : 'L'; ux = 0; uy = 1; nx = gx > 0 ? -1 : 1; ny = 0;
+        cx = gx > 0 ? Wd - m - B : m + B; cy = Hd / 2; A = Hd / 2 - m - SLEEP_END;
+      } else {
+        wall = gy > 0 ? 'B' : 'T'; ux = 1; uy = 0; nx = 0; ny = gy > 0 ? -1 : 1;
+        cx = Wd / 2; cy = gy > 0 ? Hd - m - B : m + B; A = Wd / 2 - m - SLEEP_END;
+      }
+      const depth = (head.x - cx) * nx + (head.y - cy) * ny;   // distance up from the eight's middle
+      if (fresh || wall !== sleepWall) {
+        if (depth > B + SLEEP_BAND) return null;
+        sleepWall = wall;
+        // join the eight at the point level with the head, going the way it faces
+        const s = Math.max(-1, Math.min(1, ((head.x - cx) * ux + (head.y - cy) * uy) / A));
+        sleepT = Math.asin(s);
+        if (Math.cos(heading) * ux + Math.sin(heading) * uy < 0) sleepT = Math.PI - sleepT;
+      } else if (depth > B + SLEEP_BAND * 2) { sleepWall = null; return null; }
+      const pt = t => [cx + ux * A * Math.sin(t) + nx * B * Math.sin(2 * t),
+        cy + uy * A * Math.sin(t) + ny * B * Math.sin(2 * t)];
+      let p = pt(sleepT);
+      for (let i = 0; i < 80 && Math.hypot(p[0] - head.x, p[1] - head.y) < SLEEP_LEAD; i++)
+        p = pt(sleepT += 0.02);
+      return Math.atan2(p[1] - head.y, p[0] - head.x);
+    }
+
     function step(dt, now) {
       if (state !== 'play' || paused) return;
+      const fresh = !sleepy;
+      sleepy = false;
 
       let target = null;
       let drive = IDLE_DRIVE;
@@ -551,11 +655,54 @@
           target = Math.atan2(dy, dx);
           drive = Math.max(IDLE_DRIVE, Math.min(Math.hypot(dx, dy) / AUTO_FULL, 1));
         }
+      } else if (holdPhase) {
+        // dithering after a tapped catch; a deliberate re-tilt ends it
+        if (tiltOn && tiltBase &&
+          Math.hypot(smX - tiltBase.x, smY - tiltBase.y) > MANUAL_TILT)
+          holdPhase = 0;
+        if (holdPhase === 1 || holdPhase === 2) {
+          if (!feintTo) feintTo = pickFeint(null);
+          if (feintTo && (now - holdT0 > FEINT_MAX * 1000 ||
+            Math.hypot(head.x - feintFrom.x, head.y - feintFrom.y) > FEINT_DIST)) {
+            holdPhase++;
+            holdT0 = now;
+            feintFrom = { x: head.x, y: head.y };
+            feintTo = holdPhase === 2 ? pickFeint(feintTo) : null;
+          }
+          if (holdPhase < 3 && feintTo) {
+            target = Math.atan2(feintTo.y - head.y, feintTo.x - head.x);
+            drive = FEINT_DRIVE;
+          } else holdPhase = 3;
+        }
+        if (holdPhase === 3) {
+          // give way to the slope with a slow turn; on the level there is
+          // nothing to give way to, so ordinary play resumes
+          const mag = tiltOn ? Math.hypot(smX, smY) : 0;
+          if (mag <= TILT_DEAD) holdPhase = 0;
+          else {
+            const d = wrapAngle(Math.atan2(-smY, smX) - heading);
+            heading += Math.max(-SETTLE_TURN * dt, Math.min(SETTLE_TURN * dt, d));
+            drive = FEINT_DRIVE;
+            if (Math.abs(d) < 0.15 || now - holdT0 > SETTLE_MAX * 1000) holdPhase = 0;
+          }
+        }
+      } else if (now < bumpUntil) {
+        // puzzled after meeting a wall: a head-shake on the way along it
+        const k = (now - bumpT0) / (BUMP_SECS * 1000);
+        target = bumpTarget + BUMP_WOBBLE * Math.sin(4 * Math.PI * k) * (1 - k);
+        drive = BUMP_DRIVE;
       } else if (tiltOn) {
-        const mag = Math.hypot(smX, smY);
-        if (mag > TILT_DEAD) {
-          target = Math.atan2(-smY, smX);
-          drive = Math.max(IDLE_DRIVE, Math.min(mag / FULL_TILT, 1));
+        const st = sleepwalk(fresh);
+        if (st !== null) {
+          sleepy = true;
+          target = st;
+          drive = lastDrive + (SLEEP_DRIVE - lastDrive) * Math.min(1, 2 * dt);
+        } else {
+          const mag = Math.hypot(smX, smY);
+          if (mag > TILT_DEAD) {
+            target = Math.atan2(-smY, smX);
+            drive = Math.max(IDLE_DRIVE, Math.min(mag / FULL_TILT, 1));
+          }
         }
       }
       if (target !== null) {
@@ -566,24 +713,48 @@
         heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, amt));
       }
 
+      lastDrive = drive;
       head.x += Math.cos(heading) * SNAKE_SPEED * drive * dt;
       head.y += Math.sin(heading) * SNAKE_SPEED * drive * dt;
 
-      // walls: reflect heading so the snake bounces back into play
-      if (head.x < HEAD_R) { head.x = HEAD_R; heading = Math.PI - heading; }
-      if (head.x > Wd - HEAD_R) { head.x = Wd - HEAD_R; heading = Math.PI - heading; }
-      if (head.y < HEAD_R) { head.y = HEAD_R; heading = -heading; }
-      if (head.y > Hd - HEAD_R) { head.y = Hd - HEAD_R; heading = -heading; }
+      // walls: no bounce — a blink and a puzzled turn along the wall keep
+      // the body flowing instead of folding back on itself
+      const hx = head.x < HEAD_R ? 1 : head.x > Wd - HEAD_R ? -1 : 0;
+      const hy = head.y < HEAD_R ? 1 : head.y > Hd - HEAD_R ? -1 : 0;
+      head.x = Math.max(HEAD_R, Math.min(Wd - HEAD_R, head.x));
+      head.y = Math.max(HEAD_R, Math.min(Hd - HEAD_R, head.y));
+      if ((hx || hy) && now > bumpUntil) bump(hx, hy, now);
 
-      // tail follows: each segment holds SEG_GAP behind the one ahead
-      let lead = head;
-      segs.forEach(sg => {
-        const dx = lead.x - sg.x, dy = lead.y - sg.y;
-        const d = Math.hypot(dx, dy) || 1;
-        sg.x = lead.x - dx / d * SEG_GAP;
-        sg.y = lead.y - dy / d * SEG_GAP;
+      // tail follows the head's own path, as a real snake's body does: each
+      // segment sits a further SEG_GAP back along the trail the head drew.
+      // Where the trail is too short yet, it is pulled behind the one ahead.
+      const t0 = trail[0];
+      if (!t0 || Math.hypot(head.x - t0.x, head.y - t0.y) > 1) trail.unshift({ x: head.x, y: head.y });
+      let lead = head, ti = 0, back = 0, a = head;
+      segs.forEach((sg, k) => {
+        const want = (k + 1) * SEG_GAP;
+        let onTrail = false;
+        while (ti < trail.length) {
+          const b = trail[ti];
+          const d = Math.hypot(b.x - a.x, b.y - a.y);
+          if (back + d >= want) {
+            const f = (want - back) / (d || 1);
+            sg.x = a.x + (b.x - a.x) * f;
+            sg.y = a.y + (b.y - a.y) * f;
+            onTrail = true;
+            break;
+          }
+          back += d; a = b; ti++;
+        }
+        if (!onTrail) {
+          const dx = lead.x - sg.x, dy = lead.y - sg.y;
+          const d = Math.hypot(dx, dy) || 1;
+          sg.x = lead.x - dx / d * SEG_GAP;
+          sg.y = lead.y - dy / d * SEG_GAP;
+        }
         lead = sg;
       });
+      if (trail.length > ti + 40) trail.length = ti + 40;
 
       // numeral contact
       nums.forEach((n, i) => {
@@ -591,6 +762,13 @@
         if (Math.hypot(n.x - head.x, n.y - head.y) < EAT_DIST) {
           if (i === nextIdx) {
             n.collected = true;
+            if (autoTarget === n) {
+              holdPhase = 1;
+              holdT0 = now;
+              feintFrom = { x: head.x, y: head.y };
+              feintTo = null;
+              tiltBase = { x: smX, y: smY };
+            }
             autoTarget = null;
             lastCollectT = now;
             // lowest multiple stays behind the head (index 0); newest capture
@@ -604,7 +782,7 @@
             nextIdx++;
             logEvent('collect', { v: n.v, ord: nextIdx });
             if (nextIdx === 12) finish();
-          } else if (now > n.flashUntil) {
+          } else if (!holdPhase && !sleepy && now > n.flashUntil) {   // a bump while dithering or sleepwalking is not the child's
             n.flashUntil = now + FLASH_SECS * 1000;
             misses++;
             logEvent('refuse', { v: n.v, want: table * (nextIdx + 1) });
@@ -649,7 +827,7 @@
         ctx.stroke();
       }
       ctx.fillStyle = flash ? '#e0a53a' : '#cfd8e0';
-      ctx.font = 'bold ' + (NUM_R - 2) + 'px -apple-system, sans-serif';
+      ctx.font = 'bold ' + (NUM_R - 2) + 'px Andika, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(n.v, n.x, n.y + 1);
@@ -664,30 +842,12 @@
 
       const idle = (state === 'play' && lastCollectT)
         ? (performance.now() - lastCollectT) / 1000 : 0;
+      const hintAt = HINT_DELAYS[gamesDone];
+      const marked = hintAt !== undefined && idle >= hintAt;
       nums.forEach((n, i) => {
-        if (!n.collected) drawNum(n, i === nextIdx, i === nextIdx && idle > HINT_AFTER);
+        const t = i === nextIdx && marked;
+        if (!n.collected) drawNum(n, t, t && idle > HINT_AFTER);
       });
-
-      // escalating hint: a faint arrow from the head toward the target
-      if (state === 'play' && nextIdx < 12 && idle > HINT_ARROW_AFTER
-        && idle % HINT_INTERVAL < HINT_ARROW_SECS && nums[nextIdx]) {
-        const n = nums[nextIdx];
-        const a = Math.atan2(n.y - head.y, n.x - head.x);
-        const ca = Math.cos(a), sa = Math.sin(a);
-        const x1 = head.x + ca * (HEAD_R + 10), y1 = head.y + sa * (HEAD_R + 10);
-        const x2 = head.x + ca * (HEAD_R + 44), y2 = head.y + sa * (HEAD_R + 44);
-        ctx.strokeStyle = 'rgba(77,163,255,0.6)';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.moveTo(x2, y2);
-        ctx.lineTo(x2 - Math.cos(a - 0.5) * 9, y2 - Math.sin(a - 0.5) * 9);
-        ctx.moveTo(x2, y2);
-        ctx.lineTo(x2 - Math.cos(a + 0.5) * 9, y2 - Math.sin(a + 0.5) * 9);
-        ctx.stroke();
-      }
 
       // the snake takes its table's colour — same table-coding as the
       // rest of the family (head gradient and body both derive from it)
@@ -704,7 +864,7 @@
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 15px -apple-system, sans-serif';
+        ctx.font = 'bold 15px Andika, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(sg.v, sg.x, sg.y + 1);
@@ -729,7 +889,7 @@
         ctx.stroke();
         const ex = Math.cos(heading), ey = Math.sin(heading);
         const px = -ey, py = ex;
-        const sq = blinkScale(performance.now());
+        const sq = blinkScale(performance.now()) * (sleepy ? SLEEP_EYES : 1);
         [[1, 0], [-1, 0]].forEach(([sgn]) => {
           ctx.beginPath();
           ctx.ellipse(head.x + ex * HEAD_R * 0.38 + px * sgn * HEAD_R * 0.36,
@@ -775,7 +935,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

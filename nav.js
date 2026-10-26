@@ -59,7 +59,7 @@
       border-radius: 12px;
       padding: 6px;
       z-index: 39;
-      font-family: -apple-system, system-ui, sans-serif;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
     }
     #navPanel.hidden { display: none; }
     #navPanel a, #navPanel button, #navPanel .group {
@@ -80,6 +80,11 @@
   const style = document.createElement('style');
   style.textContent = css;
   document.head.appendChild(style);
+
+  /* canvas text can draw before Andika arrives; a resize once it has
+     loaded makes every page redraw in the right font */
+  if (document.fonts) document.fonts.ready.then(() =>
+    window.dispatchEvent(new Event('resize')));
 
   /* a snake glyph rather than the standard ≡ — the browser's own
      menu button sits just above ours on some devices and two burgers

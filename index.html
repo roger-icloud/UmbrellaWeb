@@ -19,7 +19,7 @@
       min-height: 100%;
       background: #101418;
       color: #cfd8e0;
-      font-family: -apple-system, system-ui, sans-serif;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
       -webkit-user-select: none;
       user-select: none;
     }
@@ -111,11 +111,31 @@
       max-width: 560px;
       margin: 0 auto;
       padding: 0 24px 40px;
-      font-size: 12px;
+      font-size: 14px;
       color: #5f6e7c;
       line-height: 1.6;
     }
+
+    /* footer ripple: each letter rises and brightens in turn, a wave
+       that runs across the line, rests, and runs again */
+    footer .rl {
+      display: inline-block;
+      animation: ripple 3.2s ease-in-out infinite;
+      animation-delay: calc(var(--i) * 55ms);
+    }
+
+    @keyframes ripple {
+      0%, 28%, 100% { transform: none; color: #5f6e7c; }
+      14% { transform: translateY(-0.4em) scale(1.18); color: #cfd8e0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      footer .rl { animation: none; }
+    }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -124,7 +144,7 @@
 
     <!-- ============ ROGERS INTRO TEXT — edit between the markers ============ -->
     <p class="intro">
-      Games about number and sequence. Pick one.
+      Games about number and sequence. Try one.
     </p>
     <!-- ============ END OF ROGERS INTRO TEXT ============ -->
 
@@ -132,36 +152,31 @@
          The title="…" text on each tile is the hover tooltip — plain
          words, edit freely. ============ END OF TOOLTIPS ============ -->
     <div class="tiles">
-      <a class="tile has-icon" href="tilt-snake.html"
-        title="Collect the multiples in order.">
+      <a class="tile has-icon" href="tilt-snake.html" title="Collect the multiples in order.">
         <img class="icon" src="icons/tilt.png" alt="">
         <div>
           <div class="name">Tilt Snake</div>
         </div>
       </a>
-      <a class="tile has-icon" href="snake-puzzle.html"
-        title="Drag the missing numbers home.">
+      <a class="tile has-icon" href="snake-puzzle.html" title="Drag the missing numbers home.">
         <img class="icon" src="icons/snake-puzzle.png" alt="">
         <div>
           <div class="name">Snake Puzzle</div>
         </div>
       </a>
-      <a class="tile has-icon" href="pattern-snake.html"
-        title="Place the snake's numbers home.">
+      <a class="tile has-icon" href="pattern-snake.html" title="Place the snake's numbers home.">
         <img class="icon" src="icons/patterns.png" alt="">
         <div>
           <div class="name">Snake Patterns</div>
         </div>
       </a>
-      <a class="tile has-icon" href="honeycomb.html"
-        title="Find the hiding table paths.">
+      <a class="tile has-icon" href="honeycomb.html" title="Find the hiding table paths.">
         <img class="icon" src="icons/honeycomb.png" alt="">
         <div>
           <div class="name">Find Tables</div>
         </div>
       </a>
-      <a class="tile has-icon" href="tilt-ball.html"
-        title="Find the largest multiplier">
+      <a class="tile has-icon" href="tilt-ball.html" title="Find the largest multiplier">
         <img class="icon" src="icons/tilt-ball.png" alt="">
         <div>
           <div class="name">Tilt Ball</div>
@@ -170,10 +185,12 @@
     </div>
   </main>
 
+  <!-- ============ ROGERS FOOTER TEXT — edit freely; it ripples ============ -->
   <footer>
-    NumberFun — Number and sequence made fun.<br>
+    Dive in you'll soon pick it up!<br>
 
   </footer>
+  <!-- ============ END OF ROGERS FOOTER TEXT ============ -->
 
   <div id="tip"></div>
 
@@ -225,9 +242,35 @@
       });
     });
     window.addEventListener('scroll', hideTip, { passive: true });
+
+    /* footer ripple: wrap each letter in a span so the CSS wave can
+       reach it; the footer text itself stays plain in the HTML above */
+    (function () {
+      const foot = document.querySelector('footer');
+      foot.setAttribute('aria-label', foot.textContent.trim());
+      let i = 0;
+      const walk = (node) => {
+        [...node.childNodes].forEach(n => {
+          if (n.nodeType === Node.ELEMENT_NODE) { walk(n); return; }
+          if (n.nodeType !== Node.TEXT_NODE || !n.textContent.trim()) return;
+          const frag = document.createDocumentFragment();
+          for (const ch of n.textContent.trim()) {
+            if (ch === ' ') { frag.append(' '); i++; continue; }
+            const s = document.createElement('span');
+            s.className = 'rl';
+            s.setAttribute('aria-hidden', 'true');
+            s.style.setProperty('--i', i++);
+            s.textContent = ch;
+            frag.append(s);
+          }
+          n.replaceWith(frag);
+        });
+      };
+      walk(foot);
+    })();
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

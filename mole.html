@@ -22,7 +22,7 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
-      font-family: -apple-system, ui-monospace, Menlo, monospace;
+      font-family: Andika, -apple-system, ui-monospace, Menlo, monospace;
     }
 
     canvas {
@@ -56,6 +56,9 @@
       display: none !important;
     }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -251,7 +254,7 @@
       /* quiet table label top-left */
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.fillStyle = '#5f6e7c';
-      ctx.font = '600 16px -apple-system, system-ui, sans-serif';
+      ctx.font = '600 16px Andika, -apple-system, system-ui, sans-serif';
       ctx.fillText('×' + TABLE, 14, Hd * 0.06);
 
       /* holes — dark ellipses sunk into the field */
@@ -289,7 +292,7 @@
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(mx, my, rr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
-        ctx.font = '600 ' + Math.round(rr * 0.8) + 'px -apple-system, system-ui, sans-serif';
+        ctx.font = '600 ' + Math.round(rr * 0.8) + 'px Andika, -apple-system, system-ui, sans-serif';
         ctx.fillText(String(m.v), mx, my + 1);
         ctx.globalAlpha = 1;
         if (m.phase !== 'fly') {
@@ -316,7 +319,7 @@
         ctx.fill();
         if (filled) {
           ctx.fillStyle = '#fff';
-          ctx.font = '600 11px -apple-system, system-ui, sans-serif';
+          ctx.font = '600 11px Andika, -apple-system, system-ui, sans-serif';
           ctx.fillText(String(TABLE * (k + 1)), s.x, s.y + 0.5);
         }
         if (glow) {
@@ -349,7 +352,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

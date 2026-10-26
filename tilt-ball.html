@@ -22,7 +22,7 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
-      font-family: -apple-system, ui-monospace, Menlo, monospace;
+      font-family: Andika, -apple-system, ui-monospace, Menlo, monospace;
     }
 
     canvas {
@@ -87,6 +87,9 @@
       display: none !important;
     }
   </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
 </head>
 
 <body>
@@ -545,7 +548,7 @@
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
         ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
-          ' -apple-system, system-ui, sans-serif';
+          ' Andika, -apple-system, system-ui, sans-serif';
         ctx.fillText(h.label || String(h.v), hx, hy);
         ctx.globalAlpha = 1;
       }
@@ -587,7 +590,7 @@
       ctx.arc(ball.x, ball.y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = '700 ' + Math.round(r * 0.9) + 'px -apple-system, system-ui, sans-serif';
+      ctx.font = '700 ' + Math.round(r * 0.9) + 'px Andika, -apple-system, system-ui, sans-serif';
       ctx.fillText(String(ballNum), ball.x, ball.y + 1);
       ctx.globalAlpha = 1;
     }
@@ -603,7 +606,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=11"></script>
+  <script src="nav.js?v=12"></script>
 </body>
 
 </html>

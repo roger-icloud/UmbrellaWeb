@@ -132,79 +132,106 @@
 
     /* ---------- bar-billiards holes ----------
        ROGER NOTE —
-       · Holes are offered progressively (STAGES below); every deal is
-         guaranteed a home among the holes on the table. Ambiguity is a
-         feature — 35 can go into 5 or 7; the deeper fit twinkles and
-         counts toward unlocking the next stage.
-       · Wrong hole = refusal (amber rim flash, ball pushed back out);
-         right hole = the ball sinks and a fresh value fades in.
-       · Table reads like bar billiards: easy tests near the player,
-         hard tests remote. The "?" hole accepts whatever no offered
-         hole takes — it never claims primality, only "no match".
-       · Things to consider/develop:
-         – twinkle graduation: more varied glints when >2 holes fit,
-           or for the experienced — parked as a later flourish
-         – steering settled (2026-10-25): snake-head heading drive;
-           the FORCE/VELOCITY/STEER modes and top-right button are
-           retired.
-         – capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
+       · The table now plays in ROUNDS. Each open hole fills after
+         HOLE_CAP sinks (pips inside the rim show it); the deal only
+         serves values with an open home. When every hole is full the
+         table rests, glints, and — if the player chose the deeper fit
+         at least DEEP_NEED times — the stage advances BETWEEN rounds,
+         new holes fading in. Otherwise the same round repeats.
+       · Holes unlock in school-table order (2,10 → 5 → 4 → 3 → 6 →
+         8 → 9 → 7 → 13 → "?"), rows centring on the table so odd
+         counts stay symmetric. Ambiguity stays a feature: 35 can go
+         into 5 or 7; the deeper fit glints.
+       · "depth" (0 shallow … 7 deepest) replaces value as the ranking
+         — a bigger numeral isn't always the harder test.
+       · "?" lives on the centre rail — always central when it opens.
+         It accepts whatever no offered hole takes; it never claims
+         primality, only "no match".
+       · STRICT_HOME (Roger, 2026-10-26): shallow dumps are legal but
+         empty — each ball sinks only into its deepest open fit.
+       · capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
     const HOLE_R = 30;        // hole rim radius
     const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
     const HOLE_PUSH = 300;    // refusal ejection speed
-    const HOLE_FLASH = 0.6;   // s of amber rim on refusal
+    const HOLE_FLASH = 0.6;   // s of rim flash on refusal
     const SINK_SECS = 0.55;   // right-hole sink animation
     const BALL_FADE = 0.8;    // s for a dealt ball to fade in
     const HOLE_FADE = 0.8;    // s for a newly-unlocked hole to fade in
+    const HOLE_CAP = 5;       // sinks that fill a hole for the round
+    const STRICT_HOME = true; /* a ball sinks only into its deepest open
+        fit — a legal-but-shallower hole refuses gently, and the true
+        home glints so the refusal teaches rather than frustrates */
+    const PIP_R = 3.2;        // fill-pip dot radius
+    const INTERLUDE_SECS = 2.6; // round-complete pause before re-deal
     const DEAL_MIN = 2;
-    /* the table reads like bar billiards: the easy tests sit nearest
-       the player (the ball is dealt low), the demanding ones are
-       furthest — remote = difficult. Approach angle, not tightness,
-       carries the difficulty; a rim is a rim.
-       {v:0} is the "?" hole — it accepts whatever no OFFERED hole
-       takes, so it can't lie: 49 fits 7 when 7 is out, else "?" —
-       the hole never claims primality, it just asks the question. */
+    /* rails: each row centres on the table — odd hole counts stay
+       symmetric, per Roger's display note. "?" keeps its own centre
+       rail so it stays central and equally available when it opens. */
+    const RAIL = {
+      near: { y: 0.58, xs: [[], [0.50], [0.34, 0.66], [0.24, 0.50, 0.76], [0.14, 0.38, 0.62, 0.86]] },
+      mid:  { y: 0.38, xs: [[], [0.50], [0.34, 0.66], [0.24, 0.50, 0.76], [0.14, 0.38, 0.62, 0.86]] },
+      far:  { y: 0.19, xs: [[], [0.50], [0.34, 0.66], [0.24, 0.50, 0.76]] },
+      ctr:  { y: 0.19, xs: [[], [0.50]] },
+    };
     const HOLES = [
-      // near row — last-digit and digit-sum tests, easy approach
-      { v: 2,  fx: 0.14, fy: 0.58 },
-      { v: 3,  fx: 0.38, fy: 0.58 },
-      { v: 5,  fx: 0.62, fy: 0.58 },
-      { v: 10, fx: 0.86, fy: 0.58 },
+      // near row — the quick tests, always in reach
+      { v: 2,  rail: 'near', depth: 0 },
+      { v: 10, rail: 'near', depth: 1 },
+      { v: 5,  rail: 'near', depth: 1 },
+      { v: 3,  rail: 'near', depth: 2 },  // digit-sum joins the near tests
       // middle row — table-membership tests, a deliberate aim
-      { v: 7,  fx: 0.25, fy: 0.38 },
-      { v: 8,  fx: 0.50, fy: 0.38 },
-      { v: 9,  fx: 0.75, fy: 0.38 },
+      { v: 4,  rail: 'mid', depth: 2 },
+      { v: 6,  rail: 'mid', depth: 3 },
+      { v: 8,  rail: 'mid', depth: 3 },
+      { v: 9,  rail: 'mid', depth: 2 },
       // far row — the deep shots, cushion as backstop
-      { v: 13, fx: 0.50, fy: 0.19 },
-      { v: 0,  fx: 0.14, fy: 0.19, label: '?' },
+      { v: 7,  rail: 'far', depth: 4 },
+      { v: 13, rail: 'far', depth: 5 },
+      // centre rail — opens last; central and equally available
+      { v: 0,  rail: 'ctr', depth: 6, label: '?' },
     ];
 
     /* ---------- curriculum: stages ----------
        One scalar, `stage`, drives everything: which holes sit on the
-       table, which numbers can be dealt, and when the "?" goes live.
-       Rows open front-to-back — the table grows deeper as the
-       questions do. This table is the management surface — edit
-       rows, not code.
-       · every deal is guaranteed a home among the offered holes
-       · NEW_HOLE_BIAS of deals come from the newest hole's multiples
-         (stage 0 has no "newest" — both holes are new)
-       · MULTI_FIT_BIAS of deals carry a choice — values fitting >1
-         hole are the only deals that can twinkle or advance
-       · ADVANCE_STREAK consecutive sinks into the deepest fitting
-         hole advance the stage — shallow choices reset the streak,
-         forced (single-option) sinks neither advance nor reset
+       table and which numbers can be dealt. Holes unlock in school-
+       table order; this table is the management surface — edit rows,
+       not code.
+       · every deal is guaranteed a home among the OPEN holes
+       · deals are skewed toward holes that still need filling,
+         newest holes weighted NEW_HOLE_WEIGHT× (Roger, 2026-10-26:
+         big numbers shouldn't be dumped in 2 because its snug
+         home is full)
+       · MULTI_FIT_BIAS prefers values offering a discrimination
+         within the chosen hole — the only deals that can glint
+         or count as deeper
+       · a round ends when every open hole is full (HOLE_CAP sinks
+         each); the stage then advances between rounds — strict
+         homes mean completing the round IS the demonstration, so
+         no separate deeper-count is needed (Roger, 2026-10-26)
        Session-only for now; a saved profile just restores `stage`. */
     const STAGES = [
-      { holes: [2, 5], ceiling: 20 },                        // last-digit tests
-      { holes: [2, 3, 5], ceiling: 40 },                      // digit-sum arrives
-      { holes: [2, 3, 5, 10], ceiling: 50 },                  // near row complete
-      { holes: [2, 3, 5, 8, 9, 10], ceiling: 70 },            // mid row: membership
-      { holes: [2, 3, 5, 7, 8, 9, 10], ceiling: 80 },         // 7: real division
-      { holes: [2, 3, 5, 7, 8, 9, 10, 13], ceiling: 90 },     // far row: 26/39/52/78
-      { holes: [2, 3, 5, 7, 8, 9, 10, 13, 0], ceiling: 100 }, // "?" goes live
+      { holes: [2, 10] },                             // last digit: even and 0
+      { holes: [2, 10, 5] },                          // last digit: 5s join
+      { holes: [2, 10, 5, 4] },                       // ×4 arrives
+      { holes: [2, 10, 5, 4, 3] },                    // digit sum: 3s
+      { holes: [2, 10, 5, 4, 3, 6] },                 // 6 = fits 2 AND 3
+      { holes: [2, 10, 5, 4, 3, 6, 8] },              // ×8
+      { holes: [2, 10, 5, 4, 3, 6, 8, 9] },           // digit sum: 9s
+      { holes: [2, 10, 5, 4, 3, 6, 8, 9, 0] },        // "?" goes live
+      { holes: [2, 10, 5, 4, 3, 6, 8, 9, 0, 7] },     // 7: real division
+      { holes: [2, 10, 5, 4, 3, 6, 8, 9, 0, 7, 13] }, // 13: the deep shot
     ];
-    const NEW_HOLE_BIAS = 0.4;   // deals from the newest hole's multiples
-    const MULTI_FIT_BIAS = 0.35; // deals offering a discrimination
-    const ADVANCE_STREAK = 3;    // deepest-choice sinks in a row to stage up
+    /* each hole deals only its own school-table range — Roger's
+       ranges (2026-10-26): no 36 or 98 dumped down the 2 hole;
+       values stay meaningful multiples, like flash-cards */
+    const EARLY_CEIL = 24;   // all deals stay below this while ≤3 holes
+    const MAX_CEIL = 100;    // absolute bound once the table grows
+    const MULT_MAX = {       // highest multiplier each hole serves
+      2: 12, 3: 12, 4: 12, 5: 11, 6: 12, 7: 12,
+      8: 12, 9: 12, 10: 9, 13: 12,   // "?" takes what nothing wants
+    };
+    const NEW_HOLE_WEIGHT = 3;   // newest holes' deal weight vs the rest
+    const MULTI_FIT_BIAS = 0.30; // prefer discriminating values within a hole
     const TWINKLE_SECS = 0.7;    // glint marking a deepest-choice sink
 
     // Many Android devices report the motion axes with the opposite sign
@@ -259,13 +286,32 @@
     let sink = null;           // {t0, hole} while a right hole swallows it
     let flashUntil = 0;        // wrong-hole amber rim timestamp
     let holeFlash = null;      // which hole is flashing
+    let flashSlate = false;    // refusal was a legal-but-unavailable fit
     let stage = 0;             // curriculum level (index into STAGES)
-    let streak = 0;            // consecutive deepest-choice sinks
-    let twinkleHole = null;    // hole carrying the deepest-choice glint
-    let twinkleUntil = 0;
+    let sunkCounts = new Map(); // hole → sinks this round (fills to HOLE_CAP)
+    let deepOffered = 0;       // deals carrying a deeper choice
+    let deepTaken = 0;         // of those, the deeper fit was taken
+    let roundInterlude = null; // {t0, secs, adv} during the table-rest
+    let glints = [];           // sparkles: {hole, at, s} — deep choices + cascade
+    let newHoleVs = STAGES[0].holes.slice(); /* values that arrived
+        this stage — drawn with a soft halo until their first ball
+        sinks; the wordless "this one is new" (Roger, 2026-10-26:
+        no text at all — text is a hurdle unrelated to the task) */
     resize();
     ball.x = Wd / 2; ball.y = Hd / 2;
 
+    /* rails lay each row out centred on the table, so any count
+       reads symmetric; positions refresh on resize (Wd/Hd change) */
+    function layOut() {
+      for (const name in RAIL) {
+        const r = RAIL[name];
+        r[name] = activeHoles().filter(h => h.rail === name);
+        r[name].forEach((h, i) => {
+          h.fx = r.xs[r[name].length][i];
+          h.fy = r.y;
+        });
+      }
+    }
     const holeX = h => h.fx * Wd, holeY = h => h.fy * Hd;
 
     function holeFits(h, n) {
@@ -278,45 +324,118 @@
     const activeHoles = () =>
       HOLES.filter(h => STAGES[stage].holes.includes(h.v));
 
-    /* which active holes would accept n — the fitting set */
+    /* open holes still take balls this round */
+    const openHoles = () =>
+      activeHoles().filter(h => (sunkCounts.get(h) || 0) < HOLE_CAP);
+
+    /* any open hole for n — the pool only ever deals a value with
+       somewhere to go */
+    const hasOpenHome = n => openHoles().some(h => holeFits(h, n));
+
+    /* which open holes would accept n — the fitting set */
     function fitsSet(n) {
-      return activeHoles().filter(h => holeFits(h, n));
+      return openHoles().filter(h => holeFits(h, n));
+    }
+
+    /* the values a hole will ever serve: its own multiples up to
+       MULT_MAX, kept meaningful — "?" takes the rest (values no
+       offered hole wants), so its list always exists */
+    function holePool(h, ceil) {
+      if (h.v === 0) {
+        const out = [];
+        for (let n = DEAL_MIN; n <= ceil; n++)
+          if (!activeHoles().some(o => o.v !== 0 && holeFits(o, n))) out.push(n);
+        return out;
+      }
+      const out = [];
+      const lim = MULT_MAX[h.v] || 12;
+      for (let m = 1; m <= lim && h.v * m <= ceil; m++) out.push(h.v * m);
+      return out;
     }
 
     /* deepest fitting hole = the insight being tested —
-       the prime hole is excluded: it's never a discrimination */
-    function deepestHole(n) {
+       "?" is excluded: it's never a discrimination */
+    function deepestHole(n, fs) {
       let best = null;
-      for (const h of fitsSet(n))
-        if (h.v !== 0 && (!best || h.v > best.v)) best = h;
+      for (const h of fs || fitsSet(n))
+        if (h.v !== 0 && (!best || h.depth > best.depth)) best = h;
       return best;
     }
 
+    const tableFull = () => openHoles().length === 0;
+
+    /* the shared round-complete register: the holes glint in
+       sequence and a warm glow swells and fades over the table —
+       where strings-of-collected-numbers can later emerge */
+    function endRound(now) {
+      const adv = stage < STAGES.length - 1;
+      roundInterlude = {
+        t0: now,
+        secs: INTERLUDE_SECS + (adv ? 0.9 : 0),
+        adv: adv,
+      };
+      activeHoles().forEach((h, i) => {
+        glints.push({ hole: h, at: now + 250 + i * 120, s: TWINKLE_SECS });
+      });
+      glints.push({ hole: openHoles()[0] || activeHoles()[0], at: now + 400, s: 1.2 });
+    }
+
+    function startRound(now) {
+      stage = Math.min(stage + (roundInterlude.adv ? 1 : 0), STAGES.length - 1);
+      const prevVs = stage > 0 ? STAGES[stage - 1].holes : [];
+      newHoleVs = STAGES[stage].holes.filter(v => !prevVs.includes(v));
+      layOut();
+      for (const h of activeHoles()) {
+        sunkCounts.set(h, 0);
+        if (h.born === undefined) h.born = now;
+      }
+      deepOffered = 0;
+      deepTaken = 0;
+    }
+
     function dealBall(now) {
-      const ceil = STAGES[stage].ceiling;
-      const act = activeHoles();
-      /* build the pool: every value guaranteed a home among the
-         offered holes; on the prime stage everything qualifies */
-      const pool = [];
-      for (let n = DEAL_MIN; n <= ceil; n++)
-        if (act.some(h => holeFits(h, n))) pool.push(n);
-      /* two biases, two jobs: NEW_HOLE_BIAS serves the just-unlocked
-         holes' multiples so each new test is discovered promptly —
-         computed as "added this stage" since a stage can open several
-         holes; MULTI_FIT_BIAS serves values fitting >1 offered hole —
-         the only deals that offer a discrimination, the only deals
-         that can twinkle or advance */
+      const ceil = openHoles().length <= 3 ? EARLY_CEIL : MAX_CEIL;
+      /* build the pool: every value guaranteed an open home — once
+         "?" is offered every number qualifies */
+      /* each hole serves only its own table — its MULT_MAX multiples,
+         bounded by EARLY_CEIL while the table is small; "?" serves
+         whatever no offered hole takes. A value's home is the
+         deepest hole that serves it, so every dealt number is
+         guaranteed a home */
+      const servings = openHoles().map(h => [h, holePool(h, ceil)]);
+      const byHome = new Map();
+      for (const [h, list] of servings) {
+        for (const n of list) {
+          let home = null;
+          for (const [h2, l2] of servings)
+            if (l2.includes(n) && (!home || h2.depth > home.depth)) home = h2;
+          if (!home) continue;
+          if (!byHome.has(home)) byHome.set(home, []);
+          byHome.get(home).push(n);
+        }
+      }
+      /* deal hole-first, weighted by remaining room (newest holes
+         × NEW_HOLE_WEIGHT), then draw a value from that hole's list
+         — MULTI_FIT_BIAS preferring the discriminating ones */
       const prev = stage === 0 ? [] : STAGES[stage - 1].holes;
       const newVs = STAGES[stage].holes.filter(v => !prev.includes(v));
-      const fresh = pool.filter(n => newVs.some(v => holeFits(HOLES.find(h => h.v === v), n)));
-      const multi = pool.filter(n => fitsSet(n).length > 1);
+      const entries = [...byHome.entries()];
+      const w = h => (HOLE_CAP - (sunkCounts.get(h) || 0)) *
+        (newVs.includes(h.v) ? NEW_HOLE_WEIGHT : 1);
+      const total = entries.reduce((s, [h]) => s + w(h), 0);
+      let acc = Math.random() * total;
+      let cands = entries.length ? entries[0][1] : [];
+      for (const [h, list] of entries) {
+        acc -= w(h);
+        if (acc <= 0) { cands = list; break; }
+      }
+      if (!cands.length) cands = [lastNum];
+      const multi = cands.filter(n => fitsSet(n).length > 1);
       do {
-        const roll = Math.random();
-        const src = fresh.length && roll < NEW_HOLE_BIAS ? fresh
-          : multi.length && roll < NEW_HOLE_BIAS + MULTI_FIT_BIAS ? multi
-          : pool;
+        const src = multi.length && Math.random() < MULTI_FIT_BIAS ? multi : cands;
         ballNum = src[Math.floor(Math.random() * src.length)];
-      } while (ballNum === lastNum && pool.length > 1);
+      } while (ballNum === lastNum && cands.length > 1);
+      if (fitsSet(ballNum).length > 1) deepOffered++;
       lastNum = ballNum;
       ball.x = Wd / 2 + (Math.random() - 0.5) * Wd * 0.3;
       ball.y = Hd * 0.72;
@@ -326,8 +445,8 @@
     }
 
     function advanceStage(now) {
+      /* kept for the override hook — rounds advance via startRound */
       stage = Math.min(stage + 1, STAGES.length - 1);
-      streak = 0;
       for (const h of activeHoles()) if (h.born === undefined) h.born = now;
     }
     let smX = 0, smY = 0;            // smoothed gravity
@@ -441,6 +560,15 @@
     function step(dt) {
       if (paused) return;
 
+      if (roundInterlude) {
+        if (performance.now() - roundInterlude.t0 > roundInterlude.secs * 1000) {
+          startRound(performance.now());
+          roundInterlude = null;
+          dealBall(performance.now());
+        }
+        return;
+      }
+
       if (performance.now() < ejectUntil) {
         const damp = Math.exp(-FRICTION * dt);
         ball.vx *= damp; ball.vy *= damp;
@@ -489,31 +617,47 @@
         ball.x += (hx - ball.x) * Math.min(1, 10 * dt);
         ball.y += (hy - ball.y) * Math.min(1, 10 * dt);
         ball.vx = ball.vy = 0;
-        if (e >= 1) dealBall(performance.now());
+        if (e >= 1) {
+          if (tableFull()) {
+            endRound(performance.now());
+            ballNum = 0;      // nothing dealt until the rest is over
+          } else {
+            dealBall(performance.now());
+          }
+        }
       } else {
         for (const h of activeHoles()) {
           const dx = ball.x - holeX(h), dy = ball.y - holeY(h);
           const d = Math.hypot(dx, dy);
           if (d < HOLE_R - CAPTURE_IN) {
-            if (holeFits(h, ballNum)) {
+            const open = (sunkCounts.get(h) || 0) < HOLE_CAP;
+            const fits = fitsSet(ballNum);
+            /* the ball's home is a deepest open fit — tied-depth fits
+               share ownership, since 3*4 = 4*3 = 12 has two true
+               parents ("?" stands in alone when nothing answers) */
+            const home = STRICT_HOME
+              ? (deepestHole(ballNum, fits) || fits[0] || null)
+              : h;
+            if (open && home && h.depth === home.depth) {
               sink = { hole: h, k: 0 };
               ball.vx = ball.vy = 0;
-              /* deepest-choice detection: a discrimination only exists
-                 when more than one hole fits — forced sinks are neutral */
-              const fits = fitsSet(ballNum);
+              /* a discrimination exists when the ball could rest deeper
+                 — forced sinks are neutral either way */
               if (fits.length > 1) {
-                if (h === deepestHole(ballNum)) {
-                  streak++;
-                  twinkleHole = h;
-                  twinkleUntil = performance.now() + TWINKLE_SECS * 1000;
-                  if (streak >= ADVANCE_STREAK) advanceStage(performance.now());
-                } else {
-                  streak = 0;
-                }
+                deepTaken++;
+                glints.push({ hole: h, at: performance.now(), s: TWINKLE_SECS });
               }
+              sunkCounts.set(h, (sunkCounts.get(h) || 0) + 1);
             } else {
               flashUntil = performance.now() + HOLE_FLASH * 1000;
               holeFlash = h;
+              /* a legal fit that is full or too shallow flashes slate —
+                 the ball belonged, just not here; a true non-fit flashes
+                 amber as always. A shallow refusal also glints the true
+                 home — the refusal points, it doesn't just push back */
+              flashSlate = holeFits(h, ballNum);
+              if (flashSlate && home && home !== h)
+                glints.push({ hole: home, at: performance.now(), s: TWINKLE_SECS });
               ejectUntil = performance.now() + EJECT_SECS * 1000;
               const ux = dx / (d || 1), uy = dy / (d || 1);
               const sp = Math.max(Math.hypot(ball.vx, ball.vy), HOLE_PUSH);
@@ -537,30 +681,60 @@
       for (const h of activeHoles()) {
         const appear = h.born === undefined ? 1
           : Math.min((now - h.born) / (HOLE_FADE * 1000), 1);
+        const sunk = sunkCounts.get(h) || 0;
+        const full = sunk >= HOLE_CAP;
         ctx.globalAlpha = appear;
         const hx = holeX(h), hy = holeY(h);
+        /* new arrivals — a soft neutral halo that holds until the
+           hole takes its first ball: wordless "this one is new",
+           cool slate-blue so it never reads as refusal amber */
+        if (newHoleVs.includes(h.v) && sunk === 0) {
+          const pulse = 0.5 + 0.5 * Math.sin(now / 380);
+          const hg = ctx.createRadialGradient(hx, hy, HOLE_R * 0.6,
+            hx, hy, HOLE_R * 2.2);
+          hg.addColorStop(0, 'rgba(200,225,255,' + (0.20 + 0.10 * pulse) + ')');
+          hg.addColorStop(1, 'rgba(200,225,255,0)');
+          ctx.fillStyle = hg;
+          ctx.beginPath(); ctx.arc(hx, hy, HOLE_R * 2.2, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = 'rgba(215,235,255,' + (0.30 + 0.20 * pulse) + ')';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(hx, hy, HOLE_R + 3 + 1.5 * pulse, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         const flashing = h === holeFlash && now < flashUntil;
         ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R, 0, Math.PI * 2); ctx.fill();
         ctx.lineWidth = 2;
-        ctx.strokeStyle = flashing ? '#e0a53a' :
-          (h.v === 0 ? 'rgba(53,199,149,.45)' : 'rgba(120,150,175,.5)');
+        ctx.strokeStyle = flashing ? (flashSlate ? '#8a95a3' : '#e0a53a')
+          : full ? 'rgba(90,100,110,.30)'
+          : (h.v === 0 ? 'rgba(53,199,149,.45)' : 'rgba(120,150,175,.5)');
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
+        ctx.fillStyle = flashing ? (flashSlate ? '#8a95a3' : '#e0a53a')
+          : (full ? '#4d5660' : '#cfd8e0');
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
           ' Andika, -apple-system, system-ui, sans-serif';
-        ctx.fillText(h.label || String(h.v), hx, hy);
+        ctx.fillText(h.label || String(h.v), hx, hy - (sunk ? PIP_R * 0.7 : 0));
+        /* fill pips — one lit dot per ball the hole has taken this
+           round; all lit = the hole is full until the table rests */
+        for (let i = 0; i < HOLE_CAP; i++) {
+          const px = hx + (i - (HOLE_CAP - 1) / 2) * PIP_R * 2.8;
+          ctx.beginPath(); ctx.arc(px, hy + HOLE_R * 0.55, PIP_R, 0, Math.PI * 2);
+          ctx.fillStyle = i < sunk ? '#ffd97a' : 'rgba(120,150,175,.22)';
+          ctx.fill();
+        }
         ctx.globalAlpha = 1;
       }
 
-      /* the deepest-choice glint — a brief sparkle on the hole that
-         took the ball, marking "there was a deeper answer and you
-         found it"; never fires on a forced (single-fit) sink */
-      if (twinkleHole && now < twinkleUntil) {
-        const k = 1 - (twinkleUntil - now) / (TWINKLE_SECS * 1000);
-        const a = Math.sin(k * Math.PI);          // 0→1→0 fade
-        const gx = holeX(twinkleHole) + HOLE_R * 0.55;
-        const gy = holeY(twinkleHole) - HOLE_R * 0.55;
+      /* glints — a brief sparkle on a hole, marking "there was a
+         deeper answer and you found it", and in sequence round the
+         table at a round's rest; never fires on a forced sink */
+      for (const g of glints) {
+        const e = (now - g.at) / (g.s * 1000);
+        if (e < 0 || e > 1) continue;
+        const a = Math.sin(e * Math.PI);          // 0→1→0 fade
+        const gx = holeX(g.hole) + HOLE_R * 0.55;
+        const gy = holeY(g.hole) - HOLE_R * 0.55;
         const s = 6 + 4 * a;                      // arm length swells mid-glint
         ctx.strokeStyle = `rgba(255,244,196,${a * 0.9})`;
         ctx.lineWidth = 1.4;
@@ -570,6 +744,29 @@
         ctx.moveTo(gx - s * 0.45, gy - s * 0.45); ctx.lineTo(gx + s * 0.45, gy + s * 0.45);
         ctx.moveTo(gx + s * 0.45, gy - s * 0.45); ctx.lineTo(gx - s * 0.45, gy + s * 0.45);
         ctx.stroke();
+      }
+      glints = glints.filter(g => now - g.at < g.s * 1000 + 500);
+
+      /* the table-rest: a warm glow swells over the table while the
+         holes glint in sequence — no words; the arriving holes
+           carry their own halo into the next round */
+      if (roundInterlude) {
+        const k = Math.min((now - roundInterlude.t0) / (roundInterlude.secs * 1000), 1);
+        const ga = Math.sin(Math.PI * k) * 0.7;
+        const r = Hd * 0.10 * (0.85 + 0.35 * k);
+        const cx = Wd / 2, cy = Hd * 0.40;
+        const kk = f => Math.min(1, f * ga);
+        const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g2.addColorStop(0, 'rgba(255,250,225,' + kk(0.9) + ')');
+        g2.addColorStop(0.35, 'rgba(255,220,130,' + kk(0.75) + ')');
+        g2.addColorStop(0.75, 'rgba(255,175,60,' + kk(0.5) + ')');
+        g2.addColorStop(1, 'rgba(255,150,40,' + kk(0.28) + ')');
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+        ctx.fillStyle = g2; ctx.fill();
+        ctx.restore();
+
       }
 
       /* the ball — fades/scales in on deal, shrinks away on sinking */
@@ -602,6 +799,7 @@
       draw(now);
       requestAnimationFrame(frame);
     }
+    layOut();
     dealBall(performance.now());
     requestAnimationFrame(frame);
   </script>

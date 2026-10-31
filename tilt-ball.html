@@ -103,8 +103,8 @@
 
   <div id="overlay">
     <div style="font-size:22px">Tilt Ball</div>
-    <div class="sub">Steer the numbered ball into a hole that divides it.
-      Tilt steers; so does dragging a finger.</div>
+    <div class="sub">Tap the hole the ball belongs in —
+      or steer it with a tilt or a finger.</div>
     <button id="go">Tap to enable tilt</button>
     <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
   </div>
@@ -115,15 +115,29 @@
     /* ---------- tunables ----------
        Steering matches the tilt-snake head: tilt (or a dragged finger)
        sets a target heading, the ball turns toward it proportionally
-       capped by TURN_RATE, and speed scales with tilt magnitude. */
+       capped by TURN_RATE, and speed scales with tilt magnitude.
+       A tap on a hole sends the ball there itself (autopilot); any
+       manual steering retakes control. */
     const SMOOTHING = 0.18;   // low-pass on gravity input (0=none … 1=frozen)
-    const BALL_SPEED = 150;   // design-px/s at full drive — same as SNAKE_SPEED
+    const BALL_SPEED = 200;   // design-px/s at full drive (was 150 — felt sluggish, Roger 2026-10-28)
+    const SPEED_STAGE = 0.07; // +7% per stage — the table livelens as the player proves themselves
+    const SPEED_CAP = 1.5;    // ceiling on the stage multiplier
     const TURN_RATE = 5.0;    // rad/s hard cap on heading change
     const TURN_RESPOND = 6;   // /s proportional approach to target heading
     const TILT_DEAD = 0.4;    // gravity magnitude below which heading holds
     const FULL_TILT = 3.5;    // gravity magnitude giving full speed
     const IDLE_DRIVE = 0.15;  // fraction of speed while level / holding
     const TOUCH_FULL = 120;   // drag distance (design-px) giving full speed
+    const AUTO_DRIVE = 1.0;   // top drive while homing on a tapped hole
+    /* drive falls to IDLE_DRIVE on arrival — a floor above it left the
+       ball orbiting just outside the capture radius: turn radius at
+       cruising speed exceeds HOLE_R - CAPTURE_IN, a limit cycle.
+       Slowing into the hole reads as "rolling in", billiards-style */
+    const MANUAL_TILT = 1.5;  /* gravity change since the tap that retakes
+        control — the tilt-snake rule: only a real lean overrides */
+    const TAP_MS = 260;       // a down-up this quick is a tap, not a steer
+    const TAP_MOVE = 14;      // design-px of travel that makes it a drag
+    const TAP_SNAP = 1.8;     // hole-tap forgiveness (× HOLE_R)
     const EJECT_SECS = 0.45;  // coast after a refusal before steering resumes
     const FRICTION = 0.35;    // eject-coast damping per second
     const RESTITUTION = 0.55;   // wall bounciness 0..1
@@ -132,23 +146,28 @@
 
     /* ---------- bar-billiards holes ----------
        ROGER NOTE —
-       · The table now plays in ROUNDS. Each open hole fills after
-         HOLE_CAP sinks (pips inside the rim show it); the deal only
-         serves values with an open home. When every hole is full the
-         table rests, glints, and — if the player chose the deeper fit
-         at least DEEP_NEED times — the stage advances BETWEEN rounds,
-         new holes fading in. Otherwise the same round repeats.
+       · The table plays in ROUNDS of one RACK (like the pool-table
+         ball return, or a pinball magazine): RACK_SIZE balls wait in
+         a rail below the table, so "what remains to be placed" is
+         visible. One ball is live at a time; the next feeds
+         automatically, or tap a waiting ball to pick it.
+       · ANY fitting hole accepts (Roger, 2026-10-28): holes have no
+         capacity and no "best". 56 is 7×8 AND 8×7 — refusing one of
+         them would be a small lie. Multi-home values are the
+         strategy: which hole to feed is the child's real decision.
+       · Refusal is one honest thing: the number doesn't divide →
+         amber. No slate, no "legal but shallower" — there is no
+         wrong-but-legal hole any more.
+       · Tap a hole to send the live ball there; tilt or a dragged
+         finger always overrides.
        · Holes unlock in school-table order (2,10 → 5 → 4 → 3 → 6 →
-         8 → 9 → 7 → 13 → "?"), rows centring on the table so odd
-         counts stay symmetric. Ambiguity stays a feature: 35 can go
-         into 5 or 7; the deeper fit glints.
-       · "depth" (0 shallow … 7 deepest) replaces value as the ranking
-         — a bigger numeral isn't always the harder test.
+         8 → 9 → "?" → 7 → 13), rows centring on the table so odd
+         counts stay symmetric.
        · "?" lives on the centre rail — always central when it opens.
          It accepts whatever no offered hole takes; it never claims
-         primality, only "no match".
-       · STRICT_HOME (Roger, 2026-10-26): shallow dumps are legal but
-         empty — each ball sinks only into its deepest open fit.
+         primality, only "no match". It is NOT a bin — composite
+         leftovers never go there; its job is widening the dealt
+         pool (11, 13, 17, 19, 23… become askable).
        · capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
     const HOLE_R = 30;        // hole rim radius
     const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
@@ -157,13 +176,18 @@
     const SINK_SECS = 0.55;   // right-hole sink animation
     const BALL_FADE = 0.8;    // s for a dealt ball to fade in
     const HOLE_FADE = 0.8;    // s for a newly-unlocked hole to fade in
-    const HOLE_CAP = 5;       // sinks that fill a hole for the round
-    const STRICT_HOME = true; /* a ball sinks only into its deepest open
-        fit — a legal-but-shallower hole refuses gently, and the true
-        home glints so the refusal teaches rather than frustrates */
-    const PIP_R = 3.2;        // fill-pip dot radius
     const INTERLUDE_SECS = 2.6; // round-complete pause before re-deal
     const DEAL_MIN = 2;
+    /* the rack — the round's magazine (Roger, 2026-10-28) */
+    const RACK_SIZE = 10;     // balls dealt per round (fewer while few homes)
+    const RACK_R = 19;        // waiting-ball radius
+    const RACK_GAP = 8;       // spacing between waiting balls
+    const RACK_H = 108;       // design-px reserved at the bottom for the rack
+    const LAUNCH_SECS = 0.32; // rack → table slide
+    const LAUNCH_GAP = 300;   // ms after a sink before the next ball feeds
+    const CLEAN_FRAC = 0.6;   /* share of balls homed first-try that
+        advances the stage — every dealt ball has a true home, so the
+        discrimination being tested is "did it go straight home" */
     /* rails: each row centres on the table — odd hole counts stay
        symmetric, per Roger's display note. "?" keeps its own centre
        rail so it stays central and equally available when it opens. */
@@ -196,18 +220,12 @@
        table and which numbers can be dealt. Holes unlock in school-
        table order; this table is the management surface — edit rows,
        not code.
-       · every deal is guaranteed a home among the OPEN holes
-       · deals are skewed toward holes that still need filling,
-         newest holes weighted NEW_HOLE_WEIGHT× (Roger, 2026-10-26:
-         big numbers shouldn't be dumped in 2 because its snug
-         home is full)
-       · MULTI_FIT_BIAS prefers values offering a discrimination
-         within the chosen hole — the only deals that can glint
-         or count as deeper
-       · a round ends when every open hole is full (HOLE_CAP sinks
-         each); the stage then advances between rounds — strict
-         homes mean completing the round IS the demonstration, so
-         no separate deeper-count is needed (Roger, 2026-10-26)
+       · every rack ball is guaranteed a home that stays open for it
+       · newest holes draw a bigger share of the rack
+         (NEW_HOLE_WEIGHT×) so arrivals get exercised
+       · a round ends when the rack is empty; the stage advances
+         between rounds if at least CLEAN_FRAC of the rack went
+         home first-try — otherwise the same stage re-deals
        Session-only for now; a saved profile just restores `stage`. */
     const STAGES = [
       { holes: [2, 10] },                             // last digit: even and 0
@@ -230,9 +248,8 @@
       2: 12, 3: 12, 4: 12, 5: 11, 6: 12, 7: 12,
       8: 12, 9: 12, 10: 9, 13: 12,   // "?" takes what nothing wants
     };
-    const NEW_HOLE_WEIGHT = 3;   // newest holes' deal weight vs the rest
-    const MULTI_FIT_BIAS = 0.30; // prefer discriminating values within a hole
-    const TWINKLE_SECS = 0.7;    // glint marking a deepest-choice sink
+    const NEW_HOLE_WEIGHT = 3;   // newest holes' share of the rack
+    const TWINKLE_SECS = 0.7;    // glint on a correct-home sink
 
     // Many Android devices report the motion axes with the opposite sign
     // convention to iOS. Auto-flip on Android; ?tilt=normal / ?tilt=invert
@@ -269,7 +286,7 @@
       cv.style.width = W + 'px'; cv.style.height = H + 'px';
       ctx.setTransform(DPR * K, 0, 0, DPR * K, 0, 0);
       ball.x = Math.min(Math.max(ball.x, BALL_R), Wd - BALL_R);
-      ball.y = Math.min(Math.max(ball.y, BALL_R), Hd - BALL_R);
+      ball.y = Math.min(Math.max(ball.y, BALL_R), playH() - BALL_R);
     }
     window.addEventListener('resize', resize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
@@ -280,25 +297,38 @@
 
     /* ---------- state ---------- */
     const ball = { x: 0, y: 0, vx: 0, vy: 0 };
-    let ballNum = 0;           // the numeral the ball carries (2..100)
-    let lastNum = 0;           // avoid consecutive repeats
+    let ballNum = 0;           // the numeral the live ball carries (0 = none)
+    let ballHome = null;       // the hole this ball was dealt for
     let ballBorn = 0;          // fade-in clock (performance.now ms)
-    let sink = null;           // {t0, hole} while a right hole swallows it
+    let refused = false;       // the live ball met a refusal this play
+    let sink = null;           // {hole, k} while a right hole swallows it
     let flashUntil = 0;        // wrong-hole amber rim timestamp
     let holeFlash = null;      // which hole is flashing
-    let flashSlate = false;    // refusal was a legal-but-unavailable fit
     let stage = 0;             // curriculum level (index into STAGES)
-    let sunkCounts = new Map(); // hole → sinks this round (fills to HOLE_CAP)
-    let deepOffered = 0;       // deals carrying a deeper choice
-    let deepTaken = 0;         // of those, the deeper fit was taken
+    const hasTaken = new Set(); // holes that have taken ≥1 ball (new-hole halo)
+    let rack = [];             // [{v, home}] waiting balls, order = display
+    let rackBorn = 0;          // rack fade-in cascade clock
+    let flight = null;         // {x0,y0,x1,y1,t0,dur,mode,v,home,idx}
+    let launchAt = 0;          // timestamp the next ball may feed
+    let pendingPick = -1;      // rack index chosen during the feed gap
+    let auto = null;           // {x,y,hole} tapped destination
+    let queuedAuto = null;     // destination tapped while a ball is in flight
+    let tiltBase = null;       // gravity snapshot when the tap landed
+    let cleanSinks = 0;        // balls homed first-try this round
+    let dealtCount = 0;        // rack size this round
     let roundInterlude = null; // {t0, secs, adv} during the table-rest
-    let glints = [];           // sparkles: {hole, at, s} — deep choices + cascade
+    let glints = [];           // {hole, at, s, kind:'spark'|'glow'}
     let newHoleVs = STAGES[0].holes.slice(); /* values that arrived
         this stage — drawn with a soft halo until their first ball
         sinks; the wordless "this one is new" (Roger, 2026-10-26:
         no text at all — text is a hurdle unrelated to the task) */
     resize();
     ball.x = Wd / 2; ball.y = Hd / 2;
+
+    /* the table sits above the rack rail — holes and walls use the
+       play height, the strip below belongs to the waiting balls.
+       (a function declaration so the early resize() call sees it) */
+    function playH() { return Hd - RACK_H; }
 
     /* rails lay each row out centred on the table, so any count
        reads symmetric; positions refresh on resize (Wd/Hd change) */
@@ -312,7 +342,27 @@
         });
       }
     }
-    const holeX = h => h.fx * Wd, holeY = h => h.fy * Hd;
+    const holeX = h => h.fx * Wd, holeY = h => h.fy * playH();
+
+    /* where each waiting ball sits — wraps to two rows, centred;
+       the front of the queue is top-left */
+    function rackSlots() {
+      const n = rack.length;
+      const per = Math.max(1, Math.floor((Wd - 24) / (RACK_R * 2 + RACK_GAP)));
+      const rows = Math.ceil(n / per) || 1;
+      const y0 = playH() +
+        (RACK_H - (rows * (RACK_R * 2 + RACK_GAP) - RACK_GAP)) / 2 + RACK_R;
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const r = Math.floor(i / per), c = i % per;
+        const cols = Math.min(per, n - r * per);
+        out.push({
+          x: Wd / 2 + (c - (cols - 1) / 2) * (RACK_R * 2 + RACK_GAP),
+          y: y0 + r * (RACK_R * 2 + RACK_GAP)
+        });
+      }
+      return out;
+    }
 
     function holeFits(h, n) {
       return h.v === 0
@@ -324,17 +374,9 @@
     const activeHoles = () =>
       HOLES.filter(h => STAGES[stage].holes.includes(h.v));
 
-    /* open holes still take balls this round */
-    const openHoles = () =>
-      activeHoles().filter(h => (sunkCounts.get(h) || 0) < HOLE_CAP);
-
-    /* any open hole for n — the pool only ever deals a value with
-       somewhere to go */
-    const hasOpenHome = n => openHoles().some(h => holeFits(h, n));
-
-    /* which open holes would accept n — the fitting set */
+    /* which holes would accept n — every hole is always open */
     function fitsSet(n) {
-      return openHoles().filter(h => holeFits(h, n));
+      return activeHoles().filter(h => holeFits(h, n));
     }
 
     /* the values a hole will ever serve: its own multiples up to
@@ -362,47 +404,17 @@
       return best;
     }
 
-    const tableFull = () => openHoles().length === 0;
+    /* ---------- the rack ----------
+       A round's balls are dealt together into the rail below the
+       table. Each value is bucketed to the deepest hole that serves
+       it — PURELY for coverage, so every offered hole gets exercised
+       in the rack. Bucketing is never a rule: at the table any
+       fitting hole accepts. */
 
-    /* the shared round-complete register: the holes glint in
-       sequence and a warm glow swells and fades over the table —
-       where strings-of-collected-numbers can later emerge */
-    function endRound(now) {
-      const adv = stage < STAGES.length - 1;
-      roundInterlude = {
-        t0: now,
-        secs: INTERLUDE_SECS + (adv ? 0.9 : 0),
-        adv: adv,
-      };
-      activeHoles().forEach((h, i) => {
-        glints.push({ hole: h, at: now + 250 + i * 120, s: TWINKLE_SECS });
-      });
-      glints.push({ hole: openHoles()[0] || activeHoles()[0], at: now + 400, s: 1.2 });
-    }
-
-    function startRound(now) {
-      stage = Math.min(stage + (roundInterlude.adv ? 1 : 0), STAGES.length - 1);
-      const prevVs = stage > 0 ? STAGES[stage - 1].holes : [];
-      newHoleVs = STAGES[stage].holes.filter(v => !prevVs.includes(v));
-      layOut();
-      for (const h of activeHoles()) {
-        sunkCounts.set(h, 0);
-        if (h.born === undefined) h.born = now;
-      }
-      deepOffered = 0;
-      deepTaken = 0;
-    }
-
-    function dealBall(now) {
-      const ceil = openHoles().length <= 3 ? EARLY_CEIL : MAX_CEIL;
-      /* build the pool: every value guaranteed an open home — once
-         "?" is offered every number qualifies */
-      /* each hole serves only its own table — its MULT_MAX multiples,
-         bounded by EARLY_CEIL while the table is small; "?" serves
-         whatever no offered hole takes. A value's home is the
-         deepest hole that serves it, so every dealt number is
-         guaranteed a home */
-      const servings = openHoles().map(h => [h, holePool(h, ceil)]);
+    function buildRack(now) {
+      const hs = activeHoles();
+      const ceil = hs.length <= 3 ? EARLY_CEIL : MAX_CEIL;
+      const servings = hs.map(h => [h, holePool(h, ceil)]);
       const byHome = new Map();
       for (const [h, list] of servings) {
         for (const n of list) {
@@ -411,43 +423,136 @@
             if (l2.includes(n) && (!home || h2.depth > home.depth)) home = h2;
           if (!home) continue;
           if (!byHome.has(home)) byHome.set(home, []);
-          byHome.get(home).push(n);
+          const arr = byHome.get(home);
+          if (!arr.includes(n)) arr.push(n);
         }
       }
-      /* deal hole-first, weighted by remaining room (newest holes
-         × NEW_HOLE_WEIGHT), then draw a value from that hole's list
-         — MULTI_FIT_BIAS preferring the discriminating ones */
+      /* quotas: every hole represented, the rest of the rack shared
+         out weighted toward the newest holes, bounded only by how
+         many values each hole can serve */
+      const homes = hs.filter(h => byHome.has(h));
+      const quota = new Map();
+      for (const h of homes) quota.set(h, 1);
+      const room = h => byHome.get(h).length;
+      let left = Math.min(RACK_SIZE,
+        homes.reduce((s, h) => s + Math.max(0, room(h)), 0)) - homes.length;
       const prev = stage === 0 ? [] : STAGES[stage - 1].holes;
       const newVs = STAGES[stage].holes.filter(v => !prev.includes(v));
-      const entries = [...byHome.entries()];
-      const w = h => (HOLE_CAP - (sunkCounts.get(h) || 0)) *
-        (newVs.includes(h.v) ? NEW_HOLE_WEIGHT : 1);
-      const total = entries.reduce((s, [h]) => s + w(h), 0);
-      let acc = Math.random() * total;
-      let cands = entries.length ? entries[0][1] : [];
-      for (const [h, list] of entries) {
-        acc -= w(h);
-        if (acc <= 0) { cands = list; break; }
+      while (left > 0) {
+        const cand = homes.filter(h => quota.get(h) < room(h));
+        if (!cand.length) break;
+        const w = h => newVs.includes(h.v) ? NEW_HOLE_WEIGHT : 1;
+        let acc = Math.random() * cand.reduce((s, h) => s + w(h), 0);
+        for (const h of cand) {
+          acc -= w(h);
+          if (acc <= 0) { quota.set(h, quota.get(h) + 1); break; }
+        }
+        left--;
       }
-      if (!cands.length) cands = [lastNum];
-      const multi = cands.filter(n => fitsSet(n).length > 1);
-      do {
-        const src = multi.length && Math.random() < MULTI_FIT_BIAS ? multi : cands;
-        ballNum = src[Math.floor(Math.random() * src.length)];
-      } while (ballNum === lastNum && cands.length > 1);
-      if (fitsSet(ballNum).length > 1) deepOffered++;
-      lastNum = ballNum;
-      ball.x = Wd / 2 + (Math.random() - 0.5) * Wd * 0.3;
-      ball.y = Hd * 0.72;
-      ball.vx = ball.vy = 0;
-      ballBorn = now;
-      sink = null;
+      rack = [];
+      for (const h of homes) {
+        const pool = byHome.get(h).slice();
+        for (let i = 0; i < quota.get(h) && pool.length; i++)
+          rack.push({ v: pool.splice(Math.floor(Math.random() * pool.length), 1)[0], home: h });
+      }
+      /* shuffle so one home's balls don't arrive in a block, and
+         trim if more homes than rack slots */
+      for (let i = rack.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = rack[i]; rack[i] = rack[j]; rack[j] = t;
+      }
+      rack = rack.slice(0, RACK_SIZE);
+      rackBorn = now;
+      dealtCount = rack.length;
+      cleanSinks = 0;
     }
 
-    function advanceStage(now) {
-      /* kept for the override hook — rounds advance via startRound */
-      stage = Math.min(stage + 1, STAGES.length - 1);
-      for (const h of activeHoles()) if (h.born === undefined) h.born = now;
+    /* rack ball idx slides onto the table and goes live */
+    function launchBall(idx, now) {
+      const s = rackSlots()[idx];
+      const it = rack.splice(idx, 1)[0];
+      flight = {
+        x0: s.x, y0: s.y,
+        x1: Wd / 2 + (Math.random() - 0.5) * Wd * 0.2,
+        y1: playH() - 70,
+        t0: now, dur: LAUNCH_SECS * 1000,
+        mode: 'launch', v: it.v, home: it.home
+      };
+      auto = null;
+    }
+
+    /* free pick with a live ball: the live ball flies back into the
+       tapped slot and the tapped ball launches in its place —
+       the swap is a true exchange: the flight remembers which value
+       was picked (pickV) and which is coming home (v) */
+    function swapLive(idx, now) {
+      const s = rackSlots()[idx];
+      const pick = rack[idx];
+      flight = {
+        x0: ball.x, y0: ball.y, x1: s.x, y1: s.y,
+        t0: now, dur: LAUNCH_SECS * 700,
+        mode: 'return', v: ballNum, home: ballHome, idx,
+        pickV: pick.v, pickHome: pick.home
+      };
+      auto = null; sink = null;
+    }
+
+    /* a tap (not a drag): rack ball first, then a hole sends the
+       live ball, then bare table cancels a send */
+    function handleTap(x, y, now) {
+      const slots = rackSlots();
+      for (let i = 0; i < slots.length; i++) {
+        if (Math.hypot(x - slots[i].x, y - slots[i].y) < RACK_R + 10) {
+          if (flight) return;
+          if (ballNum && !sink) { swapLive(i, now); return; }
+          if (!ballNum) { pendingPick = i; return; }
+          return;
+        }
+      }
+      if (!ballNum && !flight) return;
+      if (sink) return;
+      let best = null, bd = 1e9;
+      for (const h of activeHoles()) {
+        const d = Math.hypot(x - holeX(h), y - holeY(h));
+        if (d < bd) { bd = d; best = h; }
+      }
+      if (best && bd < HOLE_R * TAP_SNAP) {
+        /* a tap mid-flight queues onto the incoming ball — no dead
+           time waiting for the launch to land before commanding it */
+        const t = { x: holeX(best), y: holeY(best), hole: best };
+        if (flight) queuedAuto = t;
+        else { auto = t; tiltBase = { x: smX, y: smY }; }
+      } else { auto = null; queuedAuto = null; }
+    }
+
+    /* the shared round-complete register: the holes glint in
+       sequence and a warm glow swells and fades over the table —
+       where strings-of-collected-numbers can later emerge */
+    function endRound(now) {
+      const adv = stage < STAGES.length - 1 &&
+        cleanSinks >= Math.ceil(CLEAN_FRAC * dealtCount);
+      roundInterlude = {
+        t0: now,
+        secs: INTERLUDE_SECS + (adv ? 0.9 : 0),
+        adv: adv,
+      };
+      activeHoles().forEach((h, i) => {
+        glints.push({ hole: h, at: now + 250 + i * 120, s: TWINKLE_SECS, kind: 'spark' });
+      });
+      glints.push({ hole: activeHoles()[0], at: now + 400, s: 1.2, kind: 'spark' });
+    }
+
+    function startRound(now, adv) {
+      stage = Math.min(stage + (adv ? 1 : 0), STAGES.length - 1);
+      const prevVs = stage > 0 ? STAGES[stage - 1].holes : [];
+      newHoleVs = STAGES[stage].holes.filter(v => !prevVs.includes(v));
+      layOut();
+      hasTaken.clear();
+      for (const h of activeHoles())
+        if (h.born === undefined) h.born = now;
+      buildRack(now);
+      pendingPick = -1;
+      launchAt = now + 700;   // let the rack fade in before the feed
     }
     let smX = 0, smY = 0;            // smoothed gravity
     let tiltOn = false;
@@ -514,12 +619,28 @@
       smY += (gy - smY) * SMOOTHING;
     });
 
-    /* ---------- touch steering ---------- */
-    function setTouch(t) { touch = { x: t.clientX / K, y: t.clientY / K }; }
-    cv.addEventListener('pointerdown', setTouch);
-    cv.addEventListener('pointermove', (t) => { if (t.buttons) setTouch(t); });
-    window.addEventListener('pointerup', () => touch = null);
-    window.addEventListener('pointercancel', () => touch = null);
+    /* ---------- touch: drag steers, tap commands ----------
+       Down always engages manual steering (any touch retakes from
+       autopilot); a quick still down-up is a TAP — rack ball picks,
+       hole sends. */
+    let down = null;               // {x,y,t,moved} while a finger is down
+    cv.addEventListener('pointerdown', (t) => {
+      down = { x: t.clientX / K, y: t.clientY / K, t: performance.now(), moved: false };
+      touch = { x: down.x, y: down.y };
+      auto = null;
+    });
+    cv.addEventListener('pointermove', (t) => {
+      if (!t.buttons || !down) return;
+      touch = { x: t.clientX / K, y: t.clientY / K };
+      if (Math.hypot(touch.x - down.x, touch.y - down.y) > TAP_MOVE) down.moved = true;
+    });
+    window.addEventListener('pointerup', () => {
+      touch = null;
+      if (down && !down.moved && performance.now() - down.t < TAP_MS)
+        handleTap(down.x, down.y, performance.now());
+      down = null;
+    });
+    window.addEventListener('pointercancel', () => { touch = null; down = null; });
     cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
 
     /* ---------- orientation guard ---------- */
@@ -559,17 +680,59 @@
 
     function step(dt) {
       if (paused) return;
+      const now = performance.now();
 
       if (roundInterlude) {
-        if (performance.now() - roundInterlude.t0 > roundInterlude.secs * 1000) {
-          startRound(performance.now());
+        if (now - roundInterlude.t0 > roundInterlude.secs * 1000) {
+          const adv = roundInterlude.adv;
           roundInterlude = null;
-          dealBall(performance.now());
+          startRound(now, adv);
+          if (!rack.length) endRound(now);   // nothing to deal — rest again
         }
         return;
       }
 
-      if (performance.now() < ejectUntil) {
+      /* a ball in flight (launch or swap-return) rides its tween;
+         no physics, no captures until it lands */
+      if (flight) {
+        if (now - flight.t0 >= flight.dur) {
+          const f = flight; flight = null;
+          if (f.mode === 'launch') {
+            ballNum = f.v; ballHome = f.home;
+            ball.x = f.x1; ball.y = f.y1; ball.vx = ball.vy = 0;
+            heading = -Math.PI / 2;
+            refused = false; sink = null;
+            ballBorn = now - BALL_FADE * 1000;   // the slide WAS the
+                // entrance — skip the deal fade or the ball flashes
+                // away and re-appears (Roger, 2026-10-28)
+            if (queuedAuto) { auto = queuedAuto; queuedAuto = null;
+              tiltBase = { x: smX, y: smY }; }
+          } else { // 'return' — the live ball lands in the tapped
+            // slot; the picked value launches out in its place
+            const s = rackSlots()[f.idx];
+            rack[f.idx] = { v: f.v, home: f.home };
+            ballNum = 0; ballHome = null;
+            flight = {
+              x0: s.x, y0: s.y,
+              x1: Wd / 2 + (Math.random() - 0.5) * Wd * 0.2,
+              y1: playH() - 70,
+              t0: now, dur: LAUNCH_SECS * 1000,
+              mode: 'launch', v: f.pickV, home: f.pickHome
+            };
+          }
+        } else return;
+      }
+
+      /* feed the next waiting ball once the beat has passed */
+      if (!flight && !ballNum && rack.length && now >= launchAt) {
+        const idx = pendingPick >= 0 && pendingPick < rack.length ? pendingPick : 0;
+        pendingPick = -1;
+        launchBall(idx, now);
+        return;
+      }
+      if (!ballNum) return;
+
+      if (now < ejectUntil) {
         const damp = Math.exp(-FRICTION * dt);
         ball.vx *= damp; ball.vy *= damp;
       } else {
@@ -578,7 +741,20 @@
           const dx = touch.x - ball.x, dy = touch.y - ball.y;
           target = Math.atan2(dy, dx);
           drive = Math.max(IDLE_DRIVE, Math.min(Math.hypot(dx, dy) / TOUCH_FULL, 1));
-        } else if (tiltOn) {
+        } else if (auto) {
+          /* tapped destination: cruise to it; a real lean retakes
+             control (the tilt-snake tiltBase rule) */
+          if (tiltOn && tiltBase &&
+            Math.hypot(smX - tiltBase.x, smY - tiltBase.y) > MANUAL_TILT) {
+            auto = null;
+          } else {
+            const dx = auto.x - ball.x, dy = auto.y - ball.y;
+            target = Math.atan2(dy, dx);
+            drive = Math.max(IDLE_DRIVE,
+              Math.min(Math.hypot(dx, dy) / TOUCH_FULL, AUTO_DRIVE));
+          }
+        }
+        if (target === null && tiltOn) {
           // portrait assumption: gravity.x → screen right, gravity.y →
           // up-screen, so tilt top-of-device away → roll down ⇒ use -y
           const mag = Math.hypot(smX, smY);
@@ -592,8 +768,9 @@
           const amt = d * Math.min(1, TURN_RESPOND * dt);
           heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, amt));
         }
-        ball.vx = Math.cos(heading) * BALL_SPEED * drive;
-        ball.vy = Math.sin(heading) * BALL_SPEED * drive;
+        const spd = BALL_SPEED * Math.min(1 + stage * SPEED_STAGE, SPEED_CAP);
+        ball.vx = Math.cos(heading) * spd * drive;
+        ball.vy = Math.sin(heading) * spd * drive;
       }
 
       const sp = Math.hypot(ball.vx, ball.vy);
@@ -607,9 +784,11 @@
       if (ball.x < BALL_R) { ball.x = BALL_R; heading = Math.PI - heading; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
       if (ball.x > Wd - BALL_R) { ball.x = Wd - BALL_R; heading = Math.PI - heading; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
       if (ball.y < BALL_R) { ball.y = BALL_R; heading = -heading; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
-      if (ball.y > Hd - BALL_R) { ball.y = Hd - BALL_R; heading = -heading; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
+      if (ball.y > playH() - BALL_R) { ball.y = playH() - BALL_R; heading = -heading; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
 
-      /* holes: the ball sinks only where its number belongs */
+      /* holes: the ball sinks only where its number belongs.
+         While autopiloted, only the tapped hole can take it — a sent
+         ball rolls past holes it wasn't aimed at. */
       if (sink) {
         const hx = holeX(sink.hole), hy = holeY(sink.hole);
         sink.k = Math.min(sink.k + dt / SINK_SECS, 1);
@@ -618,47 +797,30 @@
         ball.y += (hy - ball.y) * Math.min(1, 10 * dt);
         ball.vx = ball.vy = 0;
         if (e >= 1) {
-          if (tableFull()) {
-            endRound(performance.now());
-            ballNum = 0;      // nothing dealt until the rest is over
-          } else {
-            dealBall(performance.now());
-          }
+          if (!refused) cleanSinks++;
+          hasTaken.add(sink.hole);
+          glints.push({ hole: sink.hole, at: now, s: TWINKLE_SECS, kind: 'spark' });
+          ballNum = 0; ballHome = null; sink = null; auto = null;
+          if (rack.length) launchAt = now + LAUNCH_GAP;
+          else endRound(now);
         }
       } else {
         for (const h of activeHoles()) {
+          if (auto && h !== auto.hole) continue;
           const dx = ball.x - holeX(h), dy = ball.y - holeY(h);
           const d = Math.hypot(dx, dy);
           if (d < HOLE_R - CAPTURE_IN) {
-            const open = (sunkCounts.get(h) || 0) < HOLE_CAP;
-            const fits = fitsSet(ballNum);
-            /* the ball's home is a deepest open fit — tied-depth fits
-               share ownership, since 3*4 = 4*3 = 12 has two true
-               parents ("?" stands in alone when nothing answers) */
-            const home = STRICT_HOME
-              ? (deepestHole(ballNum, fits) || fits[0] || null)
-              : h;
-            if (open && home && h.depth === home.depth) {
+            /* the one honest rule: the hole takes the ball iff the
+               number divides. Any fitting hole accepts — "best fit"
+               was an invented ranking, retired 2026-10-28 */
+            if (holeFits(h, ballNum)) {
               sink = { hole: h, k: 0 };
               ball.vx = ball.vy = 0;
-              /* a discrimination exists when the ball could rest deeper
-                 — forced sinks are neutral either way */
-              if (fits.length > 1) {
-                deepTaken++;
-                glints.push({ hole: h, at: performance.now(), s: TWINKLE_SECS });
-              }
-              sunkCounts.set(h, (sunkCounts.get(h) || 0) + 1);
             } else {
-              flashUntil = performance.now() + HOLE_FLASH * 1000;
+              flashUntil = now + HOLE_FLASH * 1000;
               holeFlash = h;
-              /* a legal fit that is full or too shallow flashes slate —
-                 the ball belonged, just not here; a true non-fit flashes
-                 amber as always. A shallow refusal also glints the true
-                 home — the refusal points, it doesn't just push back */
-              flashSlate = holeFits(h, ballNum);
-              if (flashSlate && home && home !== h)
-                glints.push({ hole: home, at: performance.now(), s: TWINKLE_SECS });
-              ejectUntil = performance.now() + EJECT_SECS * 1000;
+              refused = true; auto = null;
+              ejectUntil = now + EJECT_SECS * 1000;
               const ux = dx / (d || 1), uy = dy / (d || 1);
               const sp = Math.max(Math.hypot(ball.vx, ball.vy), HOLE_PUSH);
               ball.vx = ux * sp; ball.vy = uy * sp;
@@ -681,14 +843,12 @@
       for (const h of activeHoles()) {
         const appear = h.born === undefined ? 1
           : Math.min((now - h.born) / (HOLE_FADE * 1000), 1);
-        const sunk = sunkCounts.get(h) || 0;
-        const full = sunk >= HOLE_CAP;
         ctx.globalAlpha = appear;
         const hx = holeX(h), hy = holeY(h);
         /* new arrivals — a soft neutral halo that holds until the
            hole takes its first ball: wordless "this one is new",
            cool slate-blue so it never reads as refusal amber */
-        if (newHoleVs.includes(h.v) && sunk === 0) {
+        if (newHoleVs.includes(h.v) && !hasTaken.has(h)) {
           const pulse = 0.5 + 0.5 * Math.sin(now / 380);
           const hg = ctx.createRadialGradient(hx, hy, HOLE_R * 0.6,
             hx, hy, HOLE_R * 2.2);
@@ -706,35 +866,25 @@
         ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R, 0, Math.PI * 2); ctx.fill();
         ctx.lineWidth = 2;
-        ctx.strokeStyle = flashing ? (flashSlate ? '#8a95a3' : '#e0a53a')
-          : full ? 'rgba(90,100,110,.30)'
+        ctx.strokeStyle = flashing ? '#e0a53a'
           : (h.v === 0 ? 'rgba(53,199,149,.45)' : 'rgba(120,150,175,.5)');
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = flashing ? (flashSlate ? '#8a95a3' : '#e0a53a')
-          : (full ? '#4d5660' : '#cfd8e0');
+        ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
           ' Andika, -apple-system, system-ui, sans-serif';
-        ctx.fillText(h.label || String(h.v), hx, hy - (sunk ? PIP_R * 0.7 : 0));
-        /* fill pips — one lit dot per ball the hole has taken this
-           round; all lit = the hole is full until the table rests */
-        for (let i = 0; i < HOLE_CAP; i++) {
-          const px = hx + (i - (HOLE_CAP - 1) / 2) * PIP_R * 2.8;
-          ctx.beginPath(); ctx.arc(px, hy + HOLE_R * 0.55, PIP_R, 0, Math.PI * 2);
-          ctx.fillStyle = i < sunk ? '#ffd97a' : 'rgba(120,150,175,.22)';
-          ctx.fill();
-        }
+        ctx.fillText(h.label || String(h.v), hx, hy);
         ctx.globalAlpha = 1;
       }
 
-      /* glints — a brief sparkle on a hole, marking "there was a
-         deeper answer and you found it", and in sequence round the
-         table at a round's rest; never fires on a forced sink */
+      /* glints — a brief sparkle on a hole, acknowledging a sink
+         and playing in sequence at a round's rest */
       for (const g of glints) {
         const e = (now - g.at) / (g.s * 1000);
         if (e < 0 || e > 1) continue;
         const a = Math.sin(e * Math.PI);          // 0→1→0 fade
-        const gx = holeX(g.hole) + HOLE_R * 0.55;
-        const gy = holeY(g.hole) - HOLE_R * 0.55;
+        const hxc = holeX(g.hole), hyc = holeY(g.hole);
+        const gx = hxc + HOLE_R * 0.55;
+        const gy = hyc - HOLE_R * 0.55;
         const s = 6 + 4 * a;                      // arm length swells mid-glint
         ctx.strokeStyle = `rgba(255,244,196,${a * 0.9})`;
         ctx.lineWidth = 1.4;
@@ -747,14 +897,25 @@
       }
       glints = glints.filter(g => now - g.at < g.s * 1000 + 500);
 
+      /* a tapped destination holds a soft ring while the ball is on
+         its way — "going there" stays legible */
+      if (auto) {
+        const p = 0.5 + 0.5 * Math.sin(now / 300);
+        ctx.strokeStyle = `rgba(142,201,255,${0.35 + 0.25 * p})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(auto.x, auto.y, HOLE_R + 5 + 3 * p, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
       /* the table-rest: a warm glow swells over the table while the
          holes glint in sequence — no words; the arriving holes
            carry their own halo into the next round */
       if (roundInterlude) {
         const k = Math.min((now - roundInterlude.t0) / (roundInterlude.secs * 1000), 1);
         const ga = Math.sin(Math.PI * k) * 0.7;
-        const r = Hd * 0.10 * (0.85 + 0.35 * k);
-        const cx = Wd / 2, cy = Hd * 0.40;
+        const r = playH() * 0.10 * (0.85 + 0.35 * k);
+        const cx = Wd / 2, cy = playH() * 0.40;
         const kk = f => Math.min(1, f * ga);
         const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
         g2.addColorStop(0, 'rgba(255,250,225,' + kk(0.9) + ')');
@@ -769,6 +930,51 @@
 
       }
 
+      /* the rack — the round's waiting balls below the divider;
+         front of the queue carries a gentle "you're next" pulse */
+      const slots = rackSlots();
+      ctx.strokeStyle = 'rgba(120,150,175,.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, playH()); ctx.lineTo(Wd, playH()); ctx.stroke();
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i], it = rack[i];
+        const a = Math.min((now - rackBorn - i * 60) / 500, 1);
+        if (a <= 0) continue;
+        ctx.globalAlpha = a;
+        if (i === 0) {
+          const p = 0.5 + 0.5 * Math.sin(now / 420);
+          ctx.strokeStyle = `rgba(142,201,255,${0.25 + 0.2 * p})`;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, RACK_R + 4 + 2 * p, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#16324e';
+        ctx.beginPath(); ctx.arc(s.x, s.y, RACK_R, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(120,150,175,.4)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(s.x, s.y, RACK_R - 1, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#cfd8e0';
+        ctx.font = '700 ' + Math.round(RACK_R * 0.95) +
+          'px Andika, -apple-system, system-ui, sans-serif';
+        ctx.fillText(String(it.v), s.x, s.y + 1);
+        ctx.globalAlpha = 1;
+      }
+
+      /* a ball in flight — launch grows rack-size → live, return
+         shrinks back to a slot */
+      if (flight) {
+        const k = Math.min((now - flight.t0) / flight.dur, 1);
+        const e = k * k * (3 - 2 * k);
+        const fx = flight.x0 + (flight.x1 - flight.x0) * e;
+        const fy = flight.y0 + (flight.y1 - flight.y0) * e;
+        const fr = flight.mode === 'launch'
+          ? RACK_R + (BALL_R - RACK_R) * e
+          : BALL_R + (RACK_R - BALL_R) * e;
+        drawBall(fx, fy, fr, flight.v, 1);
+        return;
+      }
+
       /* the ball — fades/scales in on deal, shrinks away on sinking */
       if (!ballNum) return;
       const age = (now - ballBorn) / 1000;
@@ -776,19 +982,23 @@
       let r = BALL_R * (0.6 + 0.4 * Math.min(age / BALL_FADE, 1));
       if (sink) { r *= (1 - sink.k) * (1 - sink.k); a *= 1 - sink.k; }
       if (r < 0.5 || a <= 0) return;
+      drawBall(ball.x, ball.y, r, ballNum, a);
+    }
+
+    function drawBall(x, y, r, num, a) {
       ctx.globalAlpha = a;
       const grd = ctx.createRadialGradient(
-        ball.x - r * 0.35, ball.y - r * 0.35, r * 0.2,
-        ball.x, ball.y, r);
+        x - r * 0.35, y - r * 0.35, r * 0.2,
+        x, y, r);
       grd.addColorStop(0, '#8ec9ff');
       grd.addColorStop(1, '#1660c8');
       ctx.fillStyle = grd;
       ctx.beginPath();
-      ctx.arc(ball.x, ball.y, r, 0, Math.PI * 2);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = '700 ' + Math.round(r * 0.9) + 'px Andika, -apple-system, system-ui, sans-serif';
-      ctx.fillText(String(ballNum), ball.x, ball.y + 1);
+      ctx.fillText(String(num), x, y + 1);
       ctx.globalAlpha = 1;
     }
 
@@ -800,7 +1010,7 @@
       requestAnimationFrame(frame);
     }
     layOut();
-    dealBall(performance.now());
+    startRound(performance.now());
     requestAnimationFrame(frame);
   </script>
 

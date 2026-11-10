@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <title>Search Lab 2 — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+      cursor: pointer;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    #again {
+      position: fixed;
+      right: 14px;
+      bottom: 66px;
+      z-index: 10;
+      display: none;
+      background: rgba(20, 28, 36, .85);
+      border: 1px solid #3a4a58;
+      border-radius: 10px;
+      color: #cfd8e0;
+      font: 600 15px Andika, sans-serif;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+
+    #params {
+      position: fixed;
+      left: 10px;
+      bottom: 66px;
+      z-index: 10;
+      color: #55636e;
+      font: 12px Andika, sans-serif;
+      white-space: pre;
+      pointer-events: none;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="chipRow"></div>
+  <button id="again">Again ▸</button>
+  <div id="params"></div>
+
+  <script>
+    'use strict';
+
+    /* search-lab 2 — Roger's first-call configuration (2026-11-08):
+       the beginner's deal. NO DIAGONALS, NO HINTS by default — pure
+       discovery on a 12×12 board with the whole table as one run.
+       Later same session: multi-table deals. Words may CROSS — a
+       horizontal and a vertical run intersect only where the values
+       agree (a common multiple: every pair of tables shares its lcm
+       inside ×1..×12). A shared cell claims for both tables and
+       draws split-colour, the honeycomb crossover idiom.
+
+       ?tables=4,6    one word per table, 1–3 (chips toggle the same)
+       ?t=5           shorthand for tables=5
+       ?members=N     word length — first N multiples (10 default)
+       ?board=WxH     overrides autodetect (10×14 on portrait phones,
+                      12×12 elsewhere)
+       ?dirs=h        horizontal only — the word-search entry rung
+       ?dirs=hvd      diagonals return (Roger parked them for the
+                      beginner deal; kept for audition)
+       ?ordered=0     scramble members within each run
+       ?near=0..1     fraction of distractors that are near-misses
+                      (a multiple ±1 — membership discrimination)
+       ?seed=N        deterministic deal
+       ?mark=1        tint member cells — see where the words hide
+       ?cross=0..1    how often multi-table deals intersect (0.5)
+       ?sound=0       mute the crossover arpeggio
+       ?runs= ?board= ?glow=1 — dormant: the wider design space of
+                      search-lab stays reachable for A/B */
+
+    /* ---------- tunables ---------- */
+    let   BW = 12, BH = 12;            // autodetect below: 10×14 phones
+    let   MEMBERS = 10;                // Roger 2026-11-08: first ten
+    let   N_RUNS = 1;                  // runs per table — 1 = the word
+    let   DIR_SET = 'hvd';             // Roger 2026-11-08: buggers on
+    let   ORDERED = true;              // the word reads along the line
+    let   GLOW = false;                // Roger 2026-11-08: no hints
+    let   NEAR_P = 0.25;               // near-miss distractor fraction
+    const MAX_TABLES = 3;              // chip multi-select cap
+    let   CROSS_P = 0.7;               // Roger: bias toward crossovers
+    const FLASH_S = 0.38;              // refusal amber
+    const BEAT_S = 0.09;               // completion stagger per member
+    const GLOW_A = 0.28;               // scaffold ring alpha
+    const GLOW_CYCLE = 2.0;            // scaffold pulse period s
+    const CELL_GAP = 0.10;             // gap fraction between cells
+    const CHIP_H = 92;                 // space kept below the board
+    const MAX_VAL = 144;               // numerals live in 2..144
+
+    /* sound + haptics (Roger, 2026-11-08) — first audio in the family.
+       Vocabulary follows the grammar: ears hear the crossover, hands
+       feel the refusal. A shared cell sings its TWO table-notes as a
+       tiny arpeggio — the chord IS the split-colour made audible.
+       Pentatonic pitches so any table pair stays consonant.
+       navigator.vibrate is Android-only: iOS allows no web haptics. */
+    let   SOUND = true;                // ?sound=0 mutes the crossover
+    const VOL = 0.16, NOTE_DUR = 0.5, ARP_GAP = 0.09;
+    const VIBES = 55;                  // ms refusal buzz
+    let audio = null;
+    const PENT = [0, 2, 4, 7, 9];      // pentatonic semitone steps
+
+    function ac() {
+      if (!SOUND) return null;
+      if (!audio)
+        audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      return audio;
+    }
+    const noteHz = t =>
+      220 * Math.pow(2, (PENT[t % 5] + 12 * ((t / 5) | 0)) / 12);
+
+    function chime(f, dt, dur) {
+      const a = ac(); if (!a) return;
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      const t0 = a.currentTime + dt;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(VOL, t0 + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g).connect(a.destination);
+      o.start(t0); o.stop(t0 + dur + 0.05);
+    }
+
+    function singCrossover(cell) {
+      cell.ts.map(ti => noteHz(tables[ti]))
+        .sort((x, y) => x - y)
+        .forEach((f, i) => chime(f, i * ARP_GAP, NOTE_DUR));
+    }
+
+    /* ---------- params ---------- */
+    const qs = new URLSearchParams(location.search);
+    const num = (k, d) => qs.has(k) ? parseFloat(qs.get(k)) : d;
+    if (qs.get('board')) {
+      const m = qs.get('board').match(/^(\d+)x(\d+)$/i);
+      if (m) { BW = +m[1]; BH = +m[2]; }
+    }
+    if (qs.get('runs')) N_RUNS = Math.max(1, Math.min(12, +qs.get('runs') | 0));
+    if (qs.get('dirs')) DIR_SET = qs.get('dirs').toLowerCase();
+    if (qs.has('ordered')) ORDERED = qs.get('ordered') !== '0';
+    if (qs.has('glow')) GLOW = qs.get('glow') !== '0';
+    if (qs.has('near')) NEAR_P = Math.max(0, Math.min(1, num('near', NEAR_P)));
+    if (qs.has('cross')) CROSS_P = Math.max(0, Math.min(1, num('cross', CROSS_P)));
+    if (qs.has('sound')) SOUND = qs.get('sound') !== '0';
+    const MARK = qs.get('mark') === '1';   // lab aid: tint member cells
+
+    /* ---------- rng ---------- */
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    let seed = qs.has('seed') ? +qs.get('seed') : (Math.random() * 1e9) | 0;
+    let rng = mulberry32(seed);
+    const pick = (arr) => arr[(rng() * arr.length) | 0];
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    const tableColour = t => 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
+
+    /* ---------- directions ---------- */
+    const DIRS = {
+      h: [[1, 0], [-1, 0]],
+      v: [[0, 1], [0, -1]],
+      d: [[1, 1], [1, -1], [-1, 1], [-1, -1]],
+    };
+    const dirPool = () => DIR_SET.split('')
+      .flatMap(k => DIRS[k] || []);
+
+    /* ---------- the deal ---------- */
+    // cells[r][c] = { v, ts:[tableIndex...], found, flashT0, r, c }
+    // runs[ti]    = [ [cell,...], ... ]  — this table's placed runs
+    let cells = [], runs = [], tables = [], state = 'play', beatT0 = 0;
+
+    const isMember = (v, t) => v % t === 0 && v / t >= 1 && v / t <= MEMBERS;
+
+    /* split ×1..×MEMBERS into N_RUNS consecutive chunks per table */
+    function chunks(t) {
+      const base = Math.floor(MEMBERS / N_RUNS), extra = MEMBERS % N_RUNS;
+      const out = []; let i = 0;
+      for (let r = 0; r < N_RUNS; r++) {
+        const len = base + (r < extra ? 1 : 0);
+        out.push(Array.from({ length: len }, (_, k) => t * (i + k + 1)));
+        i += len;
+      }
+      return out;
+    }
+
+    /* enumerate every legal placement for a run; a cell already
+       holding the SAME value is a legal crossing (shared multiple —
+       claims for both tables). CROSS_P biases toward intersecting
+       words so multi-table auditions actually show crossings */
+    function placeRun(vals, ti) {
+      const dirs = dirPool();
+      if (!dirs.length) return null;
+      const L = vals.length;
+      const ord = ORDERED ? vals.slice() : vals.slice().sort(() => rng() - 0.5);
+      const legal = [], crossings = [];
+      for (const [dx, dy] of dirs)
+        for (let sy = 0; sy < BH; sy++)
+          for (let sx = 0; sx < BW; sx++) {
+            const ex = sx + (L - 1) * dx, ey = sy + (L - 1) * dy;
+            if (ex < 0 || ex >= BW || ey < 0 || ey >= BH) continue;
+            const cellsInRun = [];
+            let ok = true, shared = 0;
+            for (let k = 0; k < L; k++) {
+              const cell = cells[sy + k * dy][sx + k * dx];
+              if (cell.v !== null && cell.v !== ord[k]) { ok = false; break; }
+              if (cell.v !== null) shared++;
+              cellsInRun.push(cell);
+            }
+            if (!ok) continue;
+            (shared ? crossings : legal).push(cellsInRun);
+          }
+      const pool = (crossings.length && rng() < CROSS_P)
+        ? crossings
+        : legal.concat(crossings);
+      if (!pool.length) return null;
+      const placed = pick(pool);
+      placed.forEach((cell, k) => {
+        if (cell.v === null) cell.v = ord[k];
+        if (!cell.ts.includes(ti)) cell.ts.push(ti);
+      });
+      return placed;
+    }
+
+    function distractor() {
+      if (rng() < NEAR_P) {
+        const t = pick(tables);
+        const v = t * ((1 + rng() * MEMBERS) | 0) + pick([-1, 1]);
+        if (v >= 2 && !tables.some(tt => isMember(v, tt))) return v;
+      }
+      for (let k = 0; k < 60; k++) {
+        const v = 2 + ((rng() * (MAX_VAL - 1)) | 0);
+        if (!tables.some(tt => isMember(v, tt))) return v;
+      }
+      return 1;                                          // 1 is never a member
+    }
+
+    function deal(ts) {
+      tables = ts;
+      rng = mulberry32(seed = (seed + 0x9e3779b9) >>> 0);
+      cells = Array.from({ length: BH }, (_, r) =>
+        Array.from({ length: BW }, (_, c) =>
+          ({ v: null, ts: [], found: false, flashT0: -1, r, c })));
+      runs = tables.map(() => []);
+      let ok = true;
+      tables.forEach((t, ti) => {
+        for (const vals of chunks(t)) {
+          const placed = placeRun(vals, ti);
+          if (!placed) { ok = false; break; }
+          runs[ti].push(placed);
+        }
+      });
+      if (!ok) {                       // runs wouldn't lay — scatter
+        cells.forEach(row => row.forEach(c => { c.v = null; c.ts = []; }));
+        runs = tables.map(() => []);
+        const free = cells.flat();
+        tables.forEach((t, ti) => {
+          for (let i = 0; i < MEMBERS; i++) {
+            const free2 = free.filter(c => c.v === null || c.v === t * (i + 1));
+            const c = free2[(rng() * free2.length) | 0];
+            if (c.v === null) { c.v = t * (i + 1); free.splice(free.indexOf(c), 1); }
+            if (!c.ts.includes(ti)) c.ts.push(ti);
+          }
+        });
+      }
+      cells.forEach(row => row.forEach(c => { if (c.v === null) c.v = distractor(); }));
+      state = 'play';
+      label();
+    }
+
+    /* ---------- board geometry ---------- */
+    function geom() {
+      const m = 18;
+      const cell = Math.min(
+        (W - 2 * m) / BW,
+        (H - CHIP_H - m) / BH);
+      return {
+        cell,
+        ox: (W - cell * BW) / 2,
+        oy: (H - CHIP_H - cell * BH) / 2,
+      };
+    }
+    const centre = (g, r, c) => ({
+      x: g.ox + c * g.cell + g.cell / 2,
+      y: g.oy + r * g.cell + g.cell / 2,
+    });
+
+    function cellAt(x, y) {
+      const g = geom();
+      const c = Math.floor((x - g.ox) / g.cell), r = Math.floor((y - g.oy) / g.cell);
+      return (r >= 0 && r < BH && c >= 0 && c < BW) ? cells[r][c] : null;
+    }
+
+    /* ---------- interaction ---------- */
+    const totalMembers = () => tables.length * MEMBERS;
+    const foundCount = () =>
+      cells.flat().reduce((n, c) => n + (c.found ? c.ts.length : 0), 0);
+
+    cv.addEventListener('pointerdown', e => {
+      if (state !== 'play') return;
+      const cell = cellAt(e.clientX, e.clientY);
+      if (!cell) return;
+      if (cell.ts.length && !cell.found) {
+        cell.found = true;             // one tap serves every table it holds
+        if (cell.ts.length > 1) singCrossover(cell);
+        if (foundCount() === totalMembers()) {
+          state = 'beat'; beatT0 = performance.now();
+        }
+        label();
+      } else if (!cell.found) {
+        cell.flashT0 = performance.now();
+        if (navigator.vibrate) navigator.vibrate(VIBES);  // felt, not heard
+      }
+    });
+
+    /* ---------- draw ---------- */
+    function rrect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+      const g = geom(), cs = g.cell, gap = cs * CELL_GAP;
+
+      /* completed runs get their connector first — the word-search
+         found-mark: one object under the tiles, not twelve cells */
+      runs.forEach((truns, ti) => truns.forEach(run => {
+        if (!run.every(c => c.found)) return;
+        const a = centre(g, run[0].r, run[0].c),
+              b = centre(g, run[run.length - 1].r, run[run.length - 1].c);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.lineCap = 'round'; ctx.lineWidth = cs * 0.55;
+        ctx.strokeStyle = tableColour(tables[ti]);
+        ctx.globalAlpha = 0.30; ctx.stroke(); ctx.globalAlpha = 1;
+      }));
+
+      for (let r = 0; r < BH; r++)
+        for (let c = 0; c < BW; c++) {
+          const cell = cells[r][c];
+          const { x, y } = centre(g, r, c);
+          const x0 = x - cs / 2 + gap / 2, y0 = y - cs / 2 + gap / 2,
+                s = cs - gap;
+
+          /* the beat: members relight in table order on completion */
+          let lift = 0;
+          if (state !== 'play' && cell.ts.length) {
+            const idx = Math.min(...cell.ts.map(ti => cell.v / tables[ti])) - 1;
+            const k = Math.max(0, Math.min(1,
+              (now - beatT0) / 1000 / BEAT_S - idx));
+            lift = Math.min(k, 1) * 0.25;
+          }
+
+          const flashing = cell.flashT0 > 0 &&
+            (now - cell.flashT0) / 1000 < FLASH_S;
+          if (flashing) {
+            const u = (now - cell.flashT0) / 1000 / FLASH_S;
+            rrect(x0, y0, s, s, s * 0.22);
+            ctx.fillStyle = '#e0a53a';
+            ctx.globalAlpha = 0.35 * (1 - u); ctx.fill(); ctx.globalAlpha = 1;
+          }
+
+          rrect(x0, y0, s, s, s * 0.22);
+          if (cell.found && cell.ts.length === 1) {
+            ctx.fillStyle = tableColour(tables[cell.ts[0]]);
+          } else if (!cell.found && MARK && cell.ts.length) {
+            ctx.fillStyle = '#23405c';
+          } else {
+            ctx.fillStyle = '#1a2430';
+          }
+          ctx.fill();
+
+          /* shared cell, claimed: split-colour wedges (honeycomb idiom) */
+          if (cell.found && cell.ts.length > 1) {
+            cell.ts.forEach((ti, i) => {
+              ctx.save();
+              rrect(x0, y0, s, s, s * 0.22); ctx.clip();
+              ctx.fillStyle = tableColour(tables[ti]);
+              ctx.fillRect(x0 + i * s / cell.ts.length, y0, s / cell.ts.length, s);
+              ctx.restore();
+            });
+          }
+
+          ctx.strokeStyle = cell.found
+            ? tableColour(tables[cell.ts[0]])
+            : '#2c3e50';
+          ctx.lineWidth = 1.2;
+          rrect(x0, y0, s, s, s * 0.22); ctx.stroke();
+
+          if (GLOW && !cell.found && cell.ts.length) {
+            const ti = cell.ts[0];
+            const run = runs[ti].find(rr => rr.includes(cell));
+            if (run && run.filter(c2 => c2.found).length >= 2) {
+              const pulse = 0.5 + 0.5 * Math.sin(now / 1000 / GLOW_CYCLE * 6.283);
+              rrect(x0 - 2, y0 - 2, s + 4, s + 4, s * 0.26);
+              ctx.strokeStyle = tableColour(tables[ti]);
+              ctx.globalAlpha = GLOW_A * (0.4 + 0.6 * pulse);
+              ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+            }
+          }
+
+          ctx.font = '600 ' + cs * 0.36 + 'px Andika, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = cell.found
+            ? '#fff'
+            : (flashing ? '#e0a53a' : '#8a97a3');
+          ctx.fillText(cell.v, x, y + 1);
+          if (lift > 0) {
+            rrect(x0, y0, s, s, s * 0.22);
+            ctx.fillStyle = '#fff';
+            ctx.globalAlpha = lift; ctx.fill(); ctx.globalAlpha = 1;
+          }
+        }
+
+      if (state === 'beat' &&
+          (now - beatT0) / 1000 > BEAT_S * MEMBERS + 0.4) {
+        state = 'done';
+        document.getElementById('again').style.display = 'block';
+      }
+    }
+
+    /* ---------- chips / again / label ---------- */
+    const chipRow = document.getElementById('chipRow');
+    const chipOn = () => [...chipRow.children]
+      .map((b, i) => b.classList.contains('on') ? i + 2 : 0)
+      .filter(Boolean);
+
+    function syncChips() {
+      [...chipRow.children].forEach((b, i) =>
+        b.classList.toggle('on', tables.includes(i + 2)));
+    }
+
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('click', () => {
+        let sel = chipOn();
+        if (sel.includes(t)) sel = sel.filter(x => x !== t);
+        else if (sel.length < MAX_TABLES) sel.push(t);
+        if (!sel.length) sel = [t];
+        document.getElementById('again').style.display = 'none';
+        deal(sel.sort((a, b2) => a - b2));
+        syncChips();
+      });
+      chipRow.appendChild(b);
+    }
+    document.getElementById('again').addEventListener('click', e => {
+      e.target.style.display = 'none';
+      deal(tables);
+    });
+
+    function label() {
+      const spec = chunks(tables[0]).map(c => c.length).join('+');
+      document.getElementById('params').textContent =
+        't=' + tables.join(',') + ' ' + BW + 'x' + BH + ' ×' + MEMBERS +
+        ' runs=' + N_RUNS + '(' + spec + ') dirs=' + DIR_SET +
+        ' seed=' + seed + ' — ' + foundCount() + '/' + totalMembers();
+    }
+
+    /* ---------- go ---------- */
+    resize();
+    /* board autodetect (Roger, 2026-11-08): a portrait phone gets
+       10×14 — tall board, bigger cells. ?board= always wins */
+    if (!qs.get('board')) {
+      if (H > W && W < 520) { BW = 10; BH = 14; }
+    }
+    if (qs.get('members')) MEMBERS = Math.max(4, Math.min(12, +qs.get('members') | 0));
+    const wanted = (qs.get('tables') || qs.get('t') || '')
+      .split(',').map(Number).filter(t => t >= 2 && t <= 12)
+      .slice(0, MAX_TABLES);
+    deal(wanted.length ? wanted : [2 + ((rng() * 11) | 0)]);
+    syncChips();
+    draw(performance.now());            // synchronous first paint
+
+    function frame(now) {
+      try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <title>Search Lab 3 — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+      cursor: pointer;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    #again {
+      position: fixed;
+      right: 14px;
+      bottom: 66px;
+      z-index: 10;
+      display: none;
+      background: rgba(20, 28, 36, .85);
+      border: 1px solid #3a4a58;
+      border-radius: 10px;
+      color: #cfd8e0;
+      font: 600 15px Andika, sans-serif;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+
+    #params {
+      position: fixed;
+      left: 10px;
+      bottom: 66px;
+      z-index: 10;
+      color: #55636e;
+      font: 12px Andika, sans-serif;
+      white-space: pre;
+      pointer-events: none;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="chipRow"></div>
+  <button id="again">Again ▸</button>
+  <div id="params"></div>
+
+  <script>
+    'use strict';
+
+    /* search-lab 3 — the comb arrangement (Roger, 2026-11-08): the
+       word-search deal moved onto a hexagonal comb, where runs go
+       straight along THREE axes (six directions) instead of two —
+       more ways for two words to meet, so crossovers get encouraged
+       by the geometry itself. Board is a hexagon of side SIDE in
+       axial coordinates (q,r): cells are circles packed like
+       honeycomb.html's comb — the family's own silhouette.
+
+       A crossing still requires the values to agree (a shared
+       multiple); CROSS_P biases placement toward intersecting
+       words. Pairs with no common multiple in range (like ×7 and
+       ×11 under ten-member rules) can never cross — parallel is
+       the honest deal for them.
+
+       ?tables=4,6    one word per table, 1–3 (chips toggle the same)
+       ?t=5           shorthand for tables=5
+       ?members=N     word length — first N multiples (10 default)
+       ?side=N        hexagon side in cells (6 → 91 cells, 11-long
+                      diameters; 7 → 169 cells, 13-long)
+       ?ordered=0     scramble members within each run
+       ?near=0..1     fraction of distractors that are near-misses
+       ?seed=N        deterministic deal
+       ?mark=1        tint member cells — see where the words hide
+       ?cross=0..1    how often multi-table deals intersect (0.7)
+       ?sound=0       mute the crossover arpeggio */
+
+    /* ---------- tunables ---------- */
+    let   SIDE = 7;                    // side 6 starves crossing arms
+    let   MEMBERS = 10;                // first ten multiples
+    let   ORDERED = true;              // the word reads along the line
+    let   NEAR_P = 0.25;               // near-miss distractor fraction
+    const MAX_TABLES = 3;              // chip multi-select cap
+    let   CROSS_P = 0.7;               // Roger: bias toward crossovers
+    const FLASH_S = 0.38;              // refusal amber
+    const BEAT_S = 0.09;               // completion stagger per member
+    const CIRCLE_R = 0.40;             // cell radius as pitch fraction
+    const CHIP_H = 92;                 // space kept below the board
+    const MAX_VAL = 144;               // numerals live in 2..144
+
+    /* sound + haptics (Roger, 2026-11-08) — ears hear the crossover,
+       hands feel the refusal. Pentatonic table-notes, shared cell
+       sings both. iOS allows no web haptics — Android only. */
+    let   SOUND = true;
+    const VOL = 0.16, NOTE_DUR = 0.5, ARP_GAP = 0.09;
+    const VIBES = 55;
+    let audio = null;
+    const PENT = [0, 2, 4, 7, 9];
+
+    function ac() {
+      if (!SOUND) return null;
+      if (!audio)
+        audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      return audio;
+    }
+    const noteHz = t =>
+      220 * Math.pow(2, (PENT[t % 5] + 12 * ((t / 5) | 0)) / 12);
+
+    function chime(f, dt, dur) {
+      const a = ac(); if (!a) return;
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      const t0 = a.currentTime + dt;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(VOL, t0 + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g).connect(a.destination);
+      o.start(t0); o.stop(t0 + dur + 0.05);
+    }
+
+    function singCrossover(cell) {
+      cell.ts.map(ti => noteHz(tables[ti]))
+        .sort((x, y) => x - y)
+        .forEach((f, i) => chime(f, i * ARP_GAP, NOTE_DUR));
+    }
+
+    /* ---------- params ---------- */
+    const qs = new URLSearchParams(location.search);
+    const num = (k, d) => qs.has(k) ? parseFloat(qs.get(k)) : d;
+    if (qs.get('side')) SIDE = Math.max(4, Math.min(9, +qs.get('side') | 0));
+    if (qs.get('members')) MEMBERS = Math.max(4, Math.min(12, +qs.get('members') | 0));
+    if (qs.has('ordered')) ORDERED = qs.get('ordered') !== '0';
+    if (qs.has('near')) NEAR_P = Math.max(0, Math.min(1, num('near', NEAR_P)));
+    if (qs.has('cross')) CROSS_P = Math.max(0, Math.min(1, num('cross', CROSS_P)));
+    if (qs.has('sound')) SOUND = qs.get('sound') !== '0';
+    const MARK = qs.get('mark') === '1';
+
+    /* ---------- rng ---------- */
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    let seed = qs.has('seed') ? +qs.get('seed') : (Math.random() * 1e9) | 0;
+    let rng = mulberry32(seed);
+    const pick = (arr) => arr[(rng() * arr.length) | 0];
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    const tableColour = t => 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
+    const VP = Math.sqrt(3) / 2;       // vertical pitch of hex packing
+
+    /* ---------- the comb ----------
+       axial coords: hexagon |q|,|r|,|q+r| <= SIDE-1. Straight lines
+       run along three axes — the six directions below. */
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+    const key = (q, r) => q + ',' + r;
+    let byKey = new Map();             // key -> cell
+    let cells = [];                    // all cells
+
+    function buildComb() {
+      byKey = new Map(); cells = [];
+      const S = SIDE - 1;
+      for (let q = -S; q <= S; q++)
+        for (let r = -S; r <= S; r++)
+          if (Math.abs(q + r) <= S) {
+            const cell = { q, r, v: null, ts: [], found: false, flashT0: -1 };
+            byKey.set(key(q, r), cell);
+            cells.push(cell);
+          }
+    }
+
+    /* ---------- the deal ---------- */
+    let runs = [], tables = [], state = 'play', beatT0 = 0;
+
+    const isMember = (v, t) => v % t === 0 && v / t >= 1 && v / t <= MEMBERS;
+
+    /* enumerate every legal straight-line placement; shared values
+       make legal crossings. CROSS_P prefers intersecting words. */
+    function placeRun(vals, ti) {
+      const L = vals.length;
+      const ord = ORDERED ? vals.slice() : vals.slice().sort(() => rng() - 0.5);
+      const legal = [], crossings = [];
+      for (const [dq, dr] of DIRS)
+        for (const start of cells) {
+          const cellsInRun = [];
+          let ok = true, shared = 0;
+          for (let k = 0; k < L; k++) {
+            const cell = byKey.get(key(start.q + k * dq, start.r + k * dr));
+            if (!cell || (cell.v !== null && cell.v !== ord[k])) {
+              ok = false; break;
+            }
+            if (cell.v !== null) shared++;
+            cellsInRun.push(cell);
+          }
+          if (!ok) continue;
+          (shared ? crossings : legal).push(cellsInRun);
+        }
+      const pool = (crossings.length && rng() < CROSS_P)
+        ? crossings
+        : legal.concat(crossings);
+      if (!pool.length) return null;
+      const placed = pick(pool);
+      placed.forEach((cell, k) => {
+        if (cell.v === null) cell.v = ord[k];
+        if (!cell.ts.includes(ti)) cell.ts.push(ti);
+      });
+      return placed;
+    }
+
+    /* plan the crossing first (Roger, 2026-11-08 — "encourages
+       crossovers"): pick a shared multiple V and a cell for it, then
+       lay BOTH words through that cell — resolution first, deal
+       generated backward. Ordered words only (unordered falls back
+       to lucky placement). */
+    function lineAt(C, dq, dr, idx, L) {
+      const out = [];
+      for (let k = 0; k < L; k++) {
+        const cell = byKey.get(key(C.q + (k - idx) * dq, C.r + (k - idx) * dr));
+        if (!cell) return null;
+        out.push(cell);
+      }
+      return out;
+    }
+
+    function layWord(run, ti) {
+      const t = tables[ti];
+      run.forEach((cell, k) => {
+        if (cell.v === null) cell.v = t * (k + 1);
+        if (!cell.ts.includes(ti)) cell.ts.push(ti);
+      });
+      runs[ti].push(run);
+    }
+
+    function crossDeal() {
+      const [ta, tb] = [tables[0], tables[1]];
+      const shared = [];
+      for (let i = 0; i < MEMBERS; i++)
+        for (let j = 0; j < MEMBERS; j++)
+          if (ta * (i + 1) === tb * (j + 1))
+            shared.push({ v: ta * (i + 1), i, j });
+      if (!shared.length) return false;
+      const cand = [];
+      for (const { i, j } of shared)
+        for (const da of DIRS)
+          for (const db of DIRS) {
+            if (da === db || (da[0] === -db[0] && da[1] === -db[1])) continue;
+            for (const C of cells) {
+              const runA = lineAt(C, da[0], da[1], i, MEMBERS);
+              const runB = lineAt(C, db[0], db[1], j, MEMBERS);
+              if (runA && runB) cand.push({ runA, runB });
+            }
+          }
+      if (!cand.length) return false;
+      const { runA, runB } = pick(cand);
+      layWord(runA, 0); layWord(runB, 1);
+      return true;
+    }
+
+    function distractor() {
+      if (rng() < NEAR_P) {
+        const t = pick(tables);
+        const v = t * ((1 + rng() * MEMBERS) | 0) + pick([-1, 1]);
+        if (v >= 2 && !tables.some(tt => isMember(v, tt))) return v;
+      }
+      for (let k = 0; k < 60; k++) {
+        const v = 2 + ((rng() * (MAX_VAL - 1)) | 0);
+        if (!tables.some(tt => isMember(v, tt))) return v;
+      }
+      return 1;
+    }
+
+    function deal(ts) {
+      tables = ts;
+      rng = mulberry32(seed = (seed + 0x9e3779b9) >>> 0);
+      buildComb();
+      runs = tables.map(() => []);
+      /* the encouraged crossover: plan tables[0]×tables[1] through a
+         shared cell when geometry allows; the rest place normally
+         (and may still cross by luck) */
+      let ti0 = 0;
+      if (tables.length >= 2 && ORDERED && rng() < CROSS_P && crossDeal())
+        ti0 = 2;
+      let ok = true;
+      for (let ti = ti0; ti < tables.length; ti++) {
+        const vals = Array.from({ length: MEMBERS }, (_, i) => tables[ti] * (i + 1));
+        const placed = placeRun(vals, ti);
+        if (!placed) { ok = false; break; }
+        runs[ti].push(placed);
+      }
+      if (!ok) {                       // scatter fallback, never dead-end
+        cells.forEach(c => { c.v = null; c.ts = []; });
+        runs = tables.map(() => []);
+        tables.forEach((t, ti) => {
+          for (let i = 0; i < MEMBERS; i++) {
+            const free = cells.filter(c => c.v === null || c.v === t * (i + 1));
+            const c = free[(rng() * free.length) | 0];
+            if (c.v === null) c.v = t * (i + 1);
+            if (!c.ts.includes(ti)) c.ts.push(ti);
+          }
+        });
+      }
+      cells.forEach(c => { if (c.v === null) c.v = distractor(); });
+      state = 'play';
+      label();
+    }
+
+    /* ---------- comb geometry ---------- */
+    /* pointy-top circles: x = pitch*(q + r/2), y = pitch*VP*r */
+    function geom() {
+      const S = SIDE - 1, m = 20;
+      const pitch = Math.min(
+        (W - 2 * m) / (3 * S),
+        (H - CHIP_H - 2 * m) / (2 * S * VP));
+      return { pitch, cx: W / 2, cy: (H - CHIP_H) / 2 };
+    }
+    const centre = (g, cell) => ({
+      x: g.cx + (cell.q + cell.r / 2) * g.pitch,
+      y: g.cy + cell.r * g.pitch * VP,
+    });
+
+    function cellAt(x, y) {
+      const g = geom();
+      let best = null, bd = g.pitch * 0.55;
+      for (const cell of cells) {
+        const p = centre(g, cell);
+        const d = Math.hypot(x - p.x, y - p.y);
+        if (d < bd) { bd = d; best = cell; }
+      }
+      return best;
+    }
+
+    /* ---------- interaction ---------- */
+    const totalMembers = () => tables.length * MEMBERS;
+    const foundCount = () =>
+      cells.reduce((n, c) => n + (c.found ? c.ts.length : 0), 0);
+
+    cv.addEventListener('pointerdown', e => {
+      if (state !== 'play') return;
+      const cell = cellAt(e.clientX, e.clientY);
+      if (!cell) return;
+      if (cell.ts.length && !cell.found) {
+        cell.found = true;
+        if (cell.ts.length > 1) singCrossover(cell);
+        if (foundCount() === totalMembers()) {
+          state = 'beat'; beatT0 = performance.now();
+        }
+        label();
+      } else if (!cell.found) {
+        cell.flashT0 = performance.now();
+        if (navigator.vibrate) navigator.vibrate(VIBES);
+      }
+    });
+
+    /* ---------- draw ---------- */
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+      const g = geom(), rad = g.pitch * CIRCLE_R;
+
+      /* completed runs get their connector first — one object under
+         the cells, not separate dots */
+      runs.forEach((truns, ti) => truns.forEach(run => {
+        if (!run.every(c => c.found)) return;
+        const a = centre(g, run[0]),
+              b = centre(g, run[run.length - 1]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.lineCap = 'round'; ctx.lineWidth = rad * 1.15;
+        ctx.strokeStyle = tableColour(tables[ti]);
+        ctx.globalAlpha = 0.30; ctx.stroke(); ctx.globalAlpha = 1;
+      }));
+
+      for (const cell of cells) {
+        const { x, y } = centre(g, cell);
+
+        let lift = 0;
+        if (state !== 'play' && cell.ts.length) {
+          const idx = Math.min(...cell.ts.map(ti => cell.v / tables[ti])) - 1;
+          const k = Math.max(0, Math.min(1,
+            (now - beatT0) / 1000 / BEAT_S - idx));
+          lift = Math.min(k, 1) * 0.25;
+        }
+
+        const flashing = cell.flashT0 > 0 &&
+          (now - cell.flashT0) / 1000 < FLASH_S;
+        if (flashing) {
+          const u = (now - cell.flashT0) / 1000 / FLASH_S;
+          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.fillStyle = '#e0a53a';
+          ctx.globalAlpha = 0.35 * (1 - u); ctx.fill(); ctx.globalAlpha = 1;
+        }
+
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+        if (cell.found && cell.ts.length === 1) {
+          ctx.fillStyle = tableColour(tables[cell.ts[0]]);
+        } else if (!cell.found && MARK && cell.ts.length) {
+          ctx.fillStyle = '#23405c';
+        } else {
+          ctx.fillStyle = '#1a2430';
+        }
+        ctx.fill();
+
+        /* shared cell claimed: split-colour wedges (honeycomb idiom) */
+        if (cell.found && cell.ts.length > 1) {
+          cell.ts.forEach((ti, i) => {
+            ctx.save();
+            ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.clip();
+            ctx.fillStyle = tableColour(tables[ti]);
+            ctx.fillRect(x - rad + i * 2 * rad / cell.ts.length,
+              y - rad, 2 * rad / cell.ts.length, 2 * rad);
+            ctx.restore();
+          });
+        }
+
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+        ctx.strokeStyle = cell.found ? tableColour(tables[cell.ts[0]]) : '#2c3e50';
+        ctx.lineWidth = 1.2; ctx.stroke();
+
+        ctx.font = '600 ' + rad * 0.85 + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = cell.found
+          ? '#fff'
+          : (flashing ? '#e0a53a' : '#8a97a3');
+        ctx.fillText(cell.v, x, y + 1);
+        if (lift > 0) {
+          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.fillStyle = '#fff';
+          ctx.globalAlpha = lift; ctx.fill(); ctx.globalAlpha = 1;
+        }
+      }
+
+      if (state === 'beat' &&
+          (now - beatT0) / 1000 > BEAT_S * MEMBERS + 0.4) {
+        state = 'done';
+        document.getElementById('again').style.display = 'block';
+      }
+    }
+
+    /* ---------- chips / again / label ---------- */
+    const chipRow = document.getElementById('chipRow');
+    const chipOn = () => [...chipRow.children]
+      .map((b, i) => b.classList.contains('on') ? i + 2 : 0)
+      .filter(Boolean);
+
+    function syncChips() {
+      [...chipRow.children].forEach((b, i) =>
+        b.classList.toggle('on', tables.includes(i + 2)));
+    }
+
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('click', () => {
+        let sel = chipOn();
+        if (sel.includes(t)) sel = sel.filter(x => x !== t);
+        else if (sel.length < MAX_TABLES) sel.push(t);
+        if (!sel.length) sel = [t];
+        document.getElementById('again').style.display = 'none';
+        deal(sel.sort((a, b2) => a - b2));
+        syncChips();
+      });
+      chipRow.appendChild(b);
+    }
+    document.getElementById('again').addEventListener('click', e => {
+      e.target.style.display = 'none';
+      deal(tables);
+    });
+
+    function label() {
+      document.getElementById('params').textContent =
+        't=' + tables.join(',') + ' side' + SIDE + ' ×' + MEMBERS +
+        ' seed=' + seed + ' — ' + foundCount() + '/' + totalMembers();
+    }
+
+    /* ---------- go ---------- */
+    const wanted = (qs.get('tables') || qs.get('t') || '')
+      .split(',').map(Number).filter(t => t >= 2 && t <= 12)
+      .slice(0, MAX_TABLES);
+    deal(wanted.length ? wanted : [2 + ((rng() * 11) | 0)]);
+    syncChips();
+    resize();
+    draw(performance.now());            // synchronous first paint
+
+    function frame(now) {
+      try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

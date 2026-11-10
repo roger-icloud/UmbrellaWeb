@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <title>Search Lab — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 12px;
+      z-index: 5;
+    }
+
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(30, 42, 54, .9);
+      color: #cfd8e0;
+      cursor: pointer;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    #again {
+      position: fixed;
+      right: 14px;
+      bottom: 66px;
+      z-index: 10;
+      display: none;
+      background: rgba(20, 28, 36, .85);
+      border: 1px solid #3a4a58;
+      border-radius: 10px;
+      color: #cfd8e0;
+      font: 600 15px Andika, sans-serif;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+
+    #params {
+      position: fixed;
+      left: 10px;
+      bottom: 66px;
+      z-index: 10;
+      color: #55636e;
+      font: 12px Andika, sans-serif;
+      white-space: pre;
+      pointer-events: none;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="chipRow"></div>
+  <button id="again">Again ▸</button>
+  <div id="params"></div>
+
+  <script>
+    'use strict';
+
+    /* search-lab — the straightforward table search (Roger, 2026-11-08).
+       Word-search grammar for times tables: the table's multiples are
+       the letters of a word, hidden IN ORDER along straight runs in a
+       grid of number distractors. Honeycomb's little sibling — same
+       verb (find the members), simpler geometry. This page is a
+       proving ground, not a product: audition board shapes, run
+       counts, directions and distractor policies before composing
+       the real activity.
+
+       ?t=5        table to hide (chips redeal, lab convenience)
+       ?board=WxH  grid size (10x10 default; 12x12 can host runs=1)
+       ?runs=N     split the 12 members into N runs (1,2,3,4,6,12)
+                   runs=12 scatters every member — the pure-membership
+                   baseline with no line help
+       ?dirs=hvd   allowed directions: h horizontal, v vertical,
+                   d diagonals (each drawn either way round)
+       ?ordered=0  scramble members within their run (default: the
+                   word reads along the line)
+       ?glow=0     turn off the prediction scaffold (a run with 2+
+                   members found hints its remaining cells)
+       ?near=0..1  fraction of distractors that are near-misses
+                   (a multiple of t ±1 — membership discrimination)
+       ?seed=N     deterministic deal for repeat auditions */
+
+    /* ---------- tunables ---------- */
+    let   BW = 10, BH = 10;            // board cells
+    let   N_RUNS = 3;                  // runs the table splits into
+    let   DIR_SET = 'hv';              // direction pool
+    let   ORDERED = true;              // the word reads along the line
+    let   GLOW = true;                 // 2+ found predicts the rest
+    let   NEAR_P = 0.25;               // near-miss distractor fraction
+    const FLASH_S = 0.38;              // refusal amber
+    const BEAT_S = 0.09;               // completion stagger per member
+    const GLOW_A = 0.28;               // scaffold ring alpha
+    const GLOW_CYCLE = 2.0;            // scaffold pulse period s
+    const CELL_GAP = 0.10;             // gap fraction between cells
+    const CHIP_H = 92;                 // space kept below the board
+    const MAX_VAL = 144;               // numerals live in 2..144
+    const DEAL_TRIES = 400;            // placement retries per deal
+
+    /* ---------- params ---------- */
+    const qs = new URLSearchParams(location.search);
+    const num = (k, d) => qs.has(k) ? parseFloat(qs.get(k)) : d;
+    if (qs.get('board')) {
+      const m = qs.get('board').match(/^(\d+)x(\d+)$/i);
+      if (m) { BW = +m[1]; BH = +m[2]; }
+    }
+    if (qs.get('runs')) N_RUNS = Math.max(1, Math.min(12, +qs.get('runs') | 0));
+    if (qs.get('dirs')) DIR_SET = qs.get('dirs').toLowerCase();
+    if (qs.has('ordered')) ORDERED = qs.get('ordered') !== '0';
+    if (qs.has('glow')) GLOW = qs.get('glow') !== '0';
+    if (qs.has('near')) NEAR_P = Math.max(0, Math.min(1, num('near', NEAR_P)));
+    const MARK = qs.get('mark') === '1';   // lab aid: tint member cells
+
+    /* ---------- rng ---------- */
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    let seed = qs.has('seed') ? +qs.get('seed') : (Math.random() * 1e9) | 0;
+    let rng = mulberry32(seed);
+    const pick = (arr) => arr[(rng() * arr.length) | 0];
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    const tableColour = t => 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
+
+    /* ---------- directions ---------- */
+    const DIRS = {
+      h: [[1, 0], [-1, 0]],
+      v: [[0, 1], [0, -1]],
+      d: [[1, 1], [1, -1], [-1, 1], [-1, -1]],
+    };
+    const dirPool = () => DIR_SET.split('')
+      .flatMap(k => DIRS[k] || []);
+
+    /* ---------- the deal ---------- */
+    // cells[r][c] = { v, member, run, found, flashT0 }
+    let cells = [], runs = [], table = 0, state = 'play', beatT0 = 0;
+
+    function memberValue(i) { return table * (i + 1); }
+    const isMember = v => v % table === 0 && v / table >= 1 && v / table <= 12;
+
+    /* split ×1..×12 into N_RUNS consecutive chunks */
+    function chunks() {
+      const base = Math.floor(12 / N_RUNS), extra = 12 % N_RUNS;
+      const out = []; let i = 0;
+      for (let r = 0; r < N_RUNS; r++) {
+        const len = base + (r < extra ? 1 : 0);
+        out.push(Array.from({ length: len }, (_, k) => table * (i + k + 1)));
+        i += len;
+      }
+      return out;
+    }
+
+    function placeRun(vals) {
+      const dirs = dirPool();
+      if (!dirs.length) return null;
+      const L = vals.length;
+      for (let tries = 0; tries < DEAL_TRIES; tries++) {
+        const [dx, dy] = pick(dirs);
+        const sx = (rng() * BW) | 0, sy = (rng() * BH) | 0;
+        const ex = sx + (L - 1) * dx, ey = sy + (L - 1) * dy;
+        if (ex < 0 || ex >= BW || ey < 0 || ey >= BH) continue;
+        const cellsInRun = [];
+        let ok = true;
+        for (let k = 0; k < L; k++) {
+          const cell = cells[sy + k * dy][sx + k * dx];
+          if (cell.v !== null) { ok = false; break; }
+          cellsInRun.push(cell);
+        }
+        if (!ok) continue;
+        const ord = ORDERED ? vals.slice() : vals.slice().sort(() => rng() - 0.5);
+        cellsInRun.forEach((cell, k) => {
+          cell.v = ord[k]; cell.member = true; cell.run = runs.length;
+        });
+        return cellsInRun;
+      }
+      return null;
+    }
+
+    function distractor() {
+      if (rng() < NEAR_P) {
+        const v = table * ((1 + rng() * 12) | 0) + pick([-1, 1]);
+        if (v >= 2 && !isMember(v)) return v;
+      }
+      for (let k = 0; k < 60; k++) {
+        const v = 2 + ((rng() * (MAX_VAL - 1)) | 0);
+        if (!isMember(v)) return v;
+      }
+      return 1;                                          // 1 is never a member
+    }
+
+    function deal(t) {
+      table = t;
+      rng = mulberry32(seed = (seed + 0x9e3779b9) >>> 0);
+      cells = Array.from({ length: BH }, () =>
+        Array.from({ length: BW }, () =>
+          ({ v: null, member: false, run: -1, found: false, flashT0: -1 })));
+      runs = [];
+      cells.forEach((row, r) => row.forEach((c, i) => { c.r = r; c.c = i; }));
+      let ok = true;
+      for (const vals of chunks()) {
+        const placed = placeRun(vals);
+        if (!placed) { ok = false; break; }
+        runs.push(placed);
+      }
+      if (!ok) {
+        /* couldn't lay the runs on this board — scatter instead so the
+           lab never dead-ends (label reports the fallback) */
+        cells.forEach(row => row.forEach(c => { c.v = null; c.member = false; }));
+        runs = [];
+        const free = [];
+        cells.forEach((row, r) => row.forEach((c, i) => free.push(c)));
+        for (let i = 0; i < 12; i++) {
+          const c = free.splice((rng() * free.length) | 0, 1)[0];
+          c.v = memberValue(i); c.member = true;
+        }
+        runs.push([]);
+      }
+      cells.forEach(row => row.forEach(c => { if (c.v === null) c.v = distractor(); }));
+      state = 'play';
+      label();
+    }
+
+    /* ---------- board geometry ---------- */
+    function geom() {
+      const m = 18;
+      const cell = Math.min(
+        (W - 2 * m) / BW,
+        (H - CHIP_H - m) / BH);
+      return {
+        cell,
+        ox: (W - cell * BW) / 2,
+        oy: (H - CHIP_H - cell * BH) / 2,
+      };
+    }
+    const centre = (g, r, c) => ({
+      x: g.ox + c * g.cell + g.cell / 2,
+      y: g.oy + r * g.cell + g.cell / 2,
+    });
+
+    function cellAt(x, y) {
+      const g = geom();
+      const c = Math.floor((x - g.ox) / g.cell), r = Math.floor((y - g.oy) / g.cell);
+      return (r >= 0 && r < BH && c >= 0 && c < BW) ? cells[r][c] : null;
+    }
+
+    /* ---------- interaction ---------- */
+    cv.addEventListener('pointerdown', e => {
+      if (state !== 'play') return;
+      const cell = cellAt(e.clientX, e.clientY);
+      if (!cell) return;
+      if (cell.member && !cell.found) {
+        cell.found = true;
+        if (cells.every(row => row.every(c => !c.member || c.found))) {
+          state = 'beat'; beatT0 = performance.now();
+        }
+        label();
+      } else if (!cell.found) {
+        cell.flashT0 = performance.now();
+      }
+    });
+
+    /* a run with 2+ members found predicts its remaining cells */
+    function predicted(cell) {
+      if (!GLOW || !cell.member || cell.found) return false;
+      const run = runs[cell.run];
+      return run && run.filter(c => c.found).length >= 2;
+    }
+
+    function runDone(ri) {
+      return runs[ri] && runs[ri].length && runs[ri].every(c => c.found);
+    }
+
+    /* ---------- draw ---------- */
+    function rrect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+      const g = geom(), cs = g.cell, gap = cs * CELL_GAP;
+
+      /* completed runs get their connector first — the word-search
+         found-mark: one object under the tiles, not twelve cells */
+      runs.forEach((run, ri) => {
+        if (!runDone(ri)) return;
+        const a = centre(g, run[0].r, run[0].c),
+              b = centre(g, run[run.length - 1].r, run[run.length - 1].c);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.lineCap = 'round'; ctx.lineWidth = cs * 0.55;
+        ctx.strokeStyle = tableColour(table);
+        ctx.globalAlpha = 0.30; ctx.stroke(); ctx.globalAlpha = 1;
+      });
+
+      for (let r = 0; r < BH; r++)
+        for (let c = 0; c < BW; c++) {
+          const cell = cells[r][c];
+          cell.r = r; cell.c = c;
+          const { x, y } = centre(g, r, c);
+          const x0 = x - cs / 2 + gap / 2, y0 = y - cs / 2 + gap / 2,
+                s = cs - gap;
+
+          /* the beat: members relight in table order on completion */
+          let lift = 0;
+          if (state !== 'play' && cell.member) {
+            const k = Math.max(0, Math.min(1,
+              (now - beatT0) / 1000 / BEAT_S - (cell.v / table - 1)));
+            lift = Math.min(k, 1) * 0.25;
+          }
+
+          const flashing = cell.flashT0 > 0 &&
+            (now - cell.flashT0) / 1000 < FLASH_S;
+          if (flashing) {
+            const u = (now - cell.flashT0) / 1000 / FLASH_S;
+            rrect(x0, y0, s, s, s * 0.22);
+            ctx.fillStyle = '#e0a53a';
+            ctx.globalAlpha = 0.35 * (1 - u); ctx.fill(); ctx.globalAlpha = 1;
+          }
+
+          rrect(x0, y0, s, s, s * 0.22);
+          ctx.fillStyle = cell.found ? tableColour(table)
+            : (MARK && cell.member ? '#23405c' : '#1a2430');
+          ctx.fill();
+          ctx.strokeStyle = cell.found ? tableColour(table) : '#2c3e50';
+          ctx.lineWidth = 1.2; ctx.stroke();
+
+          if (predicted(cell)) {
+            const pulse = 0.5 + 0.5 * Math.sin(now / 1000 / GLOW_CYCLE * 6.283);
+            rrect(x0 - 2, y0 - 2, s + 4, s + 4, s * 0.26);
+            ctx.strokeStyle = tableColour(table);
+            ctx.globalAlpha = GLOW_A * (0.4 + 0.6 * pulse);
+            ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+          }
+
+          ctx.font = '600 ' + cs * 0.36 + 'px Andika, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = cell.found
+            ? '#fff'
+            : (flashing ? '#e0a53a' : '#8a97a3');
+          ctx.fillText(cell.v, x, y + 1);
+          if (lift > 0) {
+            rrect(x0, y0, s, s, s * 0.22);
+            ctx.fillStyle = '#fff';
+            ctx.globalAlpha = lift; ctx.fill(); ctx.globalAlpha = 1;
+          }
+        }
+
+      if (state === 'beat' &&
+          (now - beatT0) / 1000 > BEAT_S * 12 + 0.4) {
+        state = 'done';
+        document.getElementById('again').style.display = 'block';
+      }
+    }
+
+    /* ---------- chips / again / label ---------- */
+    const chipRow = document.getElementById('chipRow');
+    for (let t = 2; t <= 12; t++) {
+      const b = document.createElement('button');
+      b.textContent = '×' + t;
+      b.addEventListener('click', () => {
+        document.getElementById('again').style.display = 'none';
+        [...chipRow.children].forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        deal(t);
+      });
+      chipRow.appendChild(b);
+    }
+    document.getElementById('again').addEventListener('click', e => {
+      e.target.style.display = 'none';
+      deal(table);
+    });
+
+    function label() {
+      const found = cells.flat().filter(c => c.member && c.found).length;
+      const spec = chunks().map(c => c.length).join('+');
+      document.getElementById('params').textContent =
+        't=' + table + ' runs=' + spec + ' dirs=' + DIR_SET +
+        ' seed=' + seed + ' — ' + found + '/12';
+    }
+
+    /* ---------- go ---------- */
+    const t0 = num('t', 0);
+    deal(t0 >= 2 && t0 <= 12 ? t0 : 2 + ((rng() * 11) | 0));
+    chipRow.children[table - 2].classList.add('on');
+    resize();
+    draw(performance.now());            // synchronous first paint
+
+    function frame(now) {
+      try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

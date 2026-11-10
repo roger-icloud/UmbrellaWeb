@@ -125,7 +125,20 @@
        ?seed=N        deterministic deal
        ?mark=1        tint member cells — see where the words hide
        ?cross=0..1    how often multi-table deals intersect (0.7)
-       ?sound=0       mute the crossover arpeggio */
+       ?tri=0..1      for 3-table deals, try the triangular meeting
+                      first — each pair crossing once (0.5; △ in the
+                      params line when one is dealt)
+       ?sound=0       mute the crossover arpeggio
+       ?wash=0        disable the wandering lens (Roger's reveal:
+                      press-and-drag — a soft-glow circle rides above
+                      the finger; inside it non-members go amber =
+                      "discounted completely", members invert to
+                      black-on-white. Lives only under the circle;
+                      release holds the reveal a beat for the tap)
+       ?halo=N        hex radius of the revealed area (1 = flower)
+       ?linger=S      s the reveal persists after release (1.2)
+       ?amber=0..1    discount-wash strength (fainter + wider = the
+                      more-able dial, Roger 2026-11-10) */
 
     /* ---------- tunables ---------- */
     let   SIDE = 7;                    // side 6 starves crossing arms
@@ -133,12 +146,21 @@
     let   ORDERED = true;              // the word reads along the line
     let   NEAR_P = 0.25;               // near-miss distractor fraction
     const MAX_TABLES = 3;              // chip multi-select cap
+    const T_MAX = 10;                  // chips offered — ×11/×12 wait
+    // for the friendless question (every pair in 2..10 shares a
+    // multiple in range, so crossings always exist)
     let   CROSS_P = 0.7;               // Roger: bias toward crossovers
     const FLASH_S = 0.38;              // refusal amber
     const BEAT_S = 0.09;               // completion stagger per member
     const CIRCLE_R = 0.40;             // cell radius as pitch fraction
     const CHIP_H = 92;                 // space kept below the board
     const MAX_VAL = 144;               // numerals live in 2..144
+    const HALO_N = 1;                  // hex radius of the revealed area
+    const HALO_LIFT = 2.1;             // pitches above a touch finger
+    const SHADE_SLOP = 0.5;            // drag (pitches) that arms the lens
+    const LINGER = 1.2;                // s reveal holds after release
+    const LINGER_FADE = 0.7;           // s it then fades over
+    const REV_FADE = 0.28;             // s a cell eases into its reveal
 
     /* sound + haptics (Roger, 2026-11-08) — ears hear the crossover,
        hands feel the refusal. Pentatonic table-notes, shared cell
@@ -187,6 +209,17 @@
     if (qs.has('cross')) CROSS_P = Math.max(0, Math.min(1, num('cross', CROSS_P)));
     if (qs.has('sound')) SOUND = qs.get('sound') !== '0';
     const MARK = qs.get('mark') === '1';
+    /* declared feasibility, not silent scatter: a word can't be
+       longer than the comb's longest line (2·side−1). If the params
+       ask for impossible geometry, the clamp says so in the label —
+       the deal never pretends a line it can't draw (Roger 11-10) */
+    if (MEMBERS > 2 * SIDE - 1) MEMBERS = 2 * SIDE - 1;
+    const WASH = qs.get('wash') !== '0';
+    const HALO = Math.max(0, Math.min(3,
+      qs.has('halo') ? +qs.get('halo') | 0 : HALO_N));
+    const LINGER_S = Math.max(0, num('linger', LINGER));
+    const AMBER = Math.max(0, Math.min(1, num('amber', 1)));
+    const TRI_P = Math.max(0, Math.min(1, num('tri', 0.5)));
 
     /* ---------- rng ---------- */
     function mulberry32(a) {
@@ -220,6 +253,9 @@
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
     const tableColour = t => 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
+    /* a dash of the cuisenaire colour: the table's hue lifted to a
+       pastel, for the lens's inverted possibles (Roger, 2026-11-10) */
+    const tableTint = t => 'hsl(' + ((t * 31 + 200) % 360) + ',55%,80%)';
     const VP = Math.sqrt(3) / 2;       // vertical pitch of hex packing
 
     /* ---------- the comb ----------
@@ -236,7 +272,8 @@
       for (let q = -S; q <= S; q++)
         for (let r = -S; r <= S; r++)
           if (Math.abs(q + r) <= S) {
-            const cell = { q, r, v: null, ts: [], found: false, flashT0: -1 };
+            const cell = { q, r, v: null, ts: [], found: false,
+              order: null, shown: 0, disp: null, flashT0: -1, bloomT: 0 };
             byKey.set(key(q, r), cell);
             cells.push(cell);
           }
@@ -244,6 +281,7 @@
 
     /* ---------- the deal ---------- */
     let runs = [], tables = [], state = 'play', beatT0 = 0;
+    let dealtTri = false;
 
     const isMember = (v, t) => v % t === 0 && v / t >= 1 && v / t <= MEMBERS;
 
@@ -329,6 +367,63 @@
       return true;
     }
 
+    /* triangular meeting (Roger, 2026-11-10): not three words
+       through one cell but each PAIR crossing once — A×B here, A×C
+       there, B×C elsewhere: a woven triangle of lines. The shared
+       values set the triangle's side-lengths in member-indices; the
+       three directions must then vector-sum (e2·db − e1·da = e3·dc)
+       or the combination is dead. Resolution first, deal generated
+       backward — as ever. */
+    function triDeal() {
+      if (tables.length !== 3) return false;
+      const par = (d, e) => d === e ||
+        (d[0] === -e[0] && d[1] === -e[1]);
+      const share = [[0, 1], [0, 2], [1, 2]].map(([a, b]) => {
+        const s = [];
+        for (let i = 0; i < MEMBERS; i++)
+          for (let j = 0; j < MEMBERS; j++)
+            if (tables[a] * (i + 1) === tables[b] * (j + 1))
+              s.push({ i, j });
+        return s;
+      });
+      if (share.some(s => !s.length)) return false;
+      const cand = [];
+      for (const sAB of share[0]) for (const sAC of share[1])
+      for (const sBC of share[2]) {
+        /* a word can't meet two others at the same index */
+        if (sAB.i === sAC.i || sAB.j === sBC.i || sAC.j === sBC.j)
+          continue;
+        const e1 = sAC.i - sAB.i, e2 = sBC.i - sAB.j,
+              e3 = sBC.j - sAC.j;
+        if (!e3) continue;
+        for (const da of DIRS) for (const db of DIRS) {
+          if (par(da, db)) continue;
+          const vx = e2 * db[0] - e1 * da[0],
+                vy = e2 * db[1] - e1 * da[1];
+          for (const dc of DIRS) {
+            if (par(da, dc) || par(db, dc)) continue;
+            if (vx !== e3 * dc[0] || vy !== e3 * dc[1]) continue;
+            for (const AB of cells) {
+              const runA = lineAt(AB, da[0], da[1], sAB.i, MEMBERS);
+              const runB = lineAt(AB, db[0], db[1], sAB.j, MEMBERS);
+              if (!runA || !runB) continue;
+              const runC = lineAt(runA[sAC.i], dc[0], dc[1], sAC.j, MEMBERS);
+              if (!runC || runC[sBC.j] !== runB[sBC.i]) continue;
+              const fits = (run, ti) => run.every((c, k) =>
+                c.v === null || c.v === tables[ti] * (k + 1));
+              if (fits(runA, 0) && fits(runB, 1) && fits(runC, 2))
+                cand.push({ runA, runB, runC });
+            }
+          }
+        }
+      }
+      if (!cand.length) return false;
+      const { runA, runB, runC } = pick(cand);
+      layWord(runA, 0); layWord(runB, 1); layWord(runC, 2);
+      dealtTri = true;
+      return true;
+    }
+
     function distractor() {
       if (rng() < NEAR_P) {
         const t = pick(tables);
@@ -342,37 +437,40 @@
       return 1;
     }
 
-    function deal(ts) {
-      tables = ts;
-      rng = mulberry32(seed = (seed + 0x9e3779b9) >>> 0);
+    function attempt(cross) {
       buildComb();
       runs = tables.map(() => []);
-      /* the encouraged crossover: plan tables[0]×tables[1] through a
-         shared cell when geometry allows; the rest place normally
-         (and may still cross by luck) */
+      dealtTri = false;
+      if (cross && TRI_P > 0 && rng() < TRI_P && triDeal())
+        return true;
       let ti0 = 0;
-      if (tables.length >= 2 && ORDERED && rng() < CROSS_P && crossDeal())
+      if (cross && tables.length >= 2 && ORDERED &&
+          rng() < CROSS_P && crossDeal())
         ti0 = 2;
-      let ok = true;
       for (let ti = ti0; ti < tables.length; ti++) {
         const vals = Array.from({ length: MEMBERS }, (_, i) => tables[ti] * (i + 1));
         const placed = placeRun(vals, ti);
-        if (!placed) { ok = false; break; }
+        if (!placed) return false;
         runs[ti].push(placed);
       }
-      if (!ok) {                       // scatter fallback, never dead-end
-        cells.forEach(c => { c.v = null; c.ts = []; });
-        runs = tables.map(() => []);
-        tables.forEach((t, ti) => {
-          for (let i = 0; i < MEMBERS; i++) {
-            const free = cells.filter(c => c.v === null || c.v === t * (i + 1));
-            const c = free[(rng() * free.length) | 0];
-            if (c.v === null) c.v = t * (i + 1);
-            if (!c.ts.includes(ti)) c.ts.push(ti);
-          }
-        });
+      return true;
+    }
+
+    function deal(ts) {
+      tables = ts;
+      rng = mulberry32(seed = (seed + 0x9e3779b9) >>> 0);
+      /* keep the deal's promise or reroll it: every word a line,
+         every member present. Crossing ambition is spent first;
+         parallel words — still honest lines — are the declared
+         degrade. Never a silent scatter (Roger, 2026-11-10). */
+      let att = 0;
+      while (att < 60 && !attempt(true)) att++;
+      if (att >= 60) {        // crossing ambition exhausted —
+        att = 0;              // parallel words are the declared degrade
+        while (att < 120 && !attempt(false)) att++;
       }
       cells.forEach(c => { if (c.v === null) c.v = distractor(); });
+      lastT = null;
       state = 'play';
       label();
     }
@@ -407,22 +505,141 @@
     const foundCount = () =>
       cells.reduce((n, c) => n + (c.found ? c.ts.length : 0), 0);
 
-    cv.addEventListener('pointerdown', e => {
-      if (state !== 'play') return;
-      const cell = cellAt(e.clientX, e.clientY);
+    function claimAt(x, y) {
+      const cell = cellAt(x, y);
       if (!cell) return;
-      if (cell.ts.length && !cell.found) {
+      /* a second tap on a found shared cell reveals the split —
+         "which word does this cell serve?" is a question worth
+         asking; the chord waits for it (Roger, 2026-11-10) */
+      /* colours arrive one per tap — the reveal unfolds. Each tap
+         sings the newly arrived table's note, so the chord assembles;
+         the rare triple earns the full chord on its last colour
+         (Roger, 2026-11-10: "bring out the specialness") */
+      if (cell.found) {
+        if (cell.order && cell.shown < cell.order.length) {
+          cell.shown++;
+          chime(noteHz(tables[cell.order[cell.shown - 1]]), 0, NOTE_DUR);
+          if (cell.shown === cell.order.length && cell.order.length > 2) {
+            singCrossover(cell);
+            cell.bloomT = performance.now();   // one-beat bloom: the
+          }                                    // triple marks itself
+        }
+        return;
+      }
+      if (cell.ts.length) {
         cell.found = true;
-        if (cell.ts.length > 1) singCrossover(cell);
+        /* the chain being followed decides the colour (Roger,
+           2026-11-10): a shared cell continues the run the player
+           is on — found neighbour of its table wins; else the
+           table last collected; else deal order. Six neighbour
+           checks, nothing more. */
+        let disp = null;
+        for (const ti of cell.ts)
+          if (disp === null && DIRS.some(([dq, dr]) => {
+            const n = byKey.get(key(cell.q + dq, cell.r + dr));
+            return n && n.found && n.ts.includes(ti);
+          }))
+            disp = ti;
+        if (disp === null)
+          disp = (lastT !== null && cell.ts.includes(lastT))
+            ? lastT : cell.ts[0];
+        cell.disp = disp;
+        cell.order = [disp, ...cell.ts.filter(t => t !== disp)];
+        cell.shown = 1;
+        lastT = disp;
         if (foundCount() === totalMembers()) {
           state = 'beat'; beatT0 = performance.now();
         }
         label();
-      } else if (!cell.found) {
+      } else {
         cell.flashT0 = performance.now();
         if (navigator.vibrate) navigator.vibrate(VIBES);
       }
+    }
+
+    /* the wandering lens (Roger, 2026-11-10): press-and-drag opens a
+       soft-glow circle riding above the finger; inside it non-members
+       go amber ("discounted completely") while unfound members keep a
+       faint possible-glint. The reveal lives only under the circle —
+       the app insists on concentration — and on release it freezes for
+       LINGER_S before fading, the beat that lets the finger become a
+       tap. Mouse hover previews at half strength. */
+    const hexDist = (a, b) =>
+      (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) +
+       Math.abs(a.q + a.r - b.q - b.r)) / 2;
+    let lastT = null;   // table whose chain was last continued
+    let press = null;   // {x,y,mode,type} — mode null until slop
+    let halo = null;    // {x,y,cover:Set,hover:bool,held:0}
+    const revealT = new Map();  // cell -> entry time, eases the reveal
+
+    function nearest(x, y) {
+      const g = geom();
+      let best = null, bd = g.pitch * 0.9;
+      for (const cell of cells) {
+        const p = centre(g, cell);
+        const d = Math.hypot(x - p.x, y - p.y);
+        if (d < bd) { bd = d; best = cell; }
+      }
+      return best;
+    }
+
+    function lensUpdate(x, y, type, hover) {
+      const g = geom();
+      const lift = type === 'mouse' ? 0 : HALO_LIFT * g.pitch;
+      const anchor = nearest(x, y - lift);
+      if (!anchor) { halo = null; return; }
+      const cover = new Set(
+        cells.filter(c => !c.found && hexDist(c, anchor) <= HALO));
+      const t = performance.now();
+      cover.forEach(c => { if (!revealT.has(c)) revealT.set(c, t); });
+      revealT.forEach((t0, c) => { if (!cover.has(c)) revealT.delete(c); });
+      halo = { x, y: y - lift, cover, hover, held: 0 };
+    }
+
+    /* reveal strength: 1 while held, holds through LINGER_S after
+       release, then fades over LINGER_FADE */
+    function lensAlpha(now) {
+      if (!halo) return 0;
+      if (!halo.held) return halo.hover ? 0.55 : 1;
+      const age = (now - halo.held) / 1000;
+      if (age <= LINGER_S) return 1;
+      return Math.max(0, 1 - (age - LINGER_S) / LINGER_FADE);
+    }
+
+    cv.addEventListener('pointerdown', e => {
+      if (state !== 'play') return;
+      press = { x: e.clientX, y: e.clientY, mode: null, type: e.pointerType };
+      if (cv.setPointerCapture) cv.setPointerCapture(e.pointerId);
     });
+
+    cv.addEventListener('pointermove', e => {
+      if (!WASH || state !== 'play') return;
+      if (!press) {
+        if (e.pointerType === 'mouse')
+          lensUpdate(e.clientX, e.clientY, 'mouse', true);
+        return;
+      }
+      const g = geom();
+      if (press.mode === null &&
+          Math.hypot(e.clientX - press.x, e.clientY - press.y) >
+            g.pitch * SHADE_SLOP)
+        press.mode = 'lens';
+      if (press.mode === 'lens')
+        lensUpdate(e.clientX, e.clientY, press.type, false);
+    });
+
+    function release(e, claim) {
+      if (press && press.mode === null && claim && state === 'play')
+        claimAt(e.clientX, e.clientY);
+      if (halo && !halo.hover)
+        halo.held = (press && press.mode === 'lens')
+          ? performance.now()                // freeze for the linger
+          : halo.held;                       // a tap leaves it be
+      press = null;
+    }
+    cv.addEventListener('pointerup', e => release(e, true));
+    cv.addEventListener('pointercancel', e => release(e, false));
+    cv.addEventListener('pointerleave', () => { if (!press) halo = null; });
 
     /* ---------- draw ---------- */
     function draw(now) {
@@ -442,6 +659,20 @@
         ctx.strokeStyle = tableColour(tables[ti]);
         ctx.globalAlpha = 0.30; ctx.stroke(); ctx.globalAlpha = 1;
       }));
+
+      /* the revealed area rides under the cells — a soft glow whose
+         edge is deliberately fuzzy (it designates, it doesn't point) */
+      const la = WASH ? lensAlpha(now) : 0;
+      if (halo && la <= 0) { halo = null; revealT.clear(); }
+      if (halo) {
+        const hr = g.pitch * (HALO + 0.9);
+        const grad = ctx.createRadialGradient(
+          halo.x, halo.y, hr * 0.3, halo.x, halo.y, hr);
+        grad.addColorStop(0, 'rgba(120,160,200,' + 0.10 * la + ')');
+        grad.addColorStop(1, 'rgba(120,160,200,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(halo.x - hr, halo.y - hr, 2 * hr, 2 * hr);
+      }
 
       for (const cell of cells) {
         const { x, y } = centre(g, cell);
@@ -464,42 +695,117 @@
         }
 
         ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
-        if (cell.found && cell.ts.length === 1) {
-          ctx.fillStyle = tableColour(tables[cell.ts[0]]);
-        } else if (!cell.found && MARK && cell.ts.length) {
+        if (cell.found) {
+          ctx.fillStyle = tableColour(tables[cell.disp ?? cell.ts[0]]);
+        } else if (MARK && cell.ts.length) {
           ctx.fillStyle = '#23405c';
         } else {
           ctx.fillStyle = '#1a2430';
         }
         ctx.fill();
 
-        /* shared cell claimed: split-colour wedges (honeycomb idiom) */
-        if (cell.found && cell.ts.length > 1) {
-          cell.ts.forEach((ti, i) => {
+        /* shared cell's colours arriving one per tap — wedges in
+           claim order, the first always the followed chain's.
+           Hairline separators between strips: adjacent tables sit
+           ~31° apart on the wheel (3,4,5 = purple/pink/coral), so
+           the boundary carries the meaning the hues can't */
+        if (cell.found && cell.shown > 1) {
+          const order = cell.order.slice(0, cell.shown);
+          order.forEach((ti, i) => {
             ctx.save();
             ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.clip();
             ctx.fillStyle = tableColour(tables[ti]);
-            ctx.fillRect(x - rad + i * 2 * rad / cell.ts.length,
-              y - rad, 2 * rad / cell.ts.length, 2 * rad);
+            ctx.fillRect(x - rad + i * 2 * rad / order.length,
+              y - rad, 2 * rad / order.length, 2 * rad);
             ctx.restore();
           });
+          for (let i = 1; i < order.length; i++) {
+            const sx = x - rad + i * 2 * rad / order.length;
+            ctx.save();
+            ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.clip();
+            ctx.beginPath();
+            ctx.moveTo(sx, y - rad); ctx.lineTo(sx, y + rad);
+            ctx.strokeStyle = 'rgba(16,20,24,0.7)';
+            ctx.lineWidth = 1.4;
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        /* the lens reveals: under the circle, non-members go amber
+           ("discounted completely"); unfound members invert to black
+           on white — both eased in over REV_FADE so nothing snaps */
+        const revT = (halo && la > 0 && !cell.found &&
+          halo.cover.has(cell)) ? revealT.get(cell) : undefined;
+        const revK = revT === undefined ? 0
+          : Math.min(1, (now - revT) / 1000 / REV_FADE) * la;
+        if (revK > 0 && !cell.ts.length) {
+          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.fillStyle = 'rgba(224,165,58,' + 0.34 * AMBER * revK + ')';
+          ctx.fill();
+        } else if (revK > 0) {
+          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.fillStyle = 'rgba(240,244,247,' + revK + ')';
+          ctx.fill();
+          /* a dash of the table's colour in the white */
+          ctx.globalAlpha = 0.45 * revK;
+          ctx.fillStyle = tableTint(tables[cell.ts[0]]);
+          ctx.fill();
+          ctx.globalAlpha = 1;
         }
 
         ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
-        ctx.strokeStyle = cell.found ? tableColour(tables[cell.ts[0]]) : '#2c3e50';
+        ctx.strokeStyle = cell.found
+          ? tableColour(tables[cell.disp ?? cell.ts[0]]) : '#2c3e50';
         ctx.lineWidth = 1.2; ctx.stroke();
 
         ctx.font = '600 ' + rad * 0.85 + 'px Andika, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillStyle = cell.found
           ? '#fff'
-          : (flashing ? '#e0a53a' : '#8a97a3');
+          : (flashing ? '#e0a53a'
+             : revK > 0 && !cell.ts.length
+               ? 'rgba(138,151,163,' + (1 - 0.5 * revK) + ')'
+             : '#8a97a3');
         ctx.fillText(cell.v, x, y + 1);
+        /* the inverted numeral cross-fades in over its grey self */
+        if (revK > 0 && cell.ts.length) {
+          ctx.globalAlpha = revK;
+          ctx.fillStyle = '#101418';
+          ctx.fillText(cell.v, x, y + 1);
+          ctx.globalAlpha = 1;
+        }
         if (lift > 0) {
           ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
           ctx.fillStyle = '#fff';
           ctx.globalAlpha = lift; ctx.fill(); ctx.globalAlpha = 1;
         }
+
+        /* the triple's bloom — a ring that swells and lets go */
+        if (cell.bloomT) {
+          const bu = (now - cell.bloomT) / 800;
+          if (bu < 1) {
+            ctx.beginPath();
+            ctx.arc(x, y, rad * (1 + bu * 1.6), 0, 7);
+            ctx.strokeStyle = 'rgba(255,235,180,' + 0.9 * (1 - bu) + ')';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+          } else cell.bloomT = 0;
+        }
+      }
+
+      /* the travelling edge — a blurred margin band, not a drawn
+         line (Roger: a hazy boundary the reveal lives inside) */
+      if (halo && la > 0) {
+        const R = g.pitch * (HALO + 0.62), band = g.pitch * 0.45;
+        const edge = ctx.createRadialGradient(
+          halo.x, halo.y, R - band, halo.x, halo.y, R + band);
+        edge.addColorStop(0, 'rgba(140,190,235,0)');
+        edge.addColorStop(0.5, 'rgba(140,190,235,' + 0.30 * la + ')');
+        edge.addColorStop(1, 'rgba(140,190,235,0)');
+        ctx.fillStyle = edge;
+        ctx.fillRect(halo.x - R - band, halo.y - R - band,
+          2 * (R + band), 2 * (R + band));
       }
 
       if (state === 'beat' &&
@@ -520,7 +826,7 @@
         b.classList.toggle('on', tables.includes(i + 2)));
     }
 
-    for (let t = 2; t <= 12; t++) {
+    for (let t = 2; t <= T_MAX; t++) {
       const b = document.createElement('button');
       b.textContent = '×' + t;
       b.addEventListener('click', () => {
@@ -540,16 +846,19 @@
     });
 
     function label() {
+      const x2 = cells.filter(c => c.ts.length === 2).length;
+      const x3 = cells.filter(c => c.ts.length >= 3).length;
       document.getElementById('params').textContent =
         't=' + tables.join(',') + ' side' + SIDE + ' ×' + MEMBERS +
-        ' seed=' + seed + ' — ' + foundCount() + '/' + totalMembers();
+        ' seed=' + seed + ' — ' + foundCount() + '/' + totalMembers() +
+        ' · ∩2:' + x2 + ' ∩3:' + x3 + (dealtTri ? ' △' : '');
     }
 
     /* ---------- go ---------- */
     const wanted = (qs.get('tables') || qs.get('t') || '')
-      .split(',').map(Number).filter(t => t >= 2 && t <= 12)
+      .split(',').map(Number).filter(t => t >= 2 && t <= T_MAX)
       .slice(0, MAX_TABLES);
-    deal(wanted.length ? wanted : [2 + ((rng() * 11) | 0)]);
+    deal(wanted.length ? wanted : [2 + ((rng() * (T_MAX - 1)) | 0)]);
     syncChips();
     resize();
     draw(performance.now());            // synchronous first paint

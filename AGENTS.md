@@ -15,6 +15,18 @@ rewrite his text. He is 76 and prefers a calm pace — no superlatives,
 no excitement, no fault/blame vocabulary ("oversight", "needs further
 attention" — never "still pending" for something broken).
 
+## Where this came from (provenance)
+
+Roger's route here, in about three months (as of 2026-11): VB-era
+tooling with autocomplete → Cascade → Windsurf → Devin → building the
+Swift app `~/Developer/Umbrella` from zero → moving to Linux Mint →
+back to single-file HTML for reach. He drives as designer and author
+throughout — the tools change fast and under his feet, so written
+context is load-bearing: sessions share no memory beyond what is
+recorded here and in the dated SessionNotes files. When a tool or
+workflow detail is relearned the hard way, write it down — the note
+is for the next session's agent, not for Roger.
+
 ## The design grammar (the part that's easy to lose)
 
 - **Discovery, not instruction.** Activities provoke questions ("why did

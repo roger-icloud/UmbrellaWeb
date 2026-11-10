@@ -200,7 +200,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=14"></script>
+  <script src="anim.js?v=15"></script>
 
   <script>
     'use strict';
@@ -449,6 +449,7 @@
       state = 'celebrate';
       doneMs = Math.round(performance.now() - startT);
       syncChips();
+      if (window.NF && NF.complete) NF.complete(table);  // home to the den
       Anim.begin({
         ctx, W, H,
         board: { x: bX, y: bY, w: bW, h: bH },
@@ -684,7 +685,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=12"></script>
+  <script src="nav.js?v=14"></script>
 </body>
 
 </html>

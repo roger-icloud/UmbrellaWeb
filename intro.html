@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <title>Introduction — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background: #101418;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+      color: #cfd8e0;
+    }
+
+    #frame {
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    .prose {
+      position: relative;
+      z-index: 1;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 64px 28px 120px;
+      font-size: 17px;
+      line-height: 1.78;
+    }
+
+    .prose h1 {
+      color: #e8f0f5;
+      font-size: 26px;
+      margin: 0 0 0.6em;
+    }
+
+    .prose p {
+      margin: 0 0 1.15em;
+    }
+
+    /* the concertina — depth on tap, calm by default */
+    .prose details {
+      margin: 0 0 1.15em;
+      border-left: 2px solid #2c3e50;
+      padding-left: 16px;
+    }
+
+    .prose summary {
+      cursor: pointer;
+      color: #9fc3e0;
+      font-weight: 600;
+      outline: none;
+    }
+
+    .prose summary:hover {
+      color: #c9e2f5;
+    }
+
+    .prose details[open] summary {
+      margin-bottom: 0.6em;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="frame"></canvas>
+
+  <article class="prose">
+    <!-- ROGERS TEXT begins — the introduction lives between these
+         markers; the snakes only frame it, they never touch it -->
+    <h1>Introduction</h1>
+    <p>Phones and tablets are great for talking, texting, and playing games, 
+      <br>They can also be used for learning.
+    <br>Learning and fun are not mutually exclusive. 
+  <br>I'd like to user these pages to explore both.</p>
+
+    <details>
+      <summary>I need your HELP</summary>
+      <p>My ideas are just that.  You and I can work together to make them better.</p>
+      <p>Feedback is the onlhy way that I am able to tighten up this site and make it really useful.</p>
+    </details>
+
+    <!-- ROGERS TEXT ends -->
+  </article>
+
+  <script>
+    'use strict';
+
+    /* intro frame (Roger, 2026-11-08): a page for grown-up words with
+       the family at home around it. Two table-snakes drape on the
+       prose column's border — blinking, watching, breathing, and now
+       and then giving a lazy wriggle. Very occasionally one intrudes:
+       it slides across the text itself and settles on a new perch.
+
+       A perch is just a border position the head stops at; the body
+       trails along the perimeter behind, so corner-drapes are free.
+       The trail model does the moving: the head writes breadcrumbs,
+       the body reads back SPACING behind — same slither as ever.
+
+       ?demo=1     restless clocks for auditioning (wriggle ~5s,
+                   intrude ~15-30s instead of ~90s)
+       ?tables=3,7 which snakes are home
+       ?seed=N     deterministic timers/placements */
+
+    /* ---------- tunables ---------- */
+    const TABLES = [3, 7];         // the household
+    const SEG_R = 17;              // full-size snake (game segD ≈ 36)
+    const SPACING = 30;            // trail distance between centres
+    const PERCH_OFF = 40;          // border distance outside the text
+    const RC = 34;                 // corner radius — snakes soften it
+    const CURVE_AMP = 5;           // resting S-curve, px lateral
+    const INTRUDE_V = 95;          // px/s crossing speed
+    const WEAVE = 60, TURNS = 2.5; // the wander: weaves across text
+    const WRIG_MIN = 9, WRIG_MAX = 22, WRIG_SECS = 1.3, WRIG_AMP = 3.2;
+    const INT_MIN = 60, INT_MAX = 150;         // s between intrusions
+    const BLINK_MIN = 2.6, BLINK_MAX = 7, BLINK_SECS = 0.26;
+    const SWAY_AMP = 1.1;          // breathing, px
+    const DEMO = new URLSearchParams(location.search).get('demo') === '1';
+
+    const qs = new URLSearchParams(location.search);
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    const rng = mulberry32(qs.has('seed') ? +qs.get('seed') : (Math.random() * 1e9) | 0);
+    if (qs.get('tables')) {
+      const ts = qs.get('tables').split(',').map(Number)
+        .filter(t => t >= 2 && t <= 12).slice(0, 3);
+      if (ts.length) TABLES.splice(0, TABLES.length, ...ts);
+    }
+    const WMIN = DEMO ? 4 : WRIG_MIN, WMAX = DEMO ? 7 : WRIG_MAX;
+    const IMIN = DEMO ? 12 : INT_MIN, IMAX = DEMO ? 28 : INT_MAX;
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('frame');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      layout();
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    const tableColour = t => 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
+
+    /* ---------- the border ----------
+       Perimeter path around the prose rectangle (inset by PERCH_OFF).
+       pos(s): s in border pixels, clockwise from top-left corner. */
+    let B = null;                    // {x0,y0,x1,y1,per}
+
+    /* the border wraps the VISIBLE window of text — the column's
+       width, the screen's height. A long page scrolls its words
+       beneath the frame; the snakes keep their seats. */
+    function layout() {
+      const r = document.querySelector('.prose').getBoundingClientRect();
+      const x0 = Math.max(r.left - PERCH_OFF, 10);
+      const x1 = Math.min(r.right + PERCH_OFF, W - 10);
+      const y0 = Math.max(r.top - PERCH_OFF, 56);
+      const y1 = Math.min(r.bottom + PERCH_OFF, H - 28);
+      B = {
+        x0, y0, x1, y1, rc: RC,
+        per: 2 * ((x1 - x0 - 2 * RC) + (y1 - y0 - 2 * RC)) + 2 * Math.PI * RC,
+      };
+      makePerchs();
+      snakes.forEach(s => { if (s.state !== 'intrude') perch(s); });
+    }
+    window.addEventListener('scroll', layout, { passive: true });
+
+    /* rounded-rectangle perimeter: four sides, four quarter arcs —
+       the border's corners are already smooth for the draping */
+    function borderPos(s) {
+      s = ((s % B.per) + B.per) % B.per;
+      const R = B.rc, w = B.x1 - B.x0 - 2 * R, h = B.y1 - B.y0 - 2 * R;
+      const A = Math.PI / 2 * R;
+      if (s < w) return { x: B.x0 + R + s, y: B.y0, tx: 1, ty: 0 }; s -= w;
+      if (s < A) { const a = s / R; return {
+        x: B.x1 - R + Math.sin(a) * R, y: B.y0 + R - Math.cos(a) * R,
+        tx: Math.cos(a), ty: Math.sin(a) }; } s -= A;
+      if (s < h) return { x: B.x1, y: B.y0 + R + s, tx: 0, ty: 1 }; s -= h;
+      if (s < A) { const a = s / R; return {
+        x: B.x1 - R + Math.cos(a) * R, y: B.y1 - R + Math.sin(a) * R,
+        tx: -Math.sin(a), ty: Math.cos(a) }; } s -= A;
+      if (s < w) return { x: B.x1 - R - s, y: B.y1, tx: -1, ty: 0 }; s -= w;
+      if (s < A) { const a = s / R; return {
+        x: B.x0 + R - Math.sin(a) * R, y: B.y1 - R + Math.cos(a) * R,
+        tx: -Math.cos(a), ty: -Math.sin(a) }; } s -= A;
+      if (s < h) return { x: B.x0, y: B.y1 - R - s, tx: 0, ty: -1 }; s -= h;
+      const a = s / R; return {
+        x: B.x0 + R - Math.cos(a) * R, y: B.y0 + R - Math.sin(a) * R,
+        tx: Math.sin(a), ty: -Math.cos(a) };
+    }
+
+    /* ---------- snakes ---------- */
+    // {t, s, dir, hist[], state, path, d, wrig, blink, gaze, nextX}
+    const N_SEG = 12;
+    const snakes = [];
+
+    function newSnake(t, s0, dir) {
+      return {
+        t, s: s0, dir,                 // head rests at border pos s
+        hist: [],                      // breadcrumb trail, head first
+        state: 'rest',
+        path: null, plen: 0, d: 0,     // intrusion route
+        wrigT0: -1,                    // active wriggle window
+        nextWrig: 4000 + rng() * 6000,
+        nextBlink: 2000 + rng() * 4000, blinkT0: -1,
+        gazeT: 0, gazeP: { x: 0, y: 0 },
+        nextIntrude: (IMIN + rng() * (IMAX - IMIN)) * 1000 / 3,
+      };
+    }
+
+    /* fill the resting trail: head at s, body laid back along the
+       border — the drape is just the perimeter behind the head */
+    function perch(sn) {
+      sn.hist = [];
+      for (let i = 0; i <= N_SEG * SPACING + 4; i += 2) {
+        const p = borderPos(sn.s - sn.dir * i);
+        sn.hist.push({ x: p.x, y: p.y });
+      }
+      sn.state = 'rest';
+    }
+
+    /* ---------- intrusion ---------- */
+    /* Build a route: leave the perch, cross the text on a lazy arc,
+       land on the border, then run along it until the tail is clear —
+       settling only when the whole body is off the words. */
+    function plotIntrude(sn) {
+      /* housemates, not earthworms (Roger, 2026-11-08): a landing
+         must clear a decent stretch of border from BOTH its own
+         perch and the other snake's — no parallel lying-together */
+      const targets = PERCHS.filter(p => {
+        const dOwn = Math.abs(p.s - sn.s) % B.per;
+        if (Math.min(dOwn, B.per - dOwn) < B.per * 0.2) return false;
+        return snakes.every(o => {
+          if (o === sn) return true;
+          const d = Math.abs(o.s - p.s) % B.per;
+          return Math.min(d, B.per - d) > B.per * 0.18;
+        });
+      });
+      if (!targets.length) return;
+      const dst = targets[(rng() * targets.length) | 0];
+      const head = borderPos(sn.s);
+      const land = borderPos(dst.s - dst.dir * (N_SEG * SPACING + 20));
+      /* the wander (Roger, 2026-11-08): not a straight vector — the
+         crossing weaves, several changes of direction on the way
+         over. Chord from perch to landing, then a perpendicular
+         sway that swells mid-crossing and dies at the ends. */
+      const dx = land.x - head.x, dy = land.y - head.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const wamp = WEAVE * (0.7 + rng() * 0.6);
+      const turns = TURNS * (0.8 + rng() * 0.5);
+      const ph = rng() * Math.PI * 2;
+      const pts = [];
+      for (let k = 0; k <= 60; k++) {
+        const u = k / 60;
+        const env = Math.sin(u * Math.PI);           // fade at ends
+        const off = Math.sin(u * Math.PI * turns + ph) * wamp * env;
+        pts.push({
+          x: head.x + dx * u + nx * off,
+          y: head.y + dy * u + ny * off,
+        });
+      }
+      let s = dst.s - dst.dir * (N_SEG * SPACING + 20);  // run the border
+      const stop = dst.s;
+      while (true) {                                   // home stretch
+        pts.push(borderPos(s));
+        s += dst.dir * 3;
+        if (dst.dir > 0 ? s >= stop : s <= stop) break;
+      }
+      pts.push(borderPos(stop));
+      // cumulative lengths
+      let plen = 0;
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++) {
+        plen += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        cum.push(plen);
+      }
+      sn.path = pts; sn.cum = cum; sn.plen = plen; sn.d = 0;
+      sn.dst = dst;
+      sn.state = 'intrude';
+    }
+
+    function pathAt(sn, d) {
+      const { cum, path } = sn;
+      let i = cum.findIndex(c => c > d);
+      if (i < 0) i = cum.length - 1;
+      if (i === 0) return path[0];
+      const k = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+      return {
+        x: path[i - 1].x + (path[i].x - path[i - 1].x) * k,
+        y: path[i - 1].y + (path[i].y - path[i - 1].y) * k,
+      };
+    }
+
+    /* ---------- per-snake life ---------- */
+    function blinkScale(sn, now) {
+      if (sn.blinkT0 < 0) {
+        if (now < sn.nextBlink) return 1;
+        sn.blinkT0 = now;
+      }
+      const k = (now - sn.blinkT0) / 1000 / BLINK_SECS;
+      if (k >= 1) {
+        sn.blinkT0 = -1;
+        sn.nextBlink = now + (BLINK_MIN + rng() * (BLINK_MAX - BLINK_MIN)) * 1000;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.9;
+    }
+
+    function wriggleAmp(sn, i, now) {
+      /* the restless ripple: a wave that travels head-to-tail over
+         WRIG_SECS, lateral to the body, dying at the tail */
+      if (sn.wrigT0 < 0) return 0;
+      const k = (now - sn.wrigT0) / 1000 / WRIG_SECS;
+      if (k >= 1) { sn.wrigT0 = -1; return 0; }
+      return Math.sin(k * Math.PI * 3 - i * 0.55) * WRIG_AMP *
+        Math.sin(k * Math.PI) * (i / N_SEG);
+    }
+
+    function drawSnake(sn, now) {
+      /* the head moves (intrude) or stays put (rest); the body reads
+         the trail behind it — one mechanism for both */
+      if (sn.state === 'intrude') {
+        sn.d += INTRUDE_V / 60 * (0.85 + 0.3 * Math.sin(sn.d * 0.018));
+        const hp = pathAt(sn, Math.min(sn.d, sn.plen));
+        sn.hist.unshift({ x: hp.x, y: hp.y });
+        if (sn.hist.length > N_SEG * SPACING + 40)
+          sn.hist.length = N_SEG * SPACING + 40;
+        if (sn.d >= sn.plen) {
+          sn.s = sn.dst.s; sn.dir = sn.dst.dir;
+          sn.nextIntrude = now + (IMIN + rng() * (IMAX - IMIN)) * 1000;
+          sn.state = 'rest';
+        }
+      } else if (now > sn.nextWrig && sn.wrigT0 < 0) {
+        sn.wrigT0 = now;
+        sn.nextWrig = now + (WMIN + rng() * (WMAX - WMIN)) * 1000;
+      }
+
+      const breathe = Math.sin(now / 1100 + sn.s) * SWAY_AMP;
+      const R = SEG_R;
+      for (let i = N_SEG; i >= 0; i--) {
+        const p = sn.hist[Math.min(i === 0 ? 0 : Math.round(i * SPACING / 2),
+          sn.hist.length - 1)] || sn.hist[0];
+        if (!p) return;
+        /* perpendicular for sway + wriggle */
+        const q = sn.hist[Math.min(Math.round(i * SPACING / 2) + 3,
+          sn.hist.length - 1)] || p;
+        let tx = p.x - q.x, ty = p.y - q.y;
+        const tl = Math.hypot(tx, ty) || 1;
+        tx /= tl; ty /= tl;
+        const nx = -ty, ny = tx;
+        /* the occasional curve (Roger, 2026-11-08): a resting snake
+           is not a ruler — a slow-drifting S lives along the body */
+        const restCurve = Math.sin(i * 0.5 + now / 16000 + sn.s * 0.3)
+          * CURVE_AMP;
+        const off = (i ? breathe * (i / N_SEG) + restCurve : 0)
+          + wriggleAmp(sn, i, now);
+        const x = p.x + nx * off, y = p.y + ny * off;
+
+        if (i === 0) {                       // the head
+          const ahead = sn.hist[0], behind = sn.hist[3] || ahead;
+          const a = Math.atan2(ahead.y - behind.y, ahead.x - behind.x);
+          const g = ctx.createRadialGradient(
+            x - R * 0.33, y - R * 0.33, R * 0.2, x, y, R * 1.15);
+          g.addColorStop(0, 'hsl(' + ((sn.t * 31 + 200) % 360) + ',62%,62%)');
+          g.addColorStop(1, 'hsl(' + ((sn.t * 31 + 200) % 360) + ',56%,30%)');
+          ctx.beginPath(); ctx.arc(x, y, R * 1.15, 0, 7);
+          ctx.fillStyle = g; ctx.fill();
+          ctx.strokeStyle = 'hsl(' + ((sn.t * 31 + 200) % 360) + ',58%,42%)';
+          ctx.lineWidth = 1.4; ctx.stroke();
+          const ex = Math.cos(a), ey = Math.sin(a);
+          const sq = blinkScale(sn, now);
+          const look = Math.sin(now / 2600 + sn.s * 0.7) * 1.6;
+          for (const side of [-1, 1]) {
+            ctx.beginPath();
+            ctx.ellipse(
+              x + ex * R * 0.42 - ey * side * R * 0.38 + ex * look,
+              y + ey * R * 0.42 + ex * side * R * 0.38 + ey * look,
+              R * 0.17, Math.max(R * 0.17 * sq, R * 0.03), a, 0, 7);
+            ctx.fillStyle = '#101418'; ctx.fill();
+          }
+          continue;
+        }
+
+        ctx.beginPath(); ctx.arc(x, y, R, 0, 7);
+        ctx.fillStyle = tableColour(sn.t); ctx.fill();
+        ctx.strokeStyle = 'hsl(' + ((sn.t * 31 + 200) % 360) + ',55%,34%)';
+        ctx.lineWidth = 1; ctx.stroke();
+        ctx.font = '600 ' + R * 0.92 + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(sn.t * i, x, y + 0.5);
+      }
+    }
+
+    /* ---------- the household ---------- */
+    let PERCHS = [];
+    function makePerchs() {
+      if (!B) return;
+      PERCHS = [
+        { s: B.per * 0.10, dir: 1 },
+        { s: B.per * 0.22, dir: 1 },
+        { s: B.per * 0.30, dir: 1 },
+        { s: B.per * 0.60, dir: -1 },
+        { s: B.per * 0.72, dir: -1 },
+        { s: B.per * 0.88, dir: 1 },
+      ];
+    }
+
+    function draw(now) {
+      ctx.clearRect(0, 0, W, H);
+      if (!B) return;
+      const busy = snakes.some(s => s.state === 'intrude');
+      snakes.forEach(sn => {
+        if (sn.state === 'rest' && !busy && now > sn.nextIntrude)
+          plotIntrude(sn);
+        drawSnake(sn, now);
+      });
+    }
+
+    function frame(now) {
+      try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+
+    /* ---------- go ---------- */
+    resize();
+    makePerchs();
+    TABLES.forEach((t, i) => {
+      const p = PERCHS[(i * 2 + (i ? 1 : 0)) % PERCHS.length];
+      const sn = newSnake(t, p.s, p.dir);
+      perch(sn);
+      snakes.push(sn);
+    });
+    draw(performance.now());
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

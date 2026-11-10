@@ -708,3 +708,14 @@ then polish/paint what exists.
 - Commit+push only when Roger asks; he may have uncommitted prose edits —
   always `git status`/`git diff` first and carry his changes along.
 - Commits as `rogereve` with the Devin trailer; push to `main`.
+- **Naming policy (Roger, 2026-11-07)**: names should match the
+  design grammar's nouns and verbs, not implementation shorthand —
+  `drawPile`, `wakeHead`, `travelTo`, `f.look`, `f.rest`, not `heap`,
+  `fid`, `wob`, `f.b`, `f.t0`. Functions = verb phrases; state =
+  grammar nouns; tunables in domain units (segDs, seconds). Lab code
+  especially uses the plainest names — Roger reads it. Apply when a
+  piece graduates to `anim.js`; don't churn renames casually.
+- **Ask before long investigations**: one targeted clarifying question
+  beats a string of guesses — Roger's standing permission.
+  When a description conflicts with the code found, the conflict is
+  the signal: surface it rather than choosing.

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <title>Rest Lab — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+
+  <script src="anim.js?v=15"></script>
+  <script>
+    'use strict';
+
+    /* rest-lab — a clear page for exploring how a RESTING snake should
+       look. One completed snake, mid-screen, at rest. That's all.
+       Whatever "a different way of displaying a dynamic resting snake"
+       turns out to mean gets built here, on this canvas, alone.
+
+       ?t=N    pin a table (2..12, default 5) */
+
+    const qs = new URLSearchParams(location.search);
+
+    /* ---------- tunables ---------- */
+    const SEG_D = 44;        // segment diameter (design-ish px at rest)
+    const BLINK_MIN = 2.4, BLINK_MAX = 6, BLINK_SECS = 0.28;
+    const WAVE_AMP = +qs.get('amp') || 0.45; // ×segD — ?amp= to audition
+    const WAVE_STEP = 0.55;  // rad of phase per segment (smaller = longer wave)
+    const WAVE_HZ = 1.6;     // rad/s the wave travels head → tail
+    const S2_X = 0.72;       // ×W — where snake 2's head sits
+    const S2_Y = -70;        // px up from the bottom edge for the head
+    const S3_X = 0.28;       // ×W — snake 3 shares snake 2's row (S2_Y)
+    const S4_X = 0.5;        // ×W — snake 4, centre of the same row
+    const S5_X = 0.5;        // ×W — snake 5 above the first snake
+    const S5_Y = 0.16;       // ×H
+    const S6_X = 0.72;       // ×W — snake 6 beside 5, half its speed
+    const S7_X = 0.28;       // ×W — snake 7, 5 segments, same total lag
+    const S9_X = 0.88;       // ×W — snake 9: 7's character, gentler
+    const S10_X = 0.88, S10_Y = 0.78; // snake 10: the Find-Tables coil
+    const S11_X = 0.12, S11_Y = 0.78; // snake 11: the den heap, enlarged
+    const PEEK_DUR = 1400, PEEK_MIN = 2600, PEEK_SPAN = 9000;
+    const S8_X = 0.14, S8_Y = 0.30; // ×W/×H — snake 8: a dealt pose end-on
+    const S8_REC = 0.28;     // fraction of body-depth that reads as height
+    const LAG_F = 7;         // frames each segment lags the head by
+    const MASTER_GAIN = 0.008; // ×segD of wave depth per px pulled
+    const AMP_MAX = 1.3;     // deepest the master wave can be pushed
+    const F5_R = 1.1;        // ×segD — how far a fidget wanders
+    const F5_EASE = 5;       // /s — how briskly the head goes
+    const F5_MIN = 0.25, F5_SPAN = 0.8; // s between new fidget aims
+    /* snake 7 sleeps in a shallow curve — resting seats for its four
+       segments, ×segD behind-left of the head */
+    const S7_CURVE = [[-.34, -.15], [-.72, -.44], [-0.97, -.82], [-1.02, -1.24]];
+
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      if (segs.length) layout();
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    const N = 13;
+    const table = Math.min(12, Math.max(2, +qs.get('t') || 5));
+    const hue = (table * 31 + 200) % 360;
+    let nextBlinkAt = 2000 + Math.random() * 2000, blinkT0 = -1;
+
+    function tableColour() { return 'hsl(' + hue + ',60%,45%)'; }
+
+    /* step one (Roger, 2026-11-05): a head with twelve segments in a
+       straight horizontal row behind it, centred on the page — the
+       starting arrangement the collapse effect gets built on */
+    const segs = [];
+    function layout() {
+      const gap = SEG_D * 0.78;
+      const x0 = (W - N * gap) / 2;
+      for (let i = 0; i < N; i++) {
+        segs[i] = {
+          x: x0 + i * gap,
+          y: H / 2,
+          v: i === 0 ? 0 : i * table
+        };
+      }
+    }
+    layout();
+
+    function blinkScale(now) {
+      if (blinkT0 < 0) {
+        if (now < nextBlinkAt) return 1;
+        blinkT0 = now;
+      }
+      const k = (now - blinkT0) / 1000 / BLINK_SECS;
+      if (k >= 1) {
+        blinkT0 = -1;
+        nextBlinkAt = now + (BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN)) * 1000;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+
+    function drawHead(s, now) {
+      const r = SEG_D / 2;
+      const facing = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
+      const g = ctx.createRadialGradient(
+        s.x - r * 0.33, s.y - r * 0.33, r * 0.2, s.x, s.y, r);
+      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
+      ctx.fillStyle = g; ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+      ctx.stroke();
+      const ex = Math.cos(facing), ey = Math.sin(facing);
+      const px = -ey, py = ex;
+      const sq = blinkScale(now);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s.x + ex * r * 0.38 + px * side * r * 0.36,
+          s.y + ey * r * 0.38 + py * side * r * 0.36,
+          r * 0.16, Math.max(r * 0.16 * sq, r * 0.03), facing, 0, 7);
+        ctx.fillStyle = '#101418'; ctx.fill();
+      }
+    }
+
+    /* step two: a second snake rotated 90° — the head faces the
+       viewer, the twelve segments lie directly behind it along the
+       viewing axis (so only the wave makes them show, swaying out at
+       the head's flanks as it passes) */
+    function headFront(s, r, now, lid, pan) {
+      if (lid === undefined) lid = 1;
+      if (!pan) pan = 0;
+      const g = ctx.createRadialGradient(
+        s.x - r * 0.33, s.y - r * 0.33, r * 0.2, s.x, s.y, r);
+      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
+      ctx.fillStyle = g; ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+      ctx.stroke();
+      const sq = blinkScale(now);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s.x + side * r * 0.36 + pan * r * 0.5, s.y - r * 0.08,
+          r * 0.16, Math.max(r * 0.16 * sq * lid, r * 0.03), 0, 0, 7);
+        ctx.fillStyle = '#101418'; ctx.fill();
+      }
+    }
+
+    /* axis: 'x' sways the hidden body out at the head's flanks;
+       'y' bobs it out above and below; 'xy' runs both a quarter-cycle
+       apart so each segment circles behind the head */
+    function drawFacing(now, x0, y0, axis) {
+      const px = [], py = [];
+      for (let i = 0; i < N; i++) {
+        const ph = wave.ph - i * WAVE_STEP;
+        px.push(axis !== 'y' ? x0 + Math.sin(ph) * wave.amp * SEG_D : x0);
+        py.push(axis === 'y' ? y0 + Math.sin(ph) * wave.amp * SEG_D
+          : axis === 'xy' ? y0 + Math.cos(ph) * wave.amp * SEG_D : y0);
+      }
+      for (let i = N - 1; i >= 0; i--) {
+        const r = SEG_D / 2;
+        if (i === 0) { headFront({ x: px[0], y: py[0] }, r, now); continue; }
+        ctx.beginPath(); ctx.arc(px[i], py[i], r, 0, 7);
+        ctx.fillStyle = tableColour(); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+        ctx.stroke();
+        ctx.font = '700 ' + (SEG_D * 0.34) + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(segs[i].v, px[i], py[i]);
+      }
+    }
+
+    /* steps five & six: the wave as an effect, not a clock — each head
+       fidgets on a loose timetable (or is dragged); each segment draws
+       where the head was i·LAG_F frames ago, so head motion ripples
+       down the body and stillness settles the body back behind it.
+       Snake 6 runs the same mechanism at half the ease speed */
+    const fids = [
+      { ax: S5_X, ease: F5_EASE, n: N, lag: LAG_F, r: F5_R, gmin: F5_MIN, gspan: F5_SPAN },
+      { ax: S6_X, ease: F5_EASE / 2, n: N, lag: LAG_F, r: F5_R, gmin: F5_MIN, gspan: F5_SPAN },
+      { ax: S7_X, ease: F5_EASE * 0.025, n: N, lag: LAG_F, r: F5_R * 1.5, gmin: 20, gspan: 20, look: true, lidBase: 0.58 },
+      { ax: S9_X, ease: F5_EASE * 0.02, n: N, lag: LAG_F, r: F5_R * 1.5, gmin: 20, gspan: 20, look: true, lidBase: 0.58, reach: 4, lookEase: 1.2, gazeAmp: 0.2, liftAmp: 1.5 },
+    ].map(o => Object.assign({
+      ay: S5_Y, h: { x: 0, y: 0 }, hist: [], set: false, drag: false,
+      tx: 0, ty: 0, next: 0, phx: 0, phy: 0, awake: 0
+    }, o));
+    cv.addEventListener('pointerdown', e => {
+      for (const f of fids) {
+        const dx = e.clientX - f.h.x, dy = e.clientY - f.h.y;
+        if (dx * dx + dy * dy < (SEG_D * 1.5) * (SEG_D * 1.5)) {
+          f.drag = true;
+          cv.setPointerCapture(e.pointerId);
+          break;
+        }
+      }
+    });
+    cv.addEventListener('pointermove', e => {
+      for (const f of fids) if (f.drag) { f.h.x = e.clientX; f.h.y = e.clientY; }
+    });
+    cv.addEventListener('pointerup', () => fids.forEach(f => f.drag = false));
+    cv.addEventListener('pointercancel', () => fids.forEach(f => f.drag = false));
+
+    function fidTick(f, now, dt) {
+      if (!f.set) { f.h.x = W * f.ax; f.h.y = H * f.ay; f.tx = f.h.x; f.ty = f.h.y; f.set = true; }
+      if (f.drag) return;
+      // look mode — a bored dog: lids half-mast at rest; a sound →
+      // the head perks up smartly, takes one slow glance across, then
+      // sinks lazily back to sleep. Eyes pan with the look
+      if (f.look) {
+        if (!f.b) f.b = { t0: -1 };
+        const RISE = 2.6, HOLD = 12, FALL = 8, TOTAL = RISE + HOLD + FALL;
+        const lb = f.lidBase === undefined ? 0.58 : f.lidBase;
+        if (f.b.t0 >= 0) {
+          const k = (now - f.b.t0) / 1000;
+          if (k >= TOTAL) {
+            f.b.t0 = -1;
+            f.next = now + (f.gmin + Math.random() * f.gspan) * 1000;
+            f.lid = lb; f.pan = 0;
+          } else {
+            let lift = k < RISE ? k / RISE
+              : k < RISE + HOLD ? 1
+              : 1 - (k - RISE - HOLD) / FALL;
+            lift = lift * lift * (3 - 2 * lift);
+            const gazePh = Math.max(0, Math.min((k - RISE) / HOLD, 1));
+            const gaze = Math.sin(gazePh * Math.PI * 2) * lift;
+            f.lid = lb + (1 - lb) * lift;
+            f.pan = gaze * 0.8;
+            const kk = 1 - Math.exp(-dt * (f.lookEase || 2.5));
+            f.h.x += (W * f.ax + gaze * SEG_D * (f.gazeAmp || 0.4) - f.h.x) * kk;
+            f.h.y += (H * f.ay - lift * SEG_D * (f.liftAmp || 0.5) - f.h.y) * kk;
+            return;
+          }
+        } else if (now > f.next) {
+          f.b.t0 = now;
+        } else {
+          f.lid = lb; f.pan = 0;
+        }
+      }
+      // blip mode: idle almost always; occasionally a smooth dart out
+      // at a random angle and back — the trail carries it down the body
+      if (f.blip) {
+        if (!f.b) f.b = { t0: 0, dx: 0, dy: 0, dur: 0 };
+        const b = f.b;
+        if (b.dur) {
+          const k = (now - b.t0) / (b.dur * 1000);
+          if (k >= 1) {
+            b.dur = 0;
+            f.next = now + (f.gmin + Math.random() * f.gspan) * 1000;
+            f.h.x = W * f.ax; f.h.y = H * f.ay;
+          } else {
+            const s = Math.sin(k * Math.PI);
+            f.h.x = W * f.ax + b.dx * s;
+            f.h.y = H * f.ay + b.dy * s;
+          }
+        } else if (now > f.next) {
+          const a = Math.random() * Math.PI * 2;
+          const m = (0.4 + Math.random() * 0.6) * f.r * SEG_D;
+          b.dx = Math.cos(a) * m; b.dy = Math.sin(a) * m;
+          b.t0 = now; b.dur = 0.5 + Math.random() * 0.3;
+        }
+        return;
+      }
+      if (now > f.next) {
+        f.tx = W * f.ax + (Math.random() * 2 - 1) * f.r * SEG_D;
+        f.ty = H * f.ay + (Math.random() * 2 - 1) * f.r * SEG_D;
+        f.next = now + (f.gmin + Math.random() * f.gspan) * 1000;
+      }
+      const k = 1 - Math.exp(-dt * f.ease);
+      f.h.x += (f.tx - f.h.x) * k;
+      f.h.y += (f.ty - f.h.y) * k;
+      // wakefulness: up fast while the head travels, down gently when
+      // it rests — drives the blend between trail and sleeping curve
+      const moved = Math.hypot(f.h.x - f.phx, f.h.y - f.phy);
+      f.phx = f.h.x; f.phy = f.h.y;
+      const at = moved > 0.3 ? 1 : 0;
+      f.awake += (at - f.awake) * (1 - Math.exp(-dt * (at ? 6 : 1.1)));
+    }
+
+    function drawFid(f, now) {
+      if (!f.set) fidTick(f, now, 0);
+      f.hist.unshift({ x: f.h.x, y: f.h.y });
+      if (f.hist.length > f.n * f.lag + 2) f.hist.length = f.n * f.lag + 2;
+      for (let i = f.n - 1; i >= 0; i--) {
+        const p = f.hist[Math.min(i * f.lag, f.hist.length - 1)];
+        // asleep on a curve seat: the head's lagged displacement
+        // lifts segments near the head, decaying sharply to a pinned
+        // tail that never leaves its seat
+        const seat = f.curve && f.curve[i - 1];
+        let w = f.awake;
+        if (seat && f.pin) w = Math.pow((f.n - 1 - i) / (f.n - 1), 1.6);
+        else if (f.reach) w = 1;   // taper alone governs — no wake gate
+        // reach: only the nearest few segments ever move — the deep
+        // body stays tucked behind the head
+        const rw = f.reach && i > 1 ? Math.max(0, 1 - (i - 1) / f.reach) : 1;
+        // reach snakes anchor the deep body at home — head and neck
+        // may sit up, the bulk stays on the ground
+        const bx = seat ? f.h.x + seat[0] * SEG_D
+          : f.reach ? W * f.ax : f.h.x;
+        const by = seat ? f.h.y + seat[1] * SEG_D
+          : f.reach ? H * f.ay : f.h.y;
+        const px = seat || f.reach ? bx + (p.x - bx) * w * rw : p.x;
+        const py = seat || f.reach ? by + (p.y - by) * w * rw : p.y;
+        const r = SEG_D / 2;
+        if (i === 0) { headFront({ x: px, y: py }, r, now, f.lid, f.pan); continue; }
+        ctx.beginPath(); ctx.arc(px, py, r, 0, 7);
+        ctx.fillStyle = tableColour(); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+        ctx.stroke();
+        ctx.font = '700 ' + (SEG_D * 0.34) + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(i * table, px, py);
+      }
+    }
+
+    /* the master wave — snake 1 owns it; 2, 3, 4 read it. Grabbing
+       snake 1 and pulling it out of line deepens the wave everywhere;
+       releasing lets it settle back to WAVE_AMP */
+    const wave = { ph: 0, amp: WAVE_AMP };
+    let mdrag = false, mStartY = 0;
+    cv.addEventListener('pointerdown', e => {
+      if (segs.some(s => Math.hypot(e.clientX - s.x, e.clientY - s.y) < SEG_D)) {
+        mdrag = true;
+        mStartY = e.clientY;
+        cv.setPointerCapture(e.pointerId);
+      }
+    });
+    cv.addEventListener('pointermove', e => {
+      if (mdrag) {
+        wave.amp = Math.min(AMP_MAX,
+          WAVE_AMP + Math.abs(e.clientY - mStartY) * MASTER_GAIN);
+      }
+    });
+    cv.addEventListener('pointerup', () => mdrag = false);
+    cv.addEventListener('pointercancel', () => mdrag = false);
+
+    /* step eight: the remembered original — a real snake-puzzle pose
+       (Anim.pose) looked at end-on. The head faces us; the dealt
+       pose's winding becomes an irregular spread behind it, depth
+       compressed upward. Carries the puzzle's own restless wriggle:
+       a 1.6s sway burst every 7s, perpendicular to the spine */
+    let pose8 = null, pose8err = null;
+    function drawSnake8(now) {
+      if (pose8err) {
+        ctx.fillStyle = '#e0a53a'; ctx.font = '14px monospace';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText('pose8: ' + pose8err, 10, 10);
+        return;
+      }
+      if (!pose8) {
+        if (!window.Anim) {         // anim.js parses after our first paint
+          ctx.fillStyle = '#e0a53a'; ctx.font = '14px monospace';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillText('Anim: ' + typeof window.Anim, 10, 10);
+          return;
+        }
+        let p;
+        try {
+          p = Anim.pose({ board: { x: 0, y: 0, w: W, h: H }, segD: SEG_D, seed: 8 });
+        } catch (e) { pose8err = e.message || String(e); return; }
+        const sq = Math.min(W, H);
+        const fx = p.rail[0].x - p.rail[1].x, fy = p.rail[0].y - p.rail[1].y;
+        const fl = Math.hypot(fx, fy) || 1;
+        pose8 = p.rail.map(pt => {
+          const rx = (pt.x - p.rail[0].x) * sq, ry = (pt.y - p.rail[0].y) * sq;
+          return { side: (rx * -fy + ry * fx) / fl, deep: (rx * fx + ry * fy) / fl };
+        });
+      }
+      const x0 = W * S8_X, y0 = H * S8_Y;
+      const c = (now / 1000) % 7;
+      const env = c < 1.6 ? Math.sin(c / 1.6 * Math.PI) : 0;
+      for (let i = pose8.length - 1; i >= 0; i--) {
+        const p = pose8[i];
+        const wob = env * Math.sin(now / 1000 * 9 - i * 0.9) * 0.14 * SEG_D;
+        const px = x0 + p.side + wob, py = y0 - p.deep * S8_REC;
+        const r = SEG_D / 2;
+        if (i === 0) { headFront({ x: px, y: py }, r, now); continue; }
+        ctx.beginPath(); ctx.arc(px, py, r, 0, 7);
+        ctx.fillStyle = tableColour(); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+        ctx.stroke();
+        ctx.font = '700 ' + (SEG_D * 0.34) + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(i * table, px, py);
+      }
+    }
+
+    /* step ten: the Find-Tables held coil — the found snake wound into
+       a tight spiral at its spot, head resting on the rim, blinking */
+    let coil10 = null;
+    function drawSnake10(now) {
+      if (!coil10) {
+        const sp = 0.8 * SEG_D, pitch = 1.05 * SEG_D;
+        let r = 2.2 * SEG_D, th = Math.PI * 0.5;
+        coil10 = [];
+        for (let i = 0; i < N; i++) {
+          coil10.push({ dx: Math.cos(th) * r, dy: Math.sin(th) * r });
+          const dth = sp / r;
+          th += dth;
+          r -= pitch * dth / (2 * Math.PI);
+        }
+      }
+      const x0 = W * S10_X, y0 = H * S10_Y;
+      for (let i = coil10.length - 1; i >= 0; i--) {
+        const px = x0 + coil10[i].dx, py = y0 + coil10[i].dy;
+        const r = SEG_D / 2;
+        if (i === 0) { headFront({ x: px, y: py }, r, now); continue; }
+        ctx.beginPath(); ctx.arc(px, py, r, 0, 7);
+        ctx.fillStyle = tableColour(); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+        ctx.stroke();
+        ctx.font = '700 ' + (SEG_D * 0.34) + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(i * table, px, py);
+      }
+    }
+
+    /* step eleven: the den heap itself, enlarged — nav.js heap()
+       ported to SEG_D scale so its life can be judged. Head out front,
+       the twelve buried in a low mound behind, each keeping a loose
+       timetable for bobbing half out (never more than two at once) */
+    function drawSnake11(now) {
+      const sx = W * S11_X, sy = H * S11_Y;
+      const sc = SEG_D / 15;                // den draws ~15px heads
+      const breathe = Math.sin(now / 900) * 1.2 * sc;
+      // Roger, 2026-11-07: the peek-bobs read as darting balls, not
+      // pile — out for now; mound, sway, pupils, blink remain
+      // the mound bulk
+      ctx.beginPath();
+      ctx.ellipse(sx, sy - 8 * sc + breathe * 0.5, 13 * sc, 7.5 * sc, 0, 0, 7);
+      ctx.fillStyle = 'hsl(' + hue + ',50%,32%)'; ctx.fill();
+      ctx.strokeStyle = 'hsl(' + hue + ',55%,36%)';
+      ctx.lineWidth = 1; ctx.stroke();
+      [[-8, -13], [1, -15], [9, -12]].forEach(([dx, dy]) => {
+        ctx.beginPath();
+        ctx.arc(sx + dx * sc, sy + dy * sc + breathe * 0.7, 5 * sc, 0, 7);
+        ctx.fillStyle = 'hsl(' + hue + ',52%,36%)'; ctx.fill();
+      });
+      // the head out front — sway, wandering pupils, blink
+      const hx = sx + Math.sin(now / 1400) * 1.8 * sc;
+      const hy = sy - 15 * sc + breathe;
+      const g = ctx.createRadialGradient(
+        hx - 3 * sc, hy - 3 * sc, 2 * sc, hx, hy, 8.5 * sc);
+      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+      ctx.beginPath(); ctx.arc(hx, hy, 8.5 * sc, 0, 7);
+      ctx.fillStyle = g; ctx.fill();
+      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+      ctx.lineWidth = 1.5; ctx.stroke();
+      const look = Math.sin(now / 3100) * 2.2 * sc;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(hx + side * 3 * sc + look, hy - 0.5 * sc,
+          1.4 * sc, Math.max(1.4 * sc * blinkScale(now), 0.4), 0, 0, 7);
+        ctx.fillStyle = '#101418'; ctx.fill();
+      }
+    }
+
+    function draw(now) {
+      ctx.fillStyle = '#101418';
+      ctx.fillRect(0, 0, W, H);
+      // a shallow sine wave travelling down the body — draw-time only,
+      // so it costs the layout nothing
+      const wy = segs.map((s, i) =>
+        s.y + Math.sin(wave.ph - i * WAVE_STEP)
+          * wave.amp * SEG_D);
+      ctx.beginPath();
+      segs.forEach((s, i) =>
+        i ? ctx.lineTo(s.x, wy[i]) : ctx.moveTo(s.x, wy[i]));
+      ctx.strokeStyle = 'rgba(90,110,130,.25)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      for (let i = N - 1; i >= 0; i--) {
+        const s = segs[i];
+        if (i === 0) { drawHead({ x: s.x, y: wy[0] }, now); continue; }
+        ctx.beginPath(); ctx.arc(s.x, wy[i], SEG_D / 2, 0, 7);
+        ctx.fillStyle = tableColour(); ctx.fill();
+        ctx.font = '700 ' + (SEG_D * 0.34) + 'px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(s.v, s.x, wy[i]);
+      }
+      drawFacing(now, W * S3_X, H + S2_Y, 'y');
+      drawFacing(now, W * S4_X, H + S2_Y, 'xy');
+      drawFacing(now, W * S2_X, H + S2_Y, 'x');
+      fids.forEach(f => drawFid(f, now));
+      drawSnake8(now);
+      drawSnake10(now);
+      drawSnake11(now);
+    }
+
+    let lastT = 0;
+    function frame(now) {
+      const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now;
+      wave.ph += WAVE_HZ * dt;
+      if (!mdrag) wave.amp += (WAVE_AMP - wave.amp) * (1 - Math.exp(-dt * 1.4));
+      fids.forEach(f => fidTick(f, now, dt));
+      try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+
+    resize();
+    draw(performance.now());
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

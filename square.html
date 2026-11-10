@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>The Square — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #doneBar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+      display: flex;
+      justify-content: center;
+      z-index: 12;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease;
+    }
+
+    #doneBar.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #doneBar button {
+      font-size: 17px;
+      font-family: inherit;
+      padding: 12px 28px;
+      border-radius: 12px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+  <canvas id="c"></canvas>
+  <div id="doneBar"><button id="home">Back to the games</button></div>
+
+  <script>
+    'use strict';
+    /* ---------- the hundred square ----------
+       Where completed snakes bring their tables. Every third
+       completion the gathered trio marches here (nav.js sends them);
+       each snake deposits its twelve multiples in turn — a segment's
+       numeral flies home to its cell — then the heads slip away and
+       the square keeps the mark.
+
+       Cell language (Roger): a deposit deepens its table's colour by
+       a fifth — five deposits = full brightness. A cell claimed by
+       two tables splits into wedges, Honeycomb-crossover style.
+       Session-scoped (sessionStorage): this visit's memory only —
+       persistence is the separate door, decided later. */
+
+    /* ---------- tunables ---------- */
+    const DEPOSIT_STEP = 0.2;   // brightness gained per deposit (max 1)
+    const MAX_DEPOSITS = 5;     // a cell saturates after five of a kind
+    const SNAKE_SPEED = 240;    // design-px/s — the march is brisk
+    const TURN_RATE = 5.5;
+    const TURN_RESPOND = 7;
+    const SEG_GAP = 26;
+    const HEAD_R = 15;
+    const SEG_R = 11;
+    const ARRIVE_DIST = 20;   // snake "reaches" a point this close
+    const FLY_MS = 550;       // numeral fly-home duration
+    const FLY_GAP = 150;      // ms between a snake's deposits
+    const SNAKE_GAP = 700;    // ms between snakes starting their deposit
+    const DWELL = 0.9;        // s the last snake lingers before leaving
+    /* steering the deposit (Roger, 2026-11-04): the child may drag-
+       steer the depositing snake — the numeral drops only when the
+       head passes over ITS cell, so guiding it home is the game.
+       Participation is invited, never gated: after AUTO_AFTER_SECS
+       idle the snake finds the cell itself, and any drag retakes. */
+    const AUTO_AFTER_SECS = 6;
+    const TOUCH_FULL = 120;   // drag distance giving full drive
+    const IDLE_DRIVE = 0.1;   // drift while waiting for a steer
+
+    const DEN_KEY = 'nf-den';
+    const SQ_KEY = 'nf-square';
+    const hue = t => (t * 31 + 200) % 360;
+
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    function resize() {
+      const vv = window.visualViewport;
+      const w = vv ? vv.width : innerWidth, h = vv ? vv.height : innerHeight;
+      if (w < 50 || h < 50) return;
+      DPR = Math.min(devicePixelRatio || 1, 3);
+      W = w; H = h;
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    addEventListener('resize', resize);
+    if (window.visualViewport) visualViewport.addEventListener('resize', resize);
+    resize();
+
+    /* the grid: 10×10, row-major 1..100, centred with a margin */
+    let GX = 0, GY = 0, CELL = 0;
+    function layout() {
+      const m = 70;
+      CELL = Math.min((W - 2 * m) / 10, (H - 2 * m) / 10);
+      GX = (W - CELL * 10) / 2;
+      GY = (H - CELL * 10) / 2;
+    }
+    const cellOf = v => {
+      const i = v - 1;
+      return {
+        x: GX + (i % 10) * CELL,
+        y: GY + Math.floor(i / 10) * CELL,
+        c: { x: GX + (i % 10) * CELL + CELL / 2, y: GY + Math.floor(i / 10) * CELL + CELL / 2 }
+      };
+    };
+    layout();
+    addEventListener('resize', layout);
+
+    /* ---------- the record ---------- */
+    const loadSq = () => {
+      try { return JSON.parse(sessionStorage.getItem(SQ_KEY) || '{}'); }
+      catch (e) { return {}; }
+    };
+    const saveSq = r => sessionStorage.setItem(SQ_KEY, JSON.stringify(r));
+    let square = loadSq();              // {"24": {"7":2,"3":1}}
+
+    const roster = () => {
+      try { return JSON.parse(sessionStorage.getItem(DEN_KEY) || '[]'); }
+      catch (e) { return []; }
+    };
+
+    /* ---------- snakes: three march in from the left ---------- */
+    /* each: {t, x, y, heading, trail, segs[], stage, qi, left} — the
+       trail model again: head writes, body reads SEG_GAP behind */
+    const snakes = roster().map((s, i) => ({
+      t: s.t,
+      x: -60 - i * 120, y: GY - 40,
+      heading: 0, trail: [],
+      segs: Array.from({ length: 12 }, (_, k) => ({ v: s.t * (k + 1), gone: false })),
+      stage: 'enter', qi: 0, depT: 0, left: false
+    }));
+    let flies = [];      // {v, t, x0,y0, x1,y1, t0}
+    let snakesDone = 0, doneAt = 0;
+    let steer = null;    // {hx, hy, mag} drag-steer vector while held
+    let lastSteerT = 0;  // last steering input — arms the autopilot
+    const doneBar = document.getElementById('doneBar');
+    let phase = snakes.length ? 'march' : 'idle';
+
+    function deposit(n, t) {
+      const cell = square[n] || (square[n] = {});
+      cell[t] = Math.min((cell[t] || 0) + DEPOSIT_STEP, 1);
+      saveSq(square);
+    }
+
+    function step(dt, now) {
+      snakes.forEach((s, si) => {
+        let target = null, speed = SNAKE_SPEED;
+        if (s.stage === 'enter') {
+          target = { x: GX - 70 - si * 50, y: GY + CELL * 10 / 2 };
+          if (Math.hypot(target.x - s.x, target.y - s.y) < ARRIVE_DIST) {
+            s.stage = 'wait';
+            s.depT = now + si * (12 * FLY_GAP + SNAKE_GAP);
+          }
+        } else if (s.stage === 'wait') {
+          if (now > s.depT && si <= snakesDone) s.stage = 'deposit';
+        } else if (s.stage === 'deposit') {
+          const seg = s.segs.find(g => !g.gone);
+          if (!seg) { s.stage = 'rest'; snakesDone++; s.depT = now + SNAKE_GAP; }
+          else {
+            const cl = cellOf(seg.v);
+            /* steering: a live drag sets heading+drive; else after
+               AUTO_AFTER_SECS the snake finds the cell itself;
+               else a gentle idle drift — the choice is the child's */
+            let drive = IDLE_DRIVE;
+            if (steer) {
+              target = null;
+              const th = Math.atan2(steer.hy, steer.hx);
+              let dd = th - s.heading;
+              while (dd > Math.PI) dd -= 2 * Math.PI; while (dd < -Math.PI) dd += 2 * Math.PI;
+              const amt = dd * Math.min(1, TURN_RESPOND * dt);
+              s.heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, amt));
+              drive = steer.mag;
+            } else if (now - lastSteerT > AUTO_AFTER_SECS * 1000) {
+              target = cl.c;
+              drive = Math.max(0.3, Math.min(1, Math.hypot(cl.c.x - s.x, cl.c.y - s.y) / 120));
+            }
+            // the numeral drops only when the head reaches ITS cell —
+            // steer it home yourself or watch it find the way
+            if (s.x > cl.x && s.x < cl.x + CELL && s.y > cl.y && s.y < cl.y + CELL) {
+              const sg = segPos(s, s.segs.indexOf(seg));
+              flies.push({ v: seg.v, t: s.t, x0: sg.x, y0: sg.y, x1: cl.c.x, y1: cl.c.y, t0: now });
+              seg.gone = true;
+              s.qi++;
+              target = null;
+            }
+          }
+        } else if (s.stage === 'rest') {
+          if (snakesDone >= snakes.length && now > s.depT + DWELL * 1000)
+            s.stage = 'leave';
+        } else if (s.stage === 'leave') {
+          target = { x: W + 80, y: s.y };
+          if (s.x > W + 60) s.left = true;
+        }
+        if (target) {
+          const d = Math.atan2(target.y - s.y, target.x - s.x) - s.heading;
+          let dd = d; while (dd > Math.PI) dd -= 2 * Math.PI; while (dd < -Math.PI) dd += 2 * Math.PI;
+          const amt = dd * Math.min(1, TURN_RESPOND * dt);
+          s.heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, amt));
+          const drive = Math.max(0.35, Math.min(1, Math.hypot(target.x - s.x, target.y - s.y) / 140));
+          s.x += Math.cos(s.heading) * speed * drive * dt;
+          s.y += Math.sin(s.heading) * speed * drive * dt;
+        } else if (s.stage === 'deposit' && steer) {
+          s.x += Math.cos(s.heading) * speed * steer.mag * dt;
+          s.y += Math.sin(s.heading) * speed * steer.mag * dt;
+        }
+        // trail → segs positions (12 fixed slots; gone ones stop drawing)
+        const t0 = s.trail[0];
+        if (!t0 || Math.hypot(s.x - t0.x, s.y - t0.y) > 1)
+          s.trail.unshift({ x: s.x, y: s.y });
+        let a = s, ti = 0, back = 0;
+        s.pos = s.segs.map((g, k) => {
+          const want = (k + 1) * SEG_GAP;
+          while (ti < s.trail.length) {
+            const b = s.trail[ti];
+            const d = Math.hypot(b.x - a.x, b.y - a.y);
+            if (back + d >= want) {
+              const f = (want - back) / (d || 1);
+              return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+            }
+            back += d; a = b; ti++;
+          }
+          return { x: a.x - Math.cos(s.heading) * want, y: a.y - Math.sin(s.heading) * want };
+        });
+        if (s.trail.length > ti + 60) s.trail.length = ti + 60;
+      });
+      // a numeral lands → the cell keeps its mark (the deposit is
+      // the landing, not the launch — the flight is the carrying)
+      flies = flies.filter(f => {
+        if (now >= f.t0 + FLY_MS) {
+          if (!f.landed) { f.landed = true; deposit(f.v, f.t); }
+          return false;
+        }
+        return true;
+      });
+      if (phase === 'march' && snakes.length &&
+        snakes.every(s => s.left)) {
+        phase = 'idle';
+        doneAt = now;
+        sessionStorage.setItem(DEN_KEY, '[]');   // the trio has spent itself
+        setTimeout(() => doneBar.classList.add('show'), 1200);
+      }
+      if (!snakes.length) setTimeout(() => doneBar.classList.add('show'), 800);
+    }
+    function segPos(s, i) { return (s.pos && s.pos[i]) || { x: s.x, y: s.y }; }
+
+    /* ---------- draw ---------- */
+    function draw(now) {
+      ctx.clearRect(0, 0, W, H);
+
+      // cells: border grid, deposits as fifth-strength colour fills,
+      // two tables sharing a cell split into wedges (the crossover
+      // vocabulary — same code, same meaning)
+      for (let v = 1; v <= 100; v++) {
+        const { x, y, c } = cellOf(v);
+        const claim = square[v] || {};
+        const tabs = Object.keys(claim);
+        if (tabs.length === 1) {
+          ctx.fillStyle = 'hsla(' + hue(+tabs[0]) + ',60%,45%,' + claim[tabs[0]] + ')';
+          ctx.fillRect(x, y, CELL, CELL);
+        } else if (tabs.length === 2) {
+          tabs.forEach((t, i) => {
+            ctx.save();
+            ctx.beginPath(); ctx.rect(x, y, CELL, CELL); ctx.clip();
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.arc(c.x, c.y, CELL, i * Math.PI - Math.PI / 2, i * Math.PI + Math.PI / 2);
+            ctx.fillStyle = 'hsla(' + hue(+t) + ',60%,45%,' + claim[t] + ')';
+            ctx.fill();
+            ctx.restore();
+          });
+        } else if (tabs.length) {
+          tabs.forEach((t, i) => {
+            const a0 = -Math.PI / 2 + i * Math.PI * 2 / tabs.length;
+            ctx.save();
+            ctx.beginPath(); ctx.rect(x, y, CELL, CELL); ctx.clip();
+            ctx.beginPath(); ctx.moveTo(c.x, c.y);
+            ctx.arc(c.x, c.y, CELL, a0, a0 + Math.PI * 2 / tabs.length);
+            ctx.fillStyle = 'hsla(' + hue(+t) + ',60%,45%,' + claim[t] + ')';
+            ctx.fill();
+            ctx.restore();
+          });
+        }
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, CELL, CELL);
+        ctx.fillStyle = tabs.length ? '#cfd8e0' : 'rgba(138,151,163,0.5)';
+        ctx.font = '11px Andika, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(v, c.x, c.y);
+      }
+
+      // snakes: body then head, table-hued
+      snakes.forEach(s => {
+        if (s.left) return;
+        for (let i = s.segs.length - 1; i >= 0; i--) {
+          if (s.segs[i].gone) continue;
+          const p = s.pos ? s.pos[i] : s;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, SEG_R, 0, 7);
+          ctx.fillStyle = 'hsl(' + hue(s.t) + ',60%,45%)';
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 10px Andika, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(s.segs[i].v, p.x, p.y + 0.5);
+        }
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, HEAD_R, 0, 7);
+        const g = ctx.createRadialGradient(s.x - 5, s.y - 5, 3, s.x, s.y, HEAD_R);
+        g.addColorStop(0, 'hsl(' + hue(s.t) + ',62%,64%)');
+        g.addColorStop(1, 'hsl(' + hue(s.t) + ',56%,28%)');
+        ctx.fillStyle = g; ctx.fill();
+        const ex = Math.cos(s.heading), ey = Math.sin(s.heading);
+        [[-1], [1]].forEach(([sgn]) => {
+          ctx.beginPath();
+          ctx.ellipse(s.x + ex * HEAD_R * 0.4 - ey * sgn * HEAD_R * 0.34,
+            s.y + ey * HEAD_R * 0.4 + ex * sgn * HEAD_R * 0.34,
+            HEAD_R * 0.15, HEAD_R * 0.15, 0, 0, 7);
+          ctx.fillStyle = '#101418'; ctx.fill();
+        });
+      });
+
+      // flying numerals home — eased arc, table-hued disc
+      flies.forEach(f => {
+        const k = Math.min(1, (now - f.t0) / FLY_MS);
+        const e = 1 - (1 - k) * (1 - k);
+        const x = f.x0 + (f.x1 - f.x0) * e;
+        const y = f.y0 + (f.y1 - f.y0) * e - Math.sin(k * Math.PI) * 24;
+        ctx.beginPath();
+        ctx.arc(x, y, SEG_R, 0, 7);
+        ctx.fillStyle = 'hsl(' + hue(f.t) + ',60%,45%)';
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(f.v, x, y + 0.5);
+      });
+    }
+
+    let lastT = performance.now();
+    function frame(now) {
+      const dt = Math.min((now - lastT) / 1000, 0.05);
+      lastT = now;
+      step(dt, now);
+      try { draw(now); } catch (e) { }
+      requestAnimationFrame(frame);
+    }
+    document.getElementById('home').addEventListener('click', () => {
+      location.href = 'index.html';
+    });
+
+    /* drag-steer: drag direction is the heading, drag distance the
+       drive — the tilt-snake contract. Any touch retakes the wheel;
+       releasing hands it back to the autopilot after a beat */
+    let drag0 = null;
+    cv.addEventListener('pointerdown', e => {
+      drag0 = { x: e.clientX, y: e.clientY };
+      steer = { hx: 1, hy: 0, mag: 0 };
+      lastSteerT = performance.now();
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!drag0) return;
+      const dx = e.clientX - drag0.x, dy = e.clientY - drag0.y;
+      const m = Math.hypot(dx, dy);
+      if (m > 4) {
+        steer = { hx: dx / m, hy: dy / m, mag: Math.min(1, m / TOUCH_FULL) };
+        lastSteerT = performance.now();
+      }
+    });
+    const dragEnd = () => {
+      drag0 = null; steer = null;
+      lastSteerT = performance.now();
+    };
+    addEventListener('pointerup', dragEnd);
+    addEventListener('pointercancel', dragEnd);
+    cv.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

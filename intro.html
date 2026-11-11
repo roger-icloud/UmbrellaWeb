@@ -23,7 +23,8 @@
     #frame {
       position: fixed;
       inset: 0;
-      z-index: 4;
+      z-index: 0;                 /* behind the prose: a snake may
+        pass under words but never over them (Roger, 2026-11-11) */
       pointer-events: none;
     }
 
@@ -81,16 +82,38 @@
   <article class="prose">
     <!-- ROGERS TEXT begins — the introduction lives between these
          markers; the snakes only frame it, they never touch it -->
-    <h1>Introduction</h1>
-    <p>Phones and tablets are great for talking, texting, and playing games, 
-      <br>They can also be used for <em><b>learning</b></em>.
-    <br>Learning and fun are not mutually exclusive. 
-  <br>I'd like to use these pages to explore both.</p>
+    <h1>Intro</h1>
+    <p> Tablets and Phones are great for <em><b>learning</b></em> not just talking, texting, and playing games. 
+  <br>I'd like to use these pages to deliver learning and fun. These pages are new and under development which is where you come in.....</p>
 
     <details>
       <summary>I need your HELP</summary>
       <p>My ideas are just that.  You and I can work together to make them better.</p>
       <p>Feedback is the only way that I am able to tighten up this site and make it really useful.</p>
+    </details> 
+    <details>      
+    <summary>Why this app?</summary>
+      <p>Using fingers brings the learning closer than a mouse or keyboard.</p>
+      <p>Using a hand held device brings the learning closer to you.</p>
+    </details>    
+    <details>      
+    <summary>...and not to forget the 'how'</summary>
+      <p>Adopting common interface gestures makes the app more accessible and intuitive.</p>
+    <p>Rote learning is important and best delivered with personal encouragement. 
+      I think a broader understanding of the concepts is a natural pairing.</p></details>    
+    <details>
+      <summary>Not included</summary>
+      <p>No ticks or crosses, red or green — learning is through guidance not negativity.</p>
+      <p>No league tables or rankings.</p>
+      <p>No gold coins, rosettes, or other trophies to collect.</p>
+      <p>No optional purchases</p>
+      <p>No advertising</p>
+      <p>No tracking</p>
+      <p>No data collection</p>
+      <p>No social media integration</p>
+      <p>No external links</p>
+      <p>There will be the opportunity to share progress with family and friends. 
+        So that the app remembers where you're at. Always optional and plenty of advance notice before it arrives.</p>
     </details>
 
     <!-- ROGERS TEXT ends -->
@@ -99,33 +122,41 @@
   <script>
     'use strict';
 
-    /* intro frame (Roger, 2026-11-08): a page for grown-up words with
-       the family at home around it. Two table-snakes drape on the
-       prose column's border — blinking, watching, breathing, and now
-       and then giving a lazy wriggle. Very occasionally one intrudes:
-       it slides across the text itself and settles on a new perch.
+    /* intro frame: a page for grown-up words with the family at home
+       around it. Two table-snakes live ON the prose column's border —
+       blinking, watching, breathing, giving a lazy wriggle, and now
+       and then cruising the frame to a new seat. The words are never
+       crossed; the frame is the whole of their world.
 
-       A perch is just a border position the head stops at; the body
+       A seat is just a border position the head stops at; the body
        trails along the perimeter behind, so corner-drapes are free.
        The trail model does the moving: the head writes breadcrumbs,
        the body reads back SPACING behind — same slither as ever.
+       When the prose reflows (an accordion opens, the window
+       changes) the frame refits and the snakes ride it, eased.
 
        ?demo=1     restless clocks for auditioning (wriggle ~5s,
-                   intrude ~15-30s instead of ~90s)
-       ?tables=3,7 which snakes are home
+                   wander ~10s instead of ~45s)
+       ?tables=3,9 which snakes are home
        ?seed=N     deterministic timers/placements */
 
     /* ---------- tunables ---------- */
-    const TABLES = [3, 7];         // the household
+    const TABLES = [3, 9];         // the household — 9× wears the green
     const SEG_R = 17;              // full-size snake (game segD ≈ 36)
     const SPACING = 30;            // trail distance between centres
     const PERCH_OFF = 40;          // border distance outside the text
     const RC = 34;                 // corner radius — snakes soften it
     const CURVE_AMP = 5;           // resting S-curve, px lateral
-    const INTRUDE_V = 95;          // px/s crossing speed
-    const WEAVE = 60, TURNS = 2.5; // the wander: weaves across text
+    const CRUISE_V = 90;           // border cruising speed, px/s
+    const TRAVEL_SWAY = 3;         // slither undulation while moving
+    const WAND_AMP = 16;           // route weave — she makes a lane
+    const BRATE = 64;              // braid advance, px/s
+    const CHASE_GAP = 60;          // nose-to-tail chase spacing, px
+    const DUET_MIN = 300, DUET_MAX = 540;  // s between duets
+    const SEAT_IN = 55;            // corner seats sit this far past the arc
+    const MORPH_MS = 650;          // ease when the frame refits
+    const TRAV_MIN = 25, TRAV_MAX = 70;    // s between wanderings
     const WRIG_MIN = 9, WRIG_MAX = 22, WRIG_SECS = 1.3, WRIG_AMP = 3.2;
-    const INT_MIN = 60, INT_MAX = 150;         // s between intrusions
     const BLINK_MIN = 2.6, BLINK_MAX = 7, BLINK_SECS = 0.26;
     const SWAY_AMP = 1.1;          // breathing, px
     const DEMO = new URLSearchParams(location.search).get('demo') === '1';
@@ -146,7 +177,8 @@
       if (ts.length) TABLES.splice(0, TABLES.length, ...ts);
     }
     const WMIN = DEMO ? 4 : WRIG_MIN, WMAX = DEMO ? 7 : WRIG_MAX;
-    const IMIN = DEMO ? 12 : INT_MIN, IMAX = DEMO ? 28 : INT_MAX;
+    const TMIN = DEMO ? 6 : TRAV_MIN, TMAX = DEMO ? 14 : TRAV_MAX;
+    const DMIN = DEMO ? 30 : DUET_MIN, DMAX = DEMO ? 55 : DUET_MAX;
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('frame');
@@ -175,21 +207,61 @@
 
     /* the border wraps the VISIBLE window of text — the column's
        width, the screen's height. A long page scrolls its words
-       beneath the frame; the snakes keep their seats. */
+       beneath the frame; the snakes keep their seats. Open
+       accordions grow the article, the frame refits, and the
+       snakes ride the change rather than jumping it. */
     function layout() {
       const r = document.querySelector('.prose').getBoundingClientRect();
-      const x0 = Math.max(r.left - PERCH_OFF, 10);
-      const x1 = Math.min(r.right + PERCH_OFF, W - 10);
-      const y0 = Math.max(r.top - PERCH_OFF, 56);
-      const y1 = Math.min(r.bottom + PERCH_OFF, H - 28);
-      B = {
-        x0, y0, x1, y1, rc: RC,
-        per: 2 * ((x1 - x0 - 2 * RC) + (y1 - y0 - 2 * RC)) + 2 * Math.PI * RC,
+      const nb = {
+        x0: Math.max(r.left - PERCH_OFF, 10),
+        x1: Math.min(r.right + PERCH_OFF, W - 10),
+        y0: Math.max(r.top - PERCH_OFF, 56),
+        y1: Math.min(r.bottom + PERCH_OFF, H - 28),
+        rc: RC,
       };
-      makePerchs();
-      snakes.forEach(s => { if (s.state !== 'intrude') perch(s); });
+      nb.per = 2 * ((nb.x1 - nb.x0 - 2 * RC) + (nb.y1 - nb.y0 - 2 * RC))
+        + 2 * Math.PI * RC;
+      if (!B) { B = nb; makeSeats(); snakes.forEach(perch); return; }
+      if (Math.abs(nb.x0 - B.x0) + Math.abs(nb.y0 - B.y0)
+        + Math.abs(nb.x1 - B.x1) + Math.abs(nb.y1 - B.y1) < 0.5) return;
+      /* refit: the snake moves as ONE piece. Its seat re-anchors at
+         the same fraction along the same segment (fraction, not
+         arc-length — a taller frame stretches segments), then the
+         whole trail translates by the head's shift. Old pixels stay
+         behind as ox/oy; the render eases between the two over
+         MORPH_MS. Reseating each crumb independently split draped
+         snakes at the moved corner — the translate keeps the body
+         intact. */
+      const ob = B; B = nb; makeSeats();
+      const t0 = performance.now();
+      for (const sn of snakes) {
+        const hs = segAt(ob, sn.s), ol = segLens(ob)[hs.i];
+        sn.s = segStart(B, hs.i)
+          + hs.k / (ol || 1) * segLens(B)[hs.i];
+        const np = borderPos(sn.s);
+        const hp = sn.hist[0] || np;
+        const dx = np.x - hp.x, dy = np.y - hp.y;
+        for (const c of sn.hist) {
+          c.ox = c.x; c.oy = c.y;
+          c.x += dx; c.y += dy;
+        }
+        sn.morphT0 = t0;
+        if (sn.state === 'travel') {
+          sn.target = (SEATS[sn.seat] || SEATS[0]).s;
+          const fwd = ((sn.target - sn.s) % B.per + B.per) % B.per;
+          sn.togo = sn.tdir > 0 ? fwd : B.per - fwd;
+        }
+      }
+      if (duet && duet.s0 !== undefined) {
+        const hs = segAt(ob, duet.s0), ol = segLens(ob)[hs.i];
+        duet.s0 = segStart(B, hs.i)
+          + hs.k / (ol || 1) * segLens(B)[hs.i];
+      }
     }
     window.addEventListener('scroll', layout, { passive: true });
+    /* accordions reflow the prose without a window resize — the
+       observer catches it and the frame follows the text */
+    new ResizeObserver(layout).observe(document.querySelector('.prose'));
 
     /* rounded-rectangle perimeter: four sides, four quarter arcs —
        the border's corners are already smooth for the draping */
@@ -215,8 +287,32 @@
         tx: Math.sin(a), ty: -Math.cos(a) };
     }
 
+    /* (seg,k) coordinates: the border is eight segments —
+       edge, arc, edge, arc… — and k is pixels along one. This
+       survives the frame refitting where bare arc-length s would
+       not (a taller frame moves the bottom edge's s-range). */
+    function segLens(b) {
+      const R = b.rc, w = b.x1 - b.x0 - 2 * R, h = b.y1 - b.y0 - 2 * R,
+        A = Math.PI / 2 * R;
+      return [w, A, h, A, w, A, h, A];
+    }
+    function segStart(b, i) {
+      const L = segLens(b); let s = 0;
+      for (let j = 0; j < i; j++) s += L[j];
+      return s;
+    }
+    function segAt(b, s) {
+      const L = segLens(b);
+      s = ((s % b.per) + b.per) % b.per;
+      for (let i = 0; i < 8; i++) {
+        if (s < L[i]) return { i, k: s };
+        s -= L[i];
+      }
+      return { i: 7, k: L[7] };
+    }
+
     /* ---------- snakes ---------- */
-    // {t, s, dir, hist[], state, path, d, wrig, blink, gaze, nextX}
+    // {t, s, dir, hist[], state, seat, togo, tdir, morph, wrig, blink…}
     const N_SEG = 12;
     const snakes = [];
 
@@ -225,12 +321,16 @@
         t, s: s0, dir,                 // head rests at border pos s
         hist: [],                      // breadcrumb trail, head first
         state: 'rest',
-        path: null, plen: 0, d: 0,     // intrusion route
+        seat: -1, tdir: 1, togo: 0, target: 0, crumb: 0, // the wander
+        moved: 0, wph: 0,              // distance gone + weave phase
+        du: null, arrived: false,      // duet part
+        motionK: 0,                    // 0 rest … 1 cruising (eased)
+        morphT0: -1,                   // frame-refit ease
         wrigT0: -1,                    // active wriggle window
         nextWrig: 4000 + rng() * 6000,
         nextBlink: 2000 + rng() * 4000, blinkT0: -1,
         gazeT: 0, gazeP: { x: 0, y: 0 },
-        nextIntrude: (IMIN + rng() * (IMAX - IMIN)) * 1000 / 3,
+        nextTravel: (TMIN + rng() * (TMAX - TMIN)) * 1000 / 2,
       };
     }
 
@@ -242,80 +342,116 @@
         const p = borderPos(sn.s - sn.dir * i);
         sn.hist.push({ x: p.x, y: p.y });
       }
+      sn.crumb = 0;
       sn.state = 'rest';
     }
 
-    /* ---------- intrusion ---------- */
-    /* Build a route: leave the perch, cross the text on a lazy arc,
-       land on the border, then run along it until the tail is clear —
-       settling only when the whole body is off the words. */
-    function plotIntrude(sn) {
-      /* housemates, not earthworms (Roger, 2026-11-08): a landing
-         must clear a decent stretch of border from BOTH its own
-         perch and the other snake's — no parallel lying-together */
-      const targets = PERCHS.filter(p => {
-        const dOwn = Math.abs(p.s - sn.s) % B.per;
-        if (Math.min(dOwn, B.per - dOwn) < B.per * 0.2) return false;
-        return snakes.every(o => {
-          if (o === sn) return true;
-          const d = Math.abs(o.s - p.s) % B.per;
-          return Math.min(d, B.per - d) > B.per * 0.18;
-        });
+    /* ---------- the wander ----------
+       Travel stays on the frame: the head cruises the perimeter to a
+       new seat, the body follows round the corners — the words are
+       never touched. Seats just past a corner drape the body over
+       it; mid-edge seats lie flat. Direction is the shorter arc. */
+    function wander(sn, now) {
+      /* housemates, not earthworms (Roger, 2026-11-08): a seat must
+         clear a decent stretch of border from the snake's own spot
+         and the other snake's — and the ROUTE matters too. Sliding
+         over a resting housemate reads as something else entirely
+         (Roger, 2026-11-11): if the short arc crosses the sitter's
+         occupied stretch, go the long way round. The resting body
+         is just the last body-length of a clear path, so checking
+         the walk covers the roost too. */
+      const BODY = N_SEG * SPACING;
+      /* is point p inside the sitter's stretch (body + head room)? */
+      const onSitter = (o, p, gap) => {
+        const bb = (((o.s - p) * o.dir) % B.per + B.per) % B.per;
+        return bb <= BODY + gap || bb >= B.per - gap;
+      };
+      const clearPath = (from, togo, dir) => snakes.every(o => {
+        if (o === sn) return true;
+        if (onSitter(o, from + dir * togo, 50)) return false;
+        for (let v = 0; v <= togo; v += 30)
+          if (onSitter(o, from + dir * v, 50)) return false;
+        return true;
       });
-      if (!targets.length) return;
-      const dst = targets[(rng() * targets.length) | 0];
-      const head = borderPos(sn.s);
-      const land = borderPos(dst.s - dst.dir * (N_SEG * SPACING + 20));
-      /* the wander (Roger, 2026-11-08): not a straight vector — the
-         crossing weaves, several changes of direction on the way
-         over. Chord from perch to landing, then a perpendicular
-         sway that swells mid-crossing and dies at the ends. */
-      const dx = land.x - head.x, dy = land.y - head.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len, ny = dx / len;
-      const wamp = WEAVE * (0.7 + rng() * 0.6);
-      const turns = TURNS * (0.8 + rng() * 0.5);
-      const ph = rng() * Math.PI * 2;
-      const pts = [];
-      for (let k = 0; k <= 60; k++) {
-        const u = k / 60;
-        const env = Math.sin(u * Math.PI);           // fade at ends
-        const off = Math.sin(u * Math.PI * turns + ph) * wamp * env;
-        pts.push({
-          x: head.x + dx * u + nx * off,
-          y: head.y + dy * u + ny * off,
-        });
-      }
-      let s = dst.s - dst.dir * (N_SEG * SPACING + 20);  // run the border
-      const stop = dst.s;
-      while (true) {                                   // home stretch
-        pts.push(borderPos(s));
-        s += dst.dir * 3;
-        if (dst.dir > 0 ? s >= stop : s <= stop) break;
-      }
-      pts.push(borderPos(stop));
-      // cumulative lengths
-      let plen = 0;
-      const cum = [0];
-      for (let i = 1; i < pts.length; i++) {
-        plen += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-        cum.push(plen);
-      }
-      sn.path = pts; sn.cum = cum; sn.plen = plen; sn.d = 0;
-      sn.dst = dst;
-      sn.state = 'intrude';
+      const cands = SEATS.map((p, i) => ({ p, i })).filter(({ p }) => {
+        const dOwn = Math.abs(p.s - sn.s) % B.per;
+        if (Math.min(dOwn, B.per - dOwn) < B.per * 0.15) return false;
+        const fwd = ((p.s - sn.s) % B.per + B.per) % B.per;
+        return clearPath(sn.s, fwd, 1)
+          || clearPath(sn.s, B.per - fwd, -1);
+      });
+      if (!cands.length) { sn.nextTravel = now + 15000; return; }
+      const dst = cands[(rng() * cands.length) | 0];
+      const fwd = ((dst.p.s - sn.s) % B.per + B.per) % B.per;
+      const back = B.per - fwd;
+      const okF = clearPath(sn.s, fwd, 1);
+      const okB = clearPath(sn.s, back, -1);
+      sn.tdir = okF && (fwd <= back || !okB) ? 1 : -1;
+      sn.togo = sn.tdir > 0 ? fwd : back;
+      sn.target = dst.p.s; sn.seat = dst.i;
+      sn.moved = 0; sn.wph = rng() * 6.28;
+      sn.state = 'travel';
     }
 
-    function pathAt(sn, d) {
-      const { cum, path } = sn;
-      let i = cum.findIndex(c => c > d);
-      if (i < 0) i = cum.length - 1;
-      if (i === 0) return path[0];
-      const k = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
-      return {
-        x: path[i - 1].x + (path[i].x - path[i - 1].x) * k,
-        y: path[i - 1].y + (path[i].y - path[i - 1].y) * k,
-      };
+    /* ---------- duets (rare interplay, Roger 2026-11-11) ----------
+       Two choreographies, chosen at random, only when both snakes
+       rest and a long cooldown has passed — garnish, not floor-show.
+
+       chase: one leads, the other tucks in nose-to-tail and they
+       ring the frame together.
+
+       braid: they converge on the longest edge and twine around its
+       line antiphase — the caduceus climb, sword omitted. The taper
+       envelope merges them out of the rail and back into it. */
+    let nextDuet = (DMIN + rng() * (DMAX - DMIN)) * 1000 / 2;
+    let duet = null;
+
+    function tryDuet(now) {
+      if (duet || now < nextDuet || snakes.length !== 2) return;
+      if (!snakes.every(s => s.state === 'rest')) return;
+      if (rng() < 0.5) startBraid(now); else startChase(now);
+    }
+
+    /* travel to an assigned border position (duets share the
+       mechanics with the wander) */
+    function sendTo(sn, s) {
+      const fwd = ((s - sn.s) % B.per + B.per) % B.per;
+      sn.tdir = fwd <= B.per - fwd ? 1 : -1;
+      sn.togo = Math.min(fwd, B.per - fwd);
+      sn.target = s;
+      sn.moved = 0; sn.wph = rng() * 6.28;
+      sn.state = 'duet';
+    }
+
+    function startBraid(now) {
+      const L = segLens(B);
+      let best = -1;
+      for (let e = 0; e < 4; e++)
+        if (L[e * 2] > 460 && (best < 0 || L[e * 2] > L[best * 2]))
+          best = e;
+      if (best < 0) { nextDuet = now + 60000; return; }
+      const dv = rng() < 0.5 ? 1 : -1;
+      const span = Math.min(420, L[best * 2] * 0.7);
+      const s0 = segStart(B, best * 2) + (L[best * 2] - span) * rng();
+      duet = { kind: 'braid', s0, dv, span, stage: 'approach',
+        freq: 2 * Math.PI / 110, lamp: 16 };
+      snakes.forEach((sn, i) => {
+        sn.du = { ph: i * Math.PI, u0: i ? 26 : 0 };
+        sn.arrived = false;
+        sendTo(sn, s0 + dv * sn.du.u0);
+      });
+    }
+
+    function startChase(now) {
+      const li = rng() < 0.5 ? 0 : 1;
+      duet = { kind: 'chase', lead: li, gone: 0,
+        len: B.per * (0.5 + rng() * 0.3),
+        dv: rng() < 0.5 ? 1 : -1 };
+      snakes.forEach((sn, i) => {
+        sn.du = { role: i === li ? 'lead' : 'follow' };
+        sn.moved = 0; sn.wph = rng() * 6.28;
+        sn.state = 'duet';
+      });
     }
 
     /* ---------- per-snake life ---------- */
@@ -344,43 +480,146 @@
     }
 
     function drawSnake(sn, now) {
-      /* the head moves (intrude) or stays put (rest); the body reads
-         the trail behind it — one mechanism for both */
-      if (sn.state === 'intrude') {
-        sn.d += INTRUDE_V / 60 * (0.85 + 0.3 * Math.sin(sn.d * 0.018));
-        const hp = pathAt(sn, Math.min(sn.d, sn.plen));
-        sn.hist.unshift({ x: hp.x, y: hp.y });
+      /* the head cruises the frame (travel) or stays put (rest); the
+         body reads the trail behind it — one mechanism for both */
+      const approach = sn.state === 'duet' && duet
+        && duet.stage === 'approach' && !sn.arrived;
+      if (sn.state === 'travel' || approach) {
+        /* breadcrumbs every 2px of travel, not every frame — the
+           trail keeps the resting spacing, so the body neither
+           bunches nor stretches while it cruises. A soft pulse only:
+           the jitter-bug is barred (Roger, 2026-11-11) */
+        const step = Math.min(sn.togo + 0.01,
+          CRUISE_V / 60 * (0.94 + 0.12 * Math.sin(now * 0.0012 + sn.t)));
+        sn.s += sn.tdir * step; sn.togo -= step;
+        sn.crumb += step; sn.moved += step;
+        /* the road wanders (Roger, 2026-11-11): a straight rail reads
+           as a train — she weaves a lane of her own, easing off the
+           border and settling back as the seat approaches */
+        const wEase = Math.min(1, sn.moved / 90, sn.togo / 140);
+        while (sn.crumb >= 2) {
+          sn.crumb -= 2;
+          const p = borderPos(sn.s);
+          const wv = Math.sin(sn.moved * 0.017 + sn.wph)
+            * WAND_AMP * wEase;
+          sn.hist.unshift({ x: p.x - p.ty * wv, y: p.y + p.tx * wv });
+        }
         if (sn.hist.length > N_SEG * SPACING + 40)
           sn.hist.length = N_SEG * SPACING + 40;
-        if (sn.d >= sn.plen) {
-          sn.s = sn.dst.s; sn.dir = sn.dst.dir;
-          sn.nextIntrude = now + (IMIN + rng() * (IMAX - IMIN)) * 1000;
-          sn.state = 'rest';
+        if (sn.togo <= 0) {
+          if (approach) { sn.s = sn.target; sn.arrived = true; }
+          else {
+            sn.s = sn.target; sn.dir = sn.tdir;
+            sn.nextTravel = now
+              + (TMIN + rng() * (TMAX - TMIN)) * 1000;
+            perch(sn);
+          }
         }
+      } else if (sn.state === 'duet' && duet && duet.kind === 'braid'
+          && duet.stage === 'braid') {
+        /* the caduceus climb: both advance along the edge's line,
+           each on a sine antiphase of the other; the taper envelope
+           merges them out of the rail and back into it */
+        const step = BRATE / 60;
+        sn.du.u += step; sn.crumb += step; sn.moved += step;
+        sn.s = duet.s0 + duet.dv * sn.du.u;
+        while (sn.crumb >= 2) {
+          sn.crumb -= 2;
+          const ap = borderPos(sn.s);
+          const env = Math.sin(
+            Math.min(1, sn.du.u / duet.span) * Math.PI);
+          const lat = Math.sin(sn.du.u * duet.freq + sn.du.ph)
+            * duet.lamp * env;
+          sn.hist.unshift({
+            x: ap.x - ap.ty * lat, y: ap.y + ap.tx * lat });
+        }
+        if (sn.hist.length > N_SEG * SPACING + 40)
+          sn.hist.length = N_SEG * SPACING + 40;
+      } else if (sn.state === 'duet' && duet && duet.kind === 'chase') {
+        /* nose-to-tail ring: the leader cruises; the follower closes
+           to CHASE_GAP behind its tail and holds there — the two of
+           them become one loop round the frame */
+        const lead = snakes[duet.lead];
+        let step;
+        if (sn === lead) {
+          step = CRUISE_V / 60
+            * (0.94 + 0.12 * Math.sin(now * 0.0012 + sn.t));
+          duet.gone += step;
+        } else {
+          const gap = (((lead.s - sn.s) * duet.dv) % B.per + B.per)
+            % B.per;
+          const want = N_SEG * SPACING + CHASE_GAP;
+          step = gap > B.per * 0.6 ? CRUISE_V / 60 * 0.35
+            : CRUISE_V / 60 * Math.min(1.7,
+              Math.max(0.45, 1 + (gap - want) * 0.008));
+        }
+        sn.s += duet.dv * step; sn.crumb += step; sn.moved += step;
+        while (sn.crumb >= 2) {
+          sn.crumb -= 2;
+          const p = borderPos(sn.s);
+          const wv = Math.sin(sn.moved * 0.017 + sn.wph)
+            * WAND_AMP * 0.5;
+          sn.hist.unshift({ x: p.x - p.ty * wv, y: p.y + p.tx * wv });
+        }
+        if (sn.hist.length > N_SEG * SPACING + 40)
+          sn.hist.length = N_SEG * SPACING + 40;
       } else if (now > sn.nextWrig && sn.wrigT0 < 0) {
         sn.wrigT0 = now;
         sn.nextWrig = now + (WMIN + rng() * (WMAX - WMIN)) * 1000;
       }
 
-      const breathe = Math.sin(now / 1100 + sn.s) * SWAY_AMP;
+      /* frame-refit ease: crumbs carry their old pixels (ox/oy);
+         positions blend over MORPH_MS so the snake rides the change.
+         When it lands, a resting snake re-lattices itself cleanly
+         onto the new frame — the translate was rigid, this snaps it
+         exact. */
+      const mk = sn.morphT0 >= 0
+        ? Math.min(1, (now - sn.morphT0) / MORPH_MS) : 1;
+      const me = mk * mk * (3 - 2 * mk);
+      if (mk >= 1 && sn.morphT0 >= 0) {
+        sn.morphT0 = -1;
+        if (sn.state === 'rest') perch(sn);
+      }
+      const cp = c => (mk < 1 && c && c.ox !== undefined)
+        ? { x: c.ox + (c.x - c.ox) * me, y: c.oy + (c.y - c.oy) * me }
+        : c;
+
+      /* sitting-still life is damped in motion: sway and breath are
+         for a snake at rest — a cruising snake just slithers. Their
+         phases used to key on sn.s, which races during travel; keyed
+         on the table they can never run away (the jitter-bug,
+         Roger 2026-11-11). */
+      sn.motionK += (((sn.state === 'travel' || sn.state === 'duet')
+        ? 1 : 0) - sn.motionK) * 0.06;
+      const calmK = 1 - sn.motionK * 0.85;
+      const breathe = Math.sin(now / 1100 + sn.t * 5) * SWAY_AMP
+        * calmK;
       const R = SEG_R;
       for (let i = N_SEG; i >= 0; i--) {
-        const p = sn.hist[Math.min(i === 0 ? 0 : Math.round(i * SPACING / 2),
-          sn.hist.length - 1)] || sn.hist[0];
+        const p = cp(sn.hist[Math.min(i === 0 ? 0 :
+          Math.round(i * SPACING / 2), sn.hist.length - 1)]
+          || sn.hist[0]);
         if (!p) return;
         /* perpendicular for sway + wriggle */
-        const q = sn.hist[Math.min(Math.round(i * SPACING / 2) + 3,
-          sn.hist.length - 1)] || p;
+        const q = cp(sn.hist[Math.min(Math.round(i * SPACING / 2) + 3,
+          sn.hist.length - 1)]) || p;
         let tx = p.x - q.x, ty = p.y - q.y;
         const tl = Math.hypot(tx, ty) || 1;
         tx /= tl; ty /= tl;
         const nx = -ty, ny = tx;
         /* the occasional curve (Roger, 2026-11-08): a resting snake
            is not a ruler — a slow-drifting S lives along the body */
-        const restCurve = Math.sin(i * 0.5 + now / 16000 + sn.s * 0.3)
-          * CURVE_AMP;
+        const restCurve = Math.sin(i * 0.5 + now / 16000 + sn.t * 2.3)
+          * CURVE_AMP * calmK;
+        /* the slither (Roger, 2026-11-11): one slow S slides tailward
+           as she goes — keyed on distance travelled, so it IS the
+           motion, growing toward the tail; the head keeps the rail */
+        const braiding = sn.state === 'duet' && duet
+          && duet.kind === 'braid' && duet.stage === 'braid';
+        const sway = Math.sin(i * 0.6 - sn.s * 0.02) * TRAVEL_SWAY
+          * sn.motionK * (i / N_SEG) * (braiding ? 0 : 1);
         const off = (i ? breathe * (i / N_SEG) + restCurve : 0)
-          + wriggleAmp(sn, i, now);
+          + sway + wriggleAmp(sn, i, now);
         const x = p.x + nx * off, y = p.y + ny * off;
 
         if (i === 0) {                       // the head
@@ -396,7 +635,7 @@
           ctx.lineWidth = 1.4; ctx.stroke();
           const ex = Math.cos(a), ey = Math.sin(a);
           const sq = blinkScale(sn, now);
-          const look = Math.sin(now / 2600 + sn.s * 0.7) * 1.6;
+          const look = Math.sin(now / 2600 + sn.t * 3) * 1.6;
           for (const side of [-1, 1]) {
             ctx.beginPath();
             ctx.ellipse(
@@ -419,29 +658,55 @@
       }
     }
 
-    /* ---------- the household ---------- */
-    let PERCHS = [];
-    function makePerchs() {
+    /* ---------- seats ----------
+       Two per edge: just past the corner (the drape) and mid-edge
+       (the loiter). Order is stable across refits — travellers hold
+       seats by index so layout() can retarget them. */
+    let SEATS = [];
+    function makeSeats() {
       if (!B) return;
-      PERCHS = [
-        { s: B.per * 0.10, dir: 1 },
-        { s: B.per * 0.22, dir: 1 },
-        { s: B.per * 0.30, dir: 1 },
-        { s: B.per * 0.60, dir: -1 },
-        { s: B.per * 0.72, dir: -1 },
-        { s: B.per * 0.88, dir: 1 },
-      ];
+      const L = segLens(B);
+      SEATS = [];
+      for (let e = 0; e < 4; e++) {
+        const start = segStart(B, e * 2);
+        SEATS.push({ s: start + SEAT_IN });
+        if (L[e * 2] > SEAT_IN * 4)
+          SEATS.push({ s: start + L[e * 2] / 2 });
+      }
     }
 
     function draw(now) {
       ctx.clearRect(0, 0, W, H);
       if (!B) return;
-      const busy = snakes.some(s => s.state === 'intrude');
+      tryDuet(now);
+      const busy = snakes.some(
+        s => s.state === 'travel' || s.state === 'duet');
       snakes.forEach(sn => {
-        if (sn.state === 'rest' && !busy && now > sn.nextIntrude)
-          plotIntrude(sn);
+        if (sn.state === 'rest' && !busy && now > sn.nextTravel)
+          wander(sn, now);
         drawSnake(sn, now);
       });
+      /* duet stage management */
+      if (duet) {
+        const done = msg => {
+          snakes.forEach((s, i) => {
+            s.state = 'rest';
+            s.nextTravel = now + (6 + i * 5 + rng() * 10) * 1000;
+          });
+          duet = null;
+          nextDuet = now + (DMIN + rng() * (DMAX - DMIN)) * 1000;
+        };
+        if (duet.stage === 'approach'
+          && snakes.every(s => s.arrived)) {
+          duet.stage = 'braid';
+          snakes.forEach(s => { s.arrived = false; s.du.u = s.du.u0; });
+        } else if (duet.kind === 'braid' && duet.stage === 'braid'
+          && snakes.every(s => s.du.u >= duet.span)) {
+          done();
+        } else if (duet.kind === 'chase' && duet.gone >= duet.len) {
+          done();
+        }
+      }
     }
 
     function frame(now) {
@@ -451,10 +716,13 @@
 
     /* ---------- go ---------- */
     resize();
-    makePerchs();
+    /* diagonal home (Roger, 2026-11-11): first snake just past the
+       top-left corner — head on the top edge, body draped down the
+       left side; second mirrored at the bottom-right */
+    const EDGE = [0, 4, 6, 2];
     TABLES.forEach((t, i) => {
-      const p = PERCHS[(i * 2 + (i ? 1 : 0)) % PERCHS.length];
-      const sn = newSnake(t, p.s, p.dir);
+      const sn = newSnake(t, 0, 1);
+      sn.s = segStart(B, EDGE[i % 4]) + SEAT_IN;
       perch(sn);
       snakes.push(sn);
     });

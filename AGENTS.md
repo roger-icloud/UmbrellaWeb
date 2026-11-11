@@ -78,7 +78,11 @@ is for the next session's agent, not for Roger.
 
 ## Files
 
-- `index.html` — landing + Roger's intro + activity tiles
+- `index.html` — landing + Roger's intro + activity tiles; the book
+  icon top-left links `intro.html` (2026-11-11)
+- `intro.html` — Roger's adult-facing introduction (prose inside
+  `ROGERS TEXT` markers); two table-snakes (×3, ×9) live on a border
+  frame around the prose — see the intro frame section below
 - `tilt-snake.html` — tilt/drag/tap snake collects ×t in order
 - `snake-puzzle.html` — assemble a table on a posed snake; 4 blanks,
   values spawn one at a time, drag home (port of Swift `TailPuzzleModel`)
@@ -675,6 +679,62 @@ skill — track miss/refusal and completion-time stats per device and
 suggest or stage tables accordingly. Design deferred; the stats
 (misses, doneMs) already exist in-page per round — persistence and
 the guidance policy are the open parts.
+
+## Intro page — snake frame (built 2026-11-11)
+
+`intro.html` runs two household snakes (×3 purple, ×9 green — green was
+Roger's request, matching the 9× table colour) on a full-window canvas
+**behind** the prose (`#frame` z-index 0, `.prose` z-index 1 — a swaying
+body can pass under words, never over). Trail model as elsewhere: the
+head walks a rounded-rectangle border around the prose, breadcrumbs
+every 2px, body reads back. Home drapes: purple past the TL corner,
+green mirrored at BR.
+
+Mechanism points that cost finding:
+
+- **Border reseat on reflow.** `ResizeObserver` on `.prose` catches
+  accordion (`<details>`) reflow — no window resize fires. On refit,
+  re-anchor only the head (same fraction along the same segment) and
+  translate the whole trail rigidly — reseating every crumb
+  independently *splits* a snake draped over a corner (found live).
+- **No decoration phased on `sn.s`.** Resting S-curve, breath and
+  eye-look keyed on border position race while cruising (90px/s of
+  shimmer = Roger's "jitter-bug"). Phase them on table number and damp
+  by a smoothed `motionK` (0 rest → 1 cruise) so life-signals fade out
+  while travelling, back after settling.
+- **Travel weave.** Route sway must be real *path* sway (head weaves
+  its lane, easing in/out near departure and arrival so she still
+  settles onto the rail) — lateral render wiggle on a straight rail
+  reads as a train (Roger caught the distinction).
+- **Route planning.** Wanderer prefers the shorter border arc but
+  rejects any route through the other snake's occupied stretch —
+  keeps them from crawling over or roosting on each other.
+- **Rare duets** (garnish, not floor-show — ~5–9 min, both must be at
+  rest): *chase* (nose-to-tail ring around the frame) and *braid*
+  (caduceus intertwine along a straight edge axis — two strands
+  phased half-a-cycle apart around a shared sine). Draw order is
+  fixed, so one snake is always "over" at braid crossings — known
+  shortfall, parked.
+- Tunables up top: `CRUISE_V`, `SEAT_IN`, `MORPH_MS`, `TRAV_MIN/MAX`,
+  `TRAVEL_SWAY`, `DUET_MIN/MAX`. `?demo=1` makes both restless and
+  shortens duet intervals to 30–55s; `startBraid(now)`/`startChase(now)`
+  are console-callable to force a duet for audition.
+
+**Headless auditions — traps.** Chrome `--headless --virtual-time-budget`
+does not fire `requestAnimationFrame`: screenshots show stale/empty
+compositor tiles while the sim state is provably fine — verify *state*
+(counters, positions) before believing a blank canvas. `--timeout` is
+ignored (returns ~1s). What works: shim `rAF→setTimeout` for
+virtual-time state probing, and for visuals **fast-forward
+synchronously** — call `draw(t)` in a loop with synthetic time before
+first paint, then screenshot (`?ff=` hook in a temp copy; seeds via
+`?seed=` make runs deterministic). Test copies were made as
+`_duet_test.html` and deleted — recreate from the pattern if needed.
+
+**This machine (Mint)**: `gh` lives in `~/.local/bin`, authenticated as
+`roger-icloud`; git HTTPS credential helper is wired — pushes just
+work. Commits pass `-c user.name=rogereve -c user.email=roger@eve.co.uk`
+per-commit; no global git identity is set.
 
 ## Priorities (Roger, 2026-10-17; updated 2026-10-19)
 

@@ -143,7 +143,7 @@ window.Anim = (function () {
       { glow: true, calm: true },
     ],
     // home to the den: one straight seek at a given point — nothing
-    // else. The den journey's first piece; den-lab auditions it alone
+    // else. The den journey's first piece.
     den: [
       { seek: true, speed: 1.15 },
     ],

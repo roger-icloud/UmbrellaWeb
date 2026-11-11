@@ -46,6 +46,32 @@
       margin: 18px 0 34px;
     }
 
+    /* the book button — top-left counterweight to the snake menu;
+       links to intro.html (the adult-facing introduction) */
+    .booklink {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      height: 44px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid #2a3540;
+      background: rgba(20, 26, 33, 0.85);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 40;
+      text-decoration: none;
+      color: #aab8c4;
+      font-size: 14px;
+    }
+
+    .booklink svg {
+      width: 20px;
+      height: 20px;
+      stroke: #aab8c4;
+    }
+
     /* ============ END OF INTRO ============ */
 
     .tiles {
@@ -139,6 +165,17 @@
 </head>
 
 <body>
+  <a class="booklink" href="intro.html" title="About NumberFun" aria-label="Introduction">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3.5 5.5 Q7.5 4 12 5.8 Q16.5 4 20.5 5.5 L20.5 18 Q16.5 16.5 12 18.3 Q7.5 16.5 3.5 18 Z"/>
+      <path d="M12 5.8 L12 18.3"/>
+      <path d="M6 8.5 Q8 7.8 10 8.6"/>
+      <path d="M14 8.6 Q16 7.8 18 8.5"/>
+      <path d="M6 12 Q8 11.3 10 12.1"/>
+      <path d="M14 12.1 Q16 11.3 18 12"/>
+    </svg>
+    <span>Introduction</span>
+  </a>
   <main>
     <h1>NumberFun</h1>
 
@@ -179,11 +216,9 @@
           <div class="name">Tilt Ball</div>
         </div>
       </a>
-      <!-- den-lab: proving ground for the den journey (Roger, 2026-11-04)
-           — one completed snake travels home, nothing else -->
-      <a class="tile" href="den-lab.html" title="Watch one snake travel home.">
+      <a class="tile" href="feedback.html" title="Tell Roger what you think.">
         <div>
-          <div class="name">Den Lab</div>
+          <div class="name">Feedback</div>
         </div>
       </a>
     </div>

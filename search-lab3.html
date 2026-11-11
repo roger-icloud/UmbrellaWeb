@@ -138,7 +138,9 @@
        ?halo=N        hex radius of the revealed area (1 = flower)
        ?linger=S      s the reveal persists after release (1.2)
        ?amber=0..1    discount-wash strength (fainter + wider = the
-                      more-able dial, Roger 2026-11-10) */
+                      more-able dial, Roger 2026-11-10)
+       ?tall=N        force the vertical stretch (0 = circles even
+                      on a phone; unset = auto under TALL_BELOW) */
 
     /* ---------- tunables ---------- */
     let   SIDE = 7;                    // side 6 starves crossing arms
@@ -153,6 +155,13 @@
     const FLASH_S = 0.38;              // refusal amber
     const BEAT_S = 0.09;               // completion stagger per member
     const CIRCLE_R = 0.40;             // cell radius as pitch fraction
+    const MARGIN = 20;                 // board margin (shrinks on phones)
+    const TALL_MAX = 1.45;             // vertical stretch cap — tall
+    // cells on small screens only; big screens keep circles (Roger:
+    // "enlargement but not ellipse for ipad")
+    const TALL_BELOW = 34;             // stretch engages under this
+    // cell diameter in px
+    const FONT_MAX = 1.05;             // numeral size cap (× cell radius)
     const CHIP_H = 92;                 // space kept below the board
     const MAX_VAL = 144;               // numerals live in 2..144
     const HALO_N = 1;                  // hex radius of the revealed area
@@ -220,6 +229,8 @@
     const LINGER_S = Math.max(0, num('linger', LINGER));
     const AMBER = Math.max(0, Math.min(1, num('amber', 1)));
     const TRI_P = Math.max(0, Math.min(1, num('tri', 0.5)));
+    const TALL_Q = qs.has('tall')
+      ? Math.max(0, Math.min(TALL_MAX, num('tall', 1))) : null;
 
     /* ---------- rng ---------- */
     function mulberry32(a) {
@@ -476,17 +487,30 @@
     }
 
     /* ---------- comb geometry ---------- */
-    /* pointy-top circles: x = pitch*(q + r/2), y = pitch*VP*r */
+    /* pointy-top cells: x = pitch*(q + r/2), y = vStep*r. The comb's
+       centre span is 2·S pitches wide — the old 3·S budget stranded
+       a third of the portrait width (Roger, 2026-11-10). Slack
+       height buys taller cells (vStep stretches, cells become
+       ellipses) — but only while cells are too small to read; the
+       TALL_BELOW gate keeps iPad/desktop circles. */
     function geom() {
-      const S = SIDE - 1, m = 20;
+      const S = SIDE - 1;
+      const m = Math.min(MARGIN, W * 0.035);
+      const avail = H - CHIP_H - 2 * m;
       const pitch = Math.min(
-        (W - 2 * m) / (3 * S),
-        (H - CHIP_H - 2 * m) / (2 * S * VP));
-      return { pitch, cx: W / 2, cy: (H - CHIP_H) / 2 };
+        (W - 2 * m) / (2 * S + 2 * CIRCLE_R),
+        avail / (2 * S * VP + 2 * CIRCLE_R));
+      let tall = 1;
+      if (TALL_Q !== null) tall = Math.max(1, TALL_Q);
+      else if (pitch * 2 * CIRCLE_R < TALL_BELOW)
+        tall = Math.min(TALL_MAX,
+          avail / (pitch * (2 * S * VP + 2 * CIRCLE_R)));
+      return { pitch, tall, vStep: pitch * VP * tall,
+               cx: W / 2, cy: (H - CHIP_H) / 2 };
     }
     const centre = (g, cell) => ({
       x: g.cx + (cell.q + cell.r / 2) * g.pitch,
-      y: g.cy + cell.r * g.pitch * VP,
+      y: g.cy + cell.r * g.vStep,
     });
 
     function cellAt(x, y) {
@@ -494,7 +518,7 @@
       let best = null, bd = g.pitch * 0.55;
       for (const cell of cells) {
         const p = centre(g, cell);
-        const d = Math.hypot(x - p.x, y - p.y);
+        const d = Math.hypot(x - p.x, (y - p.y) / g.tall);
         if (d < bd) { bd = d; best = cell; }
       }
       return best;
@@ -577,7 +601,7 @@
       let best = null, bd = g.pitch * 0.9;
       for (const cell of cells) {
         const p = centre(g, cell);
-        const d = Math.hypot(x - p.x, y - p.y);
+        const d = Math.hypot(x - p.x, (y - p.y) / g.tall);
         if (d < bd) { bd = d; best = cell; }
       }
       return best;
@@ -645,7 +669,7 @@
     function draw(now) {
       ctx.fillStyle = '#101418';
       ctx.fillRect(0, 0, W, H);
-      const g = geom(), rad = g.pitch * CIRCLE_R;
+      const g = geom(), rad = g.pitch * CIRCLE_R, ry = rad * g.tall;
 
       /* completed runs get their connector first — one object under
          the cells, not separate dots */
@@ -689,12 +713,12 @@
           (now - cell.flashT0) / 1000 < FLASH_S;
         if (flashing) {
           const u = (now - cell.flashT0) / 1000 / FLASH_S;
-          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
           ctx.fillStyle = '#e0a53a';
           ctx.globalAlpha = 0.35 * (1 - u); ctx.fill(); ctx.globalAlpha = 1;
         }
 
-        ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+        ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
         if (cell.found) {
           ctx.fillStyle = tableColour(tables[cell.disp ?? cell.ts[0]]);
         } else if (MARK && cell.ts.length) {
@@ -713,7 +737,7 @@
           const order = cell.order.slice(0, cell.shown);
           order.forEach((ti, i) => {
             ctx.save();
-            ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.clip();
+            ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7); ctx.clip();
             ctx.fillStyle = tableColour(tables[ti]);
             ctx.fillRect(x - rad + i * 2 * rad / order.length,
               y - rad, 2 * rad / order.length, 2 * rad);
@@ -722,7 +746,7 @@
           for (let i = 1; i < order.length; i++) {
             const sx = x - rad + i * 2 * rad / order.length;
             ctx.save();
-            ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.clip();
+            ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7); ctx.clip();
             ctx.beginPath();
             ctx.moveTo(sx, y - rad); ctx.lineTo(sx, y + rad);
             ctx.strokeStyle = 'rgba(16,20,24,0.7)';
@@ -740,11 +764,11 @@
         const revK = revT === undefined ? 0
           : Math.min(1, (now - revT) / 1000 / REV_FADE) * la;
         if (revK > 0 && !cell.ts.length) {
-          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
           ctx.fillStyle = 'rgba(224,165,58,' + 0.34 * AMBER * revK + ')';
           ctx.fill();
         } else if (revK > 0) {
-          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
           ctx.fillStyle = 'rgba(240,244,247,' + revK + ')';
           ctx.fill();
           /* a dash of the table's colour in the white */
@@ -754,12 +778,14 @@
           ctx.globalAlpha = 1;
         }
 
-        ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+        ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
         ctx.strokeStyle = cell.found
           ? tableColour(tables[cell.disp ?? cell.ts[0]]) : '#2c3e50';
         ctx.lineWidth = 1.2; ctx.stroke();
 
-        ctx.font = '600 ' + rad * 0.85 + 'px Andika, sans-serif';
+        ctx.font = '700 ' +
+          Math.min(rad * 0.85 * g.tall, rad * FONT_MAX) +
+          'px Andika, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillStyle = cell.found
           ? '#fff'
@@ -776,7 +802,7 @@
           ctx.globalAlpha = 1;
         }
         if (lift > 0) {
-          ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
           ctx.fillStyle = '#fff';
           ctx.globalAlpha = lift; ctx.fill(); ctx.globalAlpha = 1;
         }
@@ -786,7 +812,8 @@
           const bu = (now - cell.bloomT) / 800;
           if (bu < 1) {
             ctx.beginPath();
-            ctx.arc(x, y, rad * (1 + bu * 1.6), 0, 7);
+            ctx.ellipse(x, y, rad * (1 + bu * 1.6),
+              ry * (1 + bu * 1.6), 0, 0, 7);
             ctx.strokeStyle = 'rgba(255,235,180,' + 0.9 * (1 - bu) + ')';
             ctx.lineWidth = 3;
             ctx.stroke();

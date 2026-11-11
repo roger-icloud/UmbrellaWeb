@@ -28,8 +28,10 @@ Static-site constraints apply — mailto + canvas snapshot, no service.
 
 ## Known 1.0-blocking defects / chores
 
-- patterns.html: DEBUG_GRID = true ships; ×9–12 completion check
-  demands 12 finds when fewer members exist (can never complete).
+- ~~patterns.html: DEBUG_GRID = true ships; ×9–12 completion check
+  demands 12 finds when fewer members exist (can never complete).~~
+  Fixed later same day: grid off; target = on-board member count
+  (×9 eleven, ×10 ten, ×11 nine, ×12 eight).
 - Nothing live until push (3 local commits).
 - Search graduation: deal invariant + deductive pre-filter (agreed
   design) before a menu tile; plus a real activity name.

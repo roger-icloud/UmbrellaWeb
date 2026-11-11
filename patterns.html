@@ -146,7 +146,7 @@
     const CELL_GAP = 1.5;    // css px grid-line gap between cells
     const FLASH_SECS = 0.6;   // refusal flash duration
     const NUM_FONT = 0.38;   // cell numeral size as a fraction of cell
-    const DEBUG_GRID = true;  // draw touch-resolution boundaries over cells
+    const DEBUG_GRID = false;  // draw touch-resolution boundaries over cells
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
@@ -179,7 +179,9 @@
 
     /* ---------- state ---------- */
     let table = 0;
-    let found = new Set();       // values found (of table's 12 multiples)
+    let target = 0;              // members of the table on the square
+    let found = new Set();       // values found so far
+    const NUM_WORDS = ['eight', 'nine', 'ten', 'eleven', 'twelve'];
     let flashCell = -1, flashUntil = 0;
     let state = 'idle';          // idle | play | done
     let startT = 0, doneMs = 0;
@@ -194,6 +196,10 @@
 
     function reset(t) {
       table = t;
+      // first-twelve membership (t…12t) but only what the square holds —
+      // ×9 offers eleven, ×12 only eight; the target must match or the
+      // table can never complete
+      target = Math.min(12, Math.floor(100 / t));
       found = new Set();
       flashCell = -1;
       state = 'play';
@@ -260,13 +266,13 @@
       if (member && !found.has(v)) {
         found.add(v);
         logEvent('collect', { v, ord: found.size });
-        if (found.size === 12) {
+        if (found.size === target) {
           doneMs = performance.now() - startT;
           state = 'done';
           logEvent('complete', { table, ms: Math.round(doneMs) });
           document.getElementById('doneTitle').textContent = '×' + table + ' found!';
           document.getElementById('doneStats').textContent =
-            'All twelve multiples in ' + (doneMs / 1000).toFixed(0) + 's';
+            'All ' + NUM_WORDS[target - 8] + ' multiples in ' + (doneMs / 1000).toFixed(0) + 's';
           document.getElementById('doneOverlay').classList.remove('hidden');
         }
       } else if (!member) {

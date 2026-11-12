@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Mix Patterns — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+
+  <script>
+    'use strict';
+
+    /* mix-patterns (Roger, 2026-11-12): a large hundred square ringed by
+       miniature ones — one per table ×2…×12, clockwise from the top.
+       Drag a satellite onto the big square to lay that table's pattern;
+       drag (or tap) it again to lift the pattern off. Patterns
+       accumulate for comparison — where two tables claim the same
+       cell, the cell splits its colours (the honeycomb rule). */
+
+    /* ---------- tunables ---------- */
+    const MARGIN = 14;         // css px clear space at screen edges
+    const TOP_RESERVE = 60;    // room for HUD + nav
+    const BOT_RESERVE = 34;
+    const CELL_GAP = 1.5;      // css px grid-line gap, main grid
+    const NUM_FONT = 0.38;     // main-grid numeral, fraction of cell
+    const SAT_FRAC = 0.14;     // satellite tile size, fraction of comp
+    const SAT_MIN = 36, SAT_MAX = 92;
+    const EDGES_MIN = 640;     // min dim (css px) that affords 4-edge parking
+    const EDGE_GAP = 8;        // css px between board edge and its strip
+    const MAX_OVERLAY = 3;     // patterns may mix three deep, no deeper
+    const FLY_MS = 320;        // satellite fly-home duration
+    const DRAG_SCALE = 1.25;   // satellite grows a touch while held
+    const PREVIEW_A = 0.3;     // would-be pattern alpha during hover
+    const BLEND_FRAC = 0.3;    // sector fraction spent blending onward
+    const PASTEL_LIFT = 0.7;   // how far toward white a chosen tile goes
+    const DIM_ALPHA = 0.3;     // idle satellites keep out of the way
+    const TAP_DIST = 10;       // px of travel that still counts as tap
+    const T_MIN = 2, T_MAX = 12;
+    const DEMO_DELAY = 900;    // ms before the satellite shows itself
+
+    /* ---------- canvas ---------- */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      layout();
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+    /* ---------- layout ----------
+       The board fills the middle; each edge keeps a parking strip of
+       satellites off the grid itself (Roger, 2026-11-12 — the ring's
+       satellites shaded the board). Slots are thirds of each edge;
+       the composition is square, so landscape and portrait both work. */
+    let cx = 0, cy = 0, sat = 0;
+    let bX = 0, bY = 0, bS = 0, cell = 0;
+
+    function layout() {
+      const availW = W - 2 * MARGIN;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - 2 * MARGIN;
+      cx = W / 2;
+      cy = TOP_RESERVE + (H - TOP_RESERVE - BOT_RESERVE) / 2;
+
+      /* four-edge parking while the screen is roomy (the ring is the
+         page's character on iPad/desktop); below the roomy threshold,
+         two-axis parking frees whichever dimension is scarce —
+         portrait puts all twelve top and bottom, short landscape
+         flanks them left and right */
+      const strips = {
+        edges: { W: 1, H: 1 },   // strips cost both dimensions
+        flanks: { W: 1, H: 0 },  // L+R strips: height is free
+        poles: { W: 0, H: 1 },   // T+B strips: width is free
+      };
+      const mode = Math.min(availW, availH) < EDGES_MIN
+        ? (availW >= availH ? 'flanks' : 'poles') : 'edges';
+      sat = Math.max(SAT_MIN, Math.min(SAT_MAX,
+        Math.min(availW, availH) * SAT_FRAC));
+      bS = Math.min(availW - (strips[mode].W ? 2 * (sat + EDGE_GAP) : 0),
+                    availH - (strips[mode].H ? 2 * (sat + EDGE_GAP) : 0));
+      if (bS < 60) bS = 60;
+      /* satellites must fit their edge: pitch along the strip decides */
+      const counts = { T: 0, R: 0, B: 0, L: 0 };
+      const spots = EDGE_SPOTS[mode];
+      for (const t in spots) counts[spots[t][0]]++;
+      for (const s of sats) {
+        const [e, sl] = spots[s.t];
+        s.edge = e; s.slot = sl; s.count = counts[e];
+      }
+      const maxCount = Math.max(counts.T, counts.R, counts.B, counts.L);
+      sat = Math.min(sat, bS / maxCount - 2);
+      cell = bS / 10;
+      bX = cx - bS / 2;
+      bY = cy - bS / 2;
+      const off = bS / 2 + EDGE_GAP + sat / 2;
+      for (const s of sats) {
+        const f = (s.slot + 0.5) / s.count;
+        s.home = s.edge === 'T' ? { x: bX + f * bS, y: cy - off }
+               : s.edge === 'B' ? { x: bX + f * bS, y: cy + off }
+               : s.edge === 'L' ? { x: cx - off, y: bY + f * bS }
+               :                  { x: cx + off, y: bY + f * bS };
+        if (s.state === 'parked') { s.x = s.home.x; s.y = s.home.y; }
+      }
+    }
+
+    /* ---------- state ---------- */
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+
+    /* Satellites park on the edge strips, numbers reading unbroken
+       clockwise — but which edges depends on the room (2026-11-12).
+       The board is square; the strips make the footprint square too,
+       so four-edge parking wastes the long axis on phones. Three
+       arrangements, whichever yields the largest board:
+       'edges' — 2,3,4 top; 5,6,7 right; 8 bottom-right, clear, 9
+                 bottom-left; 10,11,12 up the left (Roger's order)
+       'flanks' — landscape: 2..7 down the right; 8..12 up the left,
+                 clear top-left — board takes the full height
+       'poles' — portrait: 2..7 across the top; 8..12 across the
+                 bottom (right-to-left), clear bottom-left — board
+                 takes the full width. t=0 is the clear tile */
+    const EDGE_SPOTS = {
+      edges: { 2: ['T', 0], 3: ['T', 1], 4: ['T', 2],
+               5: ['R', 0], 6: ['R', 1], 7: ['R', 2],
+               9: ['B', 0], 0: ['B', 1], 8: ['B', 2],
+               12: ['L', 0], 11: ['L', 1], 10: ['L', 2] },
+      flanks: { 2: ['R', 0], 3: ['R', 1], 4: ['R', 2],
+                5: ['R', 3], 6: ['R', 4], 7: ['R', 5],
+                0: ['L', 0], 12: ['L', 1], 11: ['L', 2],
+                10: ['L', 3], 9: ['L', 4], 8: ['L', 5] },
+      poles: { 2: ['T', 0], 3: ['T', 1], 4: ['T', 2],
+               5: ['T', 3], 6: ['T', 4], 7: ['T', 5],
+               0: ['B', 0], 12: ['B', 1], 11: ['B', 2],
+               10: ['B', 3], 9: ['B', 4], 8: ['B', 5] },
+    };
+    const sats = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(t => ({
+      t, edge: 'T', slot: 0, count: 3, x: 0, y: 0, home: { x: 0, y: 0 },
+      state: 'parked', flyFrom: null, flyT0: 0, press: 0,
+      grabDX: 0, grabDY: 0, moved: 0, refuseUntil: 0,
+    }));
+    const active = new Set();   // tables whose pattern is on the board
+    let drag = null;            // the satellite currently held
+    let overBoard = false;      // held satellite is over the drop zone
+
+    /* the self-demo: on first view a satellite lifts itself to the
+       board, lays its pattern and lifts it off again — the gesture
+       taught wordlessly, cancelled by the first real touch */
+    let demo = null;            // {s, t0} while the demo plays
+    let demoOver = false;       // demo satellite is over the board
+    let demoDone = false;       // it plays once — then never again
+    let interacted = false;     // a real pointer has arrived
+
+    /* ?tables=3,5 — open with a mix already laid (up to MAX_OVERLAY),
+       so a particular combination can be linked or shared */
+    const want = (new URLSearchParams(location.search).get('tables') || '')
+      .split(',').map(Number).filter(t => t >= T_MIN && t <= T_MAX);
+    want.slice(0, MAX_OVERLAY).forEach(t => active.add(t));
+
+    /* the classic hundred-square pattern: every multiple in the
+       square, not just the first twelve — the point is comparing the
+       whole texture (the ×9 eleven-member lesson is a different page) */
+    const member = (t, v) => v % t === 0;
+    const claims = v => sats.filter(s => s.t && active.has(s.t) && member(s.t, v)).map(s => s.t);
+
+    /* three deep, no deeper (Roger, 2026-11-12: "kids will get
+       overenthusiastic") — a fourth overlay is refused, not punished:
+       the satellite flashes amber, the refusal grammar's own answer */
+    function toggleSat(s) {
+      if (s.t === 0) {                       // the clear tile
+        active.clear();
+        return;
+      }
+      if (active.has(s.t)) { active.delete(s.t); return; }
+      if (active.size >= MAX_OVERLAY) {
+        s.refuseUntil = performance.now() + 450;
+        return;
+      }
+      active.add(s.t);
+    }
+    /* a drop "takes" only if it would add within the limit or lift an
+       active pattern off — used for preview and drop-zone glow */
+    const willTake = s => s.t === 0 || active.has(s.t) || active.size < MAX_OVERLAY;
+
+    /* ---------- input ---------- */
+    function overBoardNow(x, y) {
+      return x >= bX && x <= bX + bS && y >= bY && y <= bY + bS;
+    }
+
+    cv.addEventListener('pointerdown', (e) => {
+      interacted = true;
+      if (demo) {                // a real touch ends the performance
+        demo.s.state = 'parked';
+        demo.s.x = demo.s.home.x; demo.s.y = demo.s.home.y;
+        active.delete(demo.s.t);
+        demo = null; demoOver = false;
+      }
+      if (drag) return;
+      for (let i = sats.length - 1; i >= 0; i--) {
+        const s = sats[i];
+        if (s.state !== 'parked') continue;
+        if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > sat * 0.62) continue;
+        drag = s;
+        s.state = 'drag';
+        s.grabDX = e.clientX - s.x; s.grabDY = e.clientY - s.y;
+        s.moved = 0;
+        cv.setPointerCapture(e.pointerId);
+        break;
+      }
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      drag.x = e.clientX - drag.grabDX;
+      drag.y = e.clientY - drag.grabDY;
+      drag.moved = Math.max(drag.moved,
+        Math.hypot(drag.x - drag.home.x, drag.y - drag.home.y));
+      overBoard = overBoardNow(e.clientX, e.clientY);
+    });
+    function release(e) {
+      if (!drag) return;
+      const s = drag;
+      drag = null;
+      overBoard = false;
+      if (s.moved < TAP_DIST) {
+        toggleSat(s);          // a tap toggles, no flight needed
+        s.state = 'parked';
+        s.x = s.home.x; s.y = s.home.y;
+        return;
+      }
+      if (overBoardNow(e.clientX, e.clientY)) toggleSat(s);
+      s.state = 'fly';         // always flies home after a drag
+      s.flyFrom = { x: s.x, y: s.y };
+      s.flyT0 = performance.now();
+    }
+    cv.addEventListener('pointerup', release);
+    cv.addEventListener('pointercancel', release);
+    cv.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+    /* ---------- draw ---------- */
+    const ease = k => 1 - Math.pow(1 - k, 3);
+
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function drawSatellite(s) {
+      const now = performance.now();
+      const on = s.t !== 0 && active.has(s.t);
+      const held = s.state === 'drag' || s.state === 'demo';
+      const k = held ? DRAG_SCALE : 1 - (s.press || 0) * 0.15;
+      const sz = sat * k;
+      const refusing = now < s.refuseUntil;
+      const shx = refusing
+        ? Math.sin(now / 16) * 4 * ((s.refuseUntil - now) / 450) : 0;
+      const sx = s.x + shx;
+      const x = sx - sz / 2, y = s.y - sz / 2;
+      const col = refusing ? '#e0a53a'
+        : s.t === 0 ? '#7f9bb0' : tableColour(s.t);
+
+      ctx.save();
+      if (held) { ctx.shadowColor = col; ctx.shadowBlur = 14; }
+      ctx.fillStyle = 'rgba(24,34,44,.94)';
+      roundRect(x, y, sz, sz, sz * 0.14);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      if (on) {           // a chosen tile wears a pastel lift of its
+        ctx.save();       // colour — light enough to stand off the
+        ctx.clip();       // dark, still unmistakably its table
+        ctx.globalAlpha = 0.55;  // (Roger 2026-11-12)
+        ctx.fillStyle = 'rgb(' +
+          tableRGB(s.t).map(v => Math.round(v + (255 - v) * PASTEL_LIFT)) + ')';
+        ctx.fillRect(x, y, sz, sz);
+        ctx.restore();
+      }
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = on || s.t === 0 ? 1 : DIM_ALPHA;
+      ctx.lineWidth = on ? 2.6 : 1.2;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      if (on) {           // parked-and-on: a quiet halo marks service
+        ctx.shadowColor = col; ctx.shadowBlur = 12;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+      ctx.restore();
+
+      if (s.t === 0) {    // the clear tile: a line-drawn eraser on its
+        const lit = active.size > 0;   // baseline — "wipe", silently
+        ctx.save();                  // (Roger's icon, 2026-11-12)
+        ctx.translate(sx, s.y);
+        ctx.globalAlpha = lit ? 0.95 : 0.32;
+        ctx.strokeStyle = '#e8eef2';
+        ctx.lineWidth = Math.max(1.4, sz * 0.04);
+        ctx.lineCap = 'round';
+        /* geometry check: rotated -0.62, the eraser's lowest corner is
+           local (-ew/2, +eh/2) → offset (-0.109, +0.244)·sz. Raised so
+           that corner *kisses* the baseline (y +0.14·sz); beneath the
+           contact, two short strokes at deliberately imperfect angles —
+           the action-mark saying the rubbing happens here */
+        ctx.beginPath();                       // baseline begins AT
+        ctx.moveTo(-sz * 0.129, sz * 0.14);    // the contact corner and
+        ctx.lineTo(sz * 0.26, sz * 0.14);      // runs right only
+        /* the spark: two strokes broken away from corner and line
+           alike — clock hands at 5:43, near-down and down-left,
+           floating a touch below-left of the contact */
+        ctx.moveTo(-sz * 0.155, sz * 0.175);   // ~172°: near down
+        ctx.lineTo(-sz * 0.143, sz * 0.228);
+        ctx.moveTo(-sz * 0.185, sz * 0.165);   // ~258°: down-left
+        ctx.lineTo(-sz * 0.235, sz * 0.177);
+        ctx.stroke();
+        ctx.save();
+        ctx.translate(-sz * 0.02, -sz * 0.104);
+        ctx.rotate(-0.62);
+        const ew = sz * 0.46, eh = sz * 0.27;
+        roundRect(-ew / 2, -eh / 2, ew, eh, eh * 0.28);
+        ctx.stroke();
+        ctx.beginPath();                       // rubber | sleeve band
+        ctx.moveTo(-ew * 0.2, -eh / 2);
+        ctx.lineTo(-ew * 0.2, eh / 2);
+        ctx.stroke();
+        ctx.restore();
+        ctx.restore();
+        return;
+      }
+
+      /* miniature grid: members as cells in the table's colour, the
+         rest a whisper of a lattice so the pattern has something to
+         sit against */
+      const g = sz * 0.68, gx = sx - g / 2, gy = y + sz * 0.12;
+      const c = g / 10;
+      for (let r = 0; r < 10; r++) {
+        for (let q = 0; q < 10; q++) {
+          const v = r * 10 + q + 1;
+          const px = gx + q * c, py = gy + r * c;
+          if (member(s.t, v)) {
+            ctx.globalAlpha = on ? 1 : 0.75;
+            ctx.fillStyle = col;
+            ctx.fillRect(px + c * 0.12, py + c * 0.12, c * 0.76, c * 0.76);
+            ctx.globalAlpha = 1;
+          } else {
+            ctx.fillStyle = on ? 'rgba(10,14,18,.16)' : 'rgba(120,140,155,.1)';
+            ctx.fillRect(px + c * 0.32, py + c * 0.32, c * 0.36, c * 0.36);
+          }
+        }
+      }
+
+      ctx.fillStyle = on ? '#101418' : col;
+      ctx.font = (on ? 'bold ' : '') + Math.round(sz * 0.15) +
+        'px Andika, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('×' + s.t, sx, y + sz * 0.9);
+    }
+
+    function tableRGB(t) {
+      const h = ((t * 31 + 200) % 360) / 60, s = 0.6, l = 0.45;
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs(h % 2 - 1));
+      const m = l - c / 2;
+      const seg = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]]
+        [Math.floor(h) % 6];
+      return seg.map(v => Math.round((v + m) * 255));
+    }
+
+    /* a shared cell pays its colours as a conical blend — each colour
+       owns an equal arc round the centre and smoothsteps into the
+       next. Hand-rolled wedges rather than createConicGradient so the
+       iPhone-8 vintage of Safari gets the same picture. Clipped to
+       the cell: the blend never escapes the square (Roger 2026-11-12:
+       bulging past the grid sent mixed messages). */
+    function blendFill(x, y, sz, ts) {
+      const cols = ts.map(tableRGB);
+      const n = cols.length;
+      const cxp = x + sz / 2, cyp = y + sz / 2, rad = sz / Math.SQRT2;
+      const STEPS = 120, da = Math.PI * 2 / STEPS;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, sz, sz);
+      ctx.clip();
+      for (let i = 0; i < STEPS; i++) {
+        const a0 = -Math.PI / 2 + i * da;
+        const p = ((i + 0.5) / STEPS) * n;
+        const ci = Math.floor(p) % n, f = p - Math.floor(p);
+        let col = cols[ci];
+        if (f > 1 - BLEND_FRAC) {
+          const k = (f - (1 - BLEND_FRAC)) / BLEND_FRAC;
+          const e = k * k * (3 - 2 * k);           // smoothstep
+          const nx = cols[(ci + 1) % n];
+          col = cols[ci].map((v, j) => Math.round(v + (nx[j] - v) * e));
+        }
+        ctx.fillStyle = 'rgb(' + col + ')';
+        ctx.beginPath();
+        ctx.moveTo(cxp, cyp);
+        ctx.arc(cxp, cyp, rad, a0 - 0.03, a0 + da + 0.03);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    const easeIO = t => t * t * (3 - 2 * t);
+
+    function draw() {
+      const now = performance.now();
+      ctx.clearRect(0, 0, W, H);
+
+      /* the self-demo, until a real touch arrives — a silent lesson
+         in both halves of the gesture (Roger 2026-11-12) */
+      if (!interacted && !demoDone && !demo && now > DEMO_DELAY
+          && active.size === 0) {
+        demo = { s: sats.find(s => s.t === 2), t0: now };
+        demo.s.state = 'demo';
+      }
+      if (demo) {
+        const s = demo.s, k = now - demo.t0;
+        const hx = s.home.x, hy = s.home.y;
+        const lerp = (a, b, e) => a + (b - a) * e;
+        /* the honest story: fly on, hover+preview, land — then HOME,
+           the pattern staying behind (that is what a real drop does).
+           A beat parked with its "on" halo; back out for the lift-off
+           tap; home once more. On and off in one performance. */
+        if (k < 1100) {                          // fly to the board
+          const e = easeIO(k / 1100);
+          s.x = lerp(hx, cx, e); s.y = lerp(hy, cy, e);
+          demoOver = e > 0.75;
+        } else if (k < 1800) {                   // hover — the preview
+          s.x = cx; s.y = cy; demoOver = true;   // shows where it lands
+        } else if (k < 1900) {                   // land
+          s.x = cx; s.y = cy; demoOver = false;
+          if (!active.has(s.t)) active.add(s.t);
+        } else if (k < 3000) {                   // home — pattern stays
+          const e = easeIO((k - 1900) / 1100);
+          s.x = lerp(cx, hx, e); s.y = lerp(cy, hy, e);
+        } else if (k < 4200) {                   // a beat, on duty
+          s.state = 'parked'; s.x = hx; s.y = hy; s.press = 0;
+        } else if (k < 4550) {                   // the honest "off" —
+          const p = (k - 4200) / 350;            // a press AT HOME lifts
+          s.press = Math.sin(Math.PI * Math.min(1, p));  // the pattern
+          if (p >= 0.5 && active.has(s.t)) active.delete(s.t);
+        } else if (k < 5000) {                   // settle
+          s.press = 0; s.x = hx; s.y = hy;
+        } else {
+          s.state = 'parked'; s.x = hx; s.y = hy;
+          demo = null; demoOver = false; demoDone = true;
+        }
+      }
+      const held = drag || (demo ? demo.s : null);
+      const overB = drag ? overBoard : (demo ? demoOver : false);
+
+      /* drop-zone glow while a satellite hovers over the board —
+         amber when this one would be refused (three deep already) */
+      if (held && overB) {
+        const gc = willTake(held)
+          ? (held.t ? tableColour(held.t) : '#7f9bb0') : '#e0a53a';
+        ctx.save();
+        ctx.strokeStyle = gc;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = gc;
+        ctx.shadowBlur = 16;
+        ctx.strokeRect(bX - 4, bY - 4, bS + 8, bS + 8);
+        ctx.restore();
+      }
+
+      for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 10; c++) {
+          const v = r * 10 + c + 1;
+          const x = bX + c * cell;
+          const y = bY + r * cell;
+          const ts = claims(v);
+          const preview = held && overB && held.t !== 0
+                          && !active.has(held.t) && active.size < MAX_OVERLAY
+                          && member(held.t, v);
+
+          ctx.fillStyle = '#1a2430';
+          ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+            cell - CELL_GAP, cell - CELL_GAP);
+
+          if (ts.length === 1) {
+            ctx.fillStyle = tableColour(ts[0]);
+            ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+              cell - CELL_GAP, cell - CELL_GAP);
+          } else if (ts.length > 1) {
+            blendFill(x + CELL_GAP / 2, y + CELL_GAP / 2,
+              cell - CELL_GAP, ts);
+          }
+          if (preview) {
+            ctx.save();
+            ctx.globalAlpha = PREVIEW_A;
+            ctx.fillStyle = tableColour(held.t);
+            ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+              cell - CELL_GAP, cell - CELL_GAP);
+            ctx.restore();
+          }
+
+          ctx.fillStyle = ts.length ? '#fff' : '#8a97a3';
+          ctx.font = Math.round(cell * NUM_FONT) + 'px Andika, -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          if (ts.length > 1) {   // keep the numeral legible over wedges
+            ctx.strokeStyle = '#101418';
+            ctx.lineWidth = 3;
+            ctx.strokeText(v, x + cell / 2, y + cell / 2 + 1);
+          }
+          ctx.fillText(v, x + cell / 2, y + cell / 2 + 1);
+        }
+      }
+
+      /* parked satellites, then the held one last so it rides on top */
+      for (const s of sats) {
+        if (s.state === 'fly') {
+          const k = Math.min(1, (now - s.flyT0) / FLY_MS);
+          const e = ease(k);
+          s.x = s.flyFrom.x + (s.home.x - s.flyFrom.x) * e;
+          s.y = s.flyFrom.y + (s.home.y - s.flyFrom.y) * e;
+          if (k >= 1) { s.state = 'parked'; s.x = s.home.x; s.y = s.home.y; }
+        }
+        if (s !== drag && !(demo && s === demo.s)) drawSatellite(s);
+      }
+      /* the stage convention: while the demo plays, everyone but the
+         performer falls back — "an animation is in progress" without
+         a word of it (Roger 2026-11-12) */
+      if (demo) {
+        ctx.fillStyle = 'rgba(16,20,24,.55)';
+        for (const s of sats) {
+          if (s === demo.s) continue;
+          roundRect(s.x - sat / 2, s.y - sat / 2, sat, sat, sat * 0.14);
+          ctx.fill();
+        }
+      }
+      if (drag) drawSatellite(drag);
+      else if (demo) drawSatellite(demo.s);
+    }
+
+    layout();
+    resize();
+    function frame() { draw(); requestAnimationFrame(frame); }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=14"></script>
+</body>
+
+</html>

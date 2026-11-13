@@ -35,35 +35,6 @@
       display: none !important;
     }
 
-    /* the encore eye — same eyes as the menu's watch button;
-       top-left, mirroring the snake's top-right corner */
-    #eye {
-      position: fixed;
-      left: 12px;
-      top: calc(env(safe-area-inset-top, 0px) + 16px);
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: none;
-      border: none;
-      color: #4a5c6e;
-      cursor: pointer;
-      padding: 0;
-      z-index: 5;
-    }
-    #eye:hover, #eye:active {
-      color: #cfd8e0;
-      background: #243244;
-    }
-    #eye svg {
-      width: 24px;
-      height: 24px;
-      display: block;
-    }
-
     /* the peel-away sheet was tried and retired (2026-11-12): the
        fade-down/fade-up handover replaced it — cinema grammar,
        no DOM sheet at all */
@@ -77,14 +48,6 @@
 
   <canvas id="c"></canvas>
 
-  <button id="eye" title="Watch it again" aria-label="Replay the demo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-      <ellipse cx="8" cy="12.3" rx="4" ry="5.5"/>
-      <ellipse cx="16.5" cy="11.3" rx="4.1" ry="5.8"/>
-      <circle cx="6.6" cy="13.4" r="1.6" fill="currentColor" stroke="none"/>
-      <circle cx="15.1" cy="12.3" r="1.6" fill="currentColor" stroke="none"/>
-    </svg>
-  </button>
 
   <script>
     'use strict';
@@ -233,10 +196,10 @@
     let lastDraw = 0;
     let landed = null;          // {t, at, g0, mixing}: the table just laid, settling
 
-    /* the self-demo: only when invited (?demo=1, the menu's eye) —
+    /* the self-demo: once per device, on the first visit —
        a satellite lifts itself to the board, lays its pattern and
        lifts it off again; the gesture taught wordlessly, cancelled
-       by the first real touch. The plain page waits to be asked. */
+       by the first real touch. After that the plain page waits. */
     let demo = null;            // {s, t0} while the demo plays
     let demoOver = false;       // demo satellite is over the board
     let demoDone = false;       // it plays once — then never again
@@ -288,16 +251,28 @@
       };
       demo.ts.forEach(t => { demo.fadeA[t] = 1; });
       demo.s.state = 'demo';
+      demoSeen(true);
     }
 
     /* ?tables=3,5 — open with a mix already laid (up to MAX_OVERLAY),
        so a particular combination can be linked or shared;
-       ?demo=1 — the menu's watch button: perform at once */
+       ?demo=1 — perform on request (an adult's link, e.g. from help);
+       ?demo=reset — forget it was seen, so it plays again (testing) */
     const q = new URLSearchParams(location.search);
     const want = (q.get('tables') || '')
       .split(',').map(Number).filter(t => t >= T_MIN && t <= T_MAX);
     want.slice(0, MAX_OVERLAY).forEach(t => active.add(t));
-    const demoInvited = q.has('demo');   // performance by invitation only
+    const SEEN_KEY = 'mixPatternsDemoSeen';   // this device has watched
+    function demoSeen(mark) {        // private browsing may refuse storage
+      try {
+        if (mark === undefined) return !!localStorage.getItem(SEEN_KEY);
+        if (mark) localStorage.setItem(SEEN_KEY, '1');
+        else localStorage.removeItem(SEEN_KEY);
+      } catch (e) { return false; }
+    }
+    if (q.get('demo') === 'reset') demoSeen(false);
+    const demoInvited = q.get('demo') === '1'   // first visit, or asked
+      || (!want.length && !demoSeen());
 
     /* the classic hundred-square pattern: every multiple in the
        square, not just the first twelve — the point is comparing the
@@ -395,16 +370,6 @@
     cv.addEventListener('pointerup', release);
     cv.addEventListener('pointercancel', release);
     cv.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-
-    /* the encore eye — replaying is a real touch on THIS page, which
-       is what unlocks the voice where browsers withhold it (iOS).
-       It performs with a table that isn't on the board, so a laid
-       mix is never disturbed by the show */
-    document.getElementById('eye').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (demo || drag) return;
-      beginDemo();
-    });
 
     /* ---------- draw ---------- */
     const ease = k => 1 - Math.pow(1 - k, 3);

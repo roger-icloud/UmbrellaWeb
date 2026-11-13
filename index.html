@@ -111,36 +111,6 @@
       opacity: .45;
     }
 
-    /* the split: a tile plus a small "watch" button alongside —
-       the big tap plays, the small eye replays the page's own
-       wordless demo (?demo=1). Trial: Patterns tile (2026-11-12) */
-    .tilewrap {
-      position: relative;
-    }
-    .watch {
-      position: absolute;
-      right: 12px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 50%;
-      color: #4a5c6e;
-      text-decoration: none;
-    }
-    .watch:hover, .watch:active {
-      color: #cfd8e0;
-      background: #243244;
-    }
-    .watch svg {
-      width: 24px;
-      height: 24px;
-      display: block;
-    }
-
     .tile {
       -webkit-touch-callout: none;
     }
@@ -246,21 +216,11 @@
           <div class="name">Tilt Ball</div>
         </div>
       </a>
-      <div class="tilewrap">
-        <a class="tile" href="mix-patterns.html" title="Mix the table patterns together.">
-          <div>
-            <div class="name">Patterns</div>
-          </div>
-        </a>
-        <a class="watch" href="mix-patterns.html?demo=1" title="See for yourself." aria-label="Watch the demo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-            <ellipse cx="8" cy="12.3" rx="4" ry="5.5"/>
-            <ellipse cx="16.5" cy="11.3" rx="4.1" ry="5.8"/>
-            <circle cx="6.6" cy="13.4" r="1.6" fill="currentColor" stroke="none"/>
-            <circle cx="15.1" cy="12.3" r="1.6" fill="currentColor" stroke="none"/>
-          </svg>
-        </a>
-      </div>
+      <a class="tile" href="mix-patterns.html" title="Mix the table patterns together.">
+        <div>
+          <div class="name">Patterns</div>
+        </div>
+      </a>
       <a class="tile" href="feedback.html" title="Tell Roger what you think.">
         <div>
           <div class="name">Feedback</div>
@@ -288,7 +248,7 @@
     const tipEl = document.getElementById('tip');
     let tipTimer = 0, tipShown = false, tipFromTouch = false;
 
-    document.querySelectorAll('.tile[title], .watch[title]').forEach(t => {
+    document.querySelectorAll('.tile[title]').forEach(t => {
       t.dataset.tip = t.getAttribute('title');
       t.removeAttribute('title');
     });

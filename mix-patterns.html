@@ -34,6 +34,39 @@
     .hidden {
       display: none !important;
     }
+
+    /* the encore eye — same eyes as the menu's watch button;
+       top-left, mirroring the snake's top-right corner */
+    #eye {
+      position: fixed;
+      left: 12px;
+      top: calc(env(safe-area-inset-top, 0px) + 16px);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      color: #4a5c6e;
+      cursor: pointer;
+      padding: 0;
+      z-index: 5;
+    }
+    #eye:hover, #eye:active {
+      color: #cfd8e0;
+      background: #243244;
+    }
+    #eye svg {
+      width: 24px;
+      height: 24px;
+      display: block;
+    }
+
+    /* the peel-away sheet was tried and retired (2026-11-12): the
+       fade-down/fade-up handover replaced it — cinema grammar,
+       no DOM sheet at all */
   </style>
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
@@ -43,6 +76,15 @@
 <body>
 
   <canvas id="c"></canvas>
+
+  <button id="eye" title="Watch it again" aria-label="Replay the demo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+      <ellipse cx="8" cy="12.3" rx="4" ry="5.5"/>
+      <ellipse cx="16.5" cy="11.3" rx="4.1" ry="5.8"/>
+      <circle cx="6.6" cy="13.4" r="1.6" fill="currentColor" stroke="none"/>
+      <circle cx="15.1" cy="12.3" r="1.6" fill="currentColor" stroke="none"/>
+    </svg>
+  </button>
 
   <script>
     'use strict';
@@ -73,7 +115,8 @@
     const DIM_ALPHA = 0.3;     // idle satellites keep out of the way
     const TAP_DIST = 10;       // px of travel that still counts as tap
     const T_MIN = 2, T_MAX = 12;
-    const DEMO_DELAY = 900;    // ms before the satellite shows itself
+    const DEMO_DELAY = 400;    // ms before an invited performance begins
+    const SOUND = true;        // the page's quiet voice — the demo only
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
@@ -187,19 +230,71 @@
     let drag = null;            // the satellite currently held
     let overBoard = false;      // held satellite is over the drop zone
 
-    /* the self-demo: on first view a satellite lifts itself to the
-       board, lays its pattern and lifts it off again — the gesture
-       taught wordlessly, cancelled by the first real touch */
+    /* the self-demo: only when invited (?demo=1, the menu's eye) —
+       a satellite lifts itself to the board, lays its pattern and
+       lifts it off again; the gesture taught wordlessly, cancelled
+       by the first real touch. The plain page waits to be asked. */
     let demo = null;            // {s, t0} while the demo plays
     let demoOver = false;       // demo satellite is over the board
     let demoDone = false;       // it plays once — then never again
     let interacted = false;     // a real pointer has arrived
+    let lights = 0;             // house lights: 1 = stage dimmed for a show
+    let bowSat = null;          // the performer, stays lit as lights rise
+
+    /* the page's first voice — only the invited performance speaks:
+       one low note at the bow, the performer's sign-off. (The ring's
+       arpeggio was cut — a rising run is a jingle, slot-machine
+       grammar, Roger 2026-11-12.) Synthesised, no files; absent
+       silently where the browser holds sound until a touch (iOS) */
+    let AC = null;
+    function tone(freq, dur, vol) {
+      if (!SOUND) return;
+      try {
+        if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+        AC.resume();
+        if (AC.state !== 'running') return;
+        const t0 = AC.currentTime;
+        const o = AC.createOscillator(), g = AC.createGain();
+        o.type = 'triangle'; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g); g.connect(AC.destination);
+        o.start(t0); o.stop(t0 + dur + 0.05);
+      } catch (e) { /* no voice here — the show stays silent */ }
+    }
+    let lastTouchAt = -1e9;   // last real touch — quiet guard for fades
+
+    /* the handover, final form (Roger 2026-11-12, late): the demo
+       performs TWO tables — the second pattern overlays the first
+       and shared cells blend, teaching accumulation — then it
+       undoes itself: pause, hold, the colours drain one at a time,
+       the stage fades to black, and the fresh page comes up.
+       Cinema grammar — no flourish, and it works for every future
+       demo untouched */
+    let darkA = 0;              // fade-to-black level at the ending
+    function beginDemo() {
+      const free = sats.filter(x => x.t && !active.has(x.t)).map(x => x.t);
+      const pref = [2, 4].filter(t => free.includes(t));
+      const ts = pref.concat(free.filter(t => !pref.includes(t))).slice(0, 2);
+      if (!ts.length) return;
+      demo = {
+        ts, s: sats.find(x => x.t === ts[0]),
+        s2: ts[1] ? sats.find(x => x.t === ts[1]) : null,
+        t0: performance.now(), fadeA: {},
+      };
+      demo.ts.forEach(t => { demo.fadeA[t] = 1; });
+      demo.s.state = 'demo';
+    }
 
     /* ?tables=3,5 — open with a mix already laid (up to MAX_OVERLAY),
-       so a particular combination can be linked or shared */
-    const want = (new URLSearchParams(location.search).get('tables') || '')
+       so a particular combination can be linked or shared;
+       ?demo=1 — the menu's watch button: perform at once */
+    const q = new URLSearchParams(location.search);
+    const want = (q.get('tables') || '')
       .split(',').map(Number).filter(t => t >= T_MIN && t <= T_MAX);
     want.slice(0, MAX_OVERLAY).forEach(t => active.add(t));
+    const demoInvited = q.has('demo');   // performance by invitation only
 
     /* the classic hundred-square pattern: every multiple in the
        square, not just the first twelve — the point is comparing the
@@ -232,12 +327,17 @@
     }
 
     cv.addEventListener('pointerdown', (e) => {
+      if (AC && AC.state === 'suspended') AC.resume();  // a touch unlocks the voice
       interacted = true;
-      if (demo) {                // a real touch ends the performance
-        demo.s.state = 'parked';
-        demo.s.x = demo.s.home.x; demo.s.y = demo.s.home.y;
-        active.delete(demo.s.t);
-        demo = null; demoOver = false;
+      lastTouchAt = performance.now();
+      if (demo) {                // a real touch ends the performance —
+        for (const ds of [demo.s, demo.s2]) {    // park both performers,
+          if (ds) { ds.state = 'parked'; ds.x = ds.home.x; ds.y = ds.home.y;
+                    ds.press = 0; }
+        }
+        demo.ts.forEach(t => active.delete(t));  // lift what it laid,
+        darkA = 0;                               // raise the dark —
+        demo = null; demoOver = false;           // the board is yours
       }
       if (drag) return;
       for (let i = sats.length - 1; i >= 0; i--) {
@@ -279,6 +379,16 @@
     cv.addEventListener('pointerup', release);
     cv.addEventListener('pointercancel', release);
     cv.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+    /* the encore eye — replaying is a real touch on THIS page, which
+       is what unlocks the voice where browsers withhold it (iOS).
+       It performs with a table that isn't on the board, so a laid
+       mix is never disturbed by the show */
+    document.getElementById('eye').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (demo || drag) return;
+      beginDemo();
+    });
 
     /* ---------- draw ---------- */
     const ease = k => 1 - Math.pow(1 - k, 3);
@@ -454,44 +564,61 @@
       const now = performance.now();
       ctx.clearRect(0, 0, W, H);
 
-      /* the self-demo, until a real touch arrives — a silent lesson
-         in both halves of the gesture (Roger 2026-11-12) */
-      if (!interacted && !demoDone && !demo && now > DEMO_DELAY
+      /* the self-demo, only when invited — a silent lesson in both
+         halves of the gesture (Roger 2026-11-12) */
+      if (demoInvited && !interacted && !demoDone && !demo && now > DEMO_DELAY
           && active.size === 0) {
-        demo = { s: sats.find(s => s.t === 2), t0: now };
-        demo.s.state = 'demo';
+        beginDemo();
       }
       if (demo) {
-        const s = demo.s, k = now - demo.t0;
-        const hx = s.home.x, hy = s.home.y;
+        let k = now - demo.t0;
         const lerp = (a, b, e) => a + (b - a) * e;
-        /* the honest story: fly on, hover+preview, land — then HOME,
-           the pattern staying behind (that is what a real drop does).
-           A beat parked with its "on" halo; back out for the lift-off
-           tap; home once more. On and off in one performance. */
-        if (k < 1100) {                          // fly to the board
-          const e = easeIO(k / 1100);
-          s.x = lerp(hx, cx, e); s.y = lerp(hy, cy, e);
-          demoOver = e > 0.75;
-        } else if (k < 1800) {                   // hover — the preview
-          s.x = cx; s.y = cy; demoOver = true;   // shows where it lands
-        } else if (k < 1900) {                   // land
-          s.x = cx; s.y = cy; demoOver = false;
-          if (!active.has(s.t)) active.add(s.t);
-        } else if (k < 3000) {                   // home — pattern stays
-          const e = easeIO((k - 1900) / 1100);
-          s.x = lerp(cx, hx, e); s.y = lerp(cy, hy, e);
-        } else if (k < 4200) {                   // a beat, on duty
-          s.state = 'parked'; s.x = hx; s.y = hy; s.press = 0;
-        } else if (k < 4550) {                   // the honest "off" —
-          const p = (k - 4200) / 350;            // a press AT HOME lifts
-          s.press = Math.sin(Math.PI * Math.min(1, p));  // the pattern
-          if (p >= 0.5 && active.has(s.t)) active.delete(s.t);
-        } else if (k < 5000) {                   // settle
-          s.press = 0; s.x = hx; s.y = hy;
+        if (!demo.s2 && k >= 3800) k += 3800;    // one free table? solo act
+        let s = demo.s;
+        if (k >= 3800 && demo.s2 && s !== demo.s2) {
+          s.state = 'parked'; s = demo.s = demo.s2; s.state = 'demo';
+        }
+        const hx = s.home.x, hy = s.home.y;
+        /* two acts, one lesson: fly on, preview, land, home — twice,
+           so the second pattern overlays the first and shared cells
+           blend. Then it undoes itself: pause, hold, the colours
+           drain one at a time, the stage fades to black, and the
+           fresh page comes up — over to you. */
+        const A = k < 3800 ? k : k - 3800;       // act-local clock
+        if (k < 8000) {
+          if (A < 1100) {                        // fly to the board
+            const e = easeIO(A / 1100);
+            s.x = lerp(hx, cx, e); s.y = lerp(cy, hy, e);
+            demoOver = e > 0.75;
+          } else if (A < 1800) {                 // hover — the preview
+            s.x = cx; s.y = cy; demoOver = true;
+          } else if (A < 1900) {                 // land
+            s.x = cx; s.y = cy; demoOver = false;
+            if (!active.has(s.t)) active.add(s.t);
+          } else if (A < 3000) {                 // home, pattern stays
+            const e = easeIO((A - 1900) / 1100);
+            s.x = lerp(cx, hx, e); s.y = lerp(cy, hy, e);
+          } else {                               // hold — the mix stands
+            s.state = 'parked'; s.x = hx; s.y = hy; s.press = 0;
+          }
+        } else if (k < 8500) {                   // the bow — the last
+          const p = (k - 8000) / 500;            // performer nods
+          s.x = hx; s.y = hy + Math.sin(Math.PI * Math.min(1, p)) * 5;
+          if (!demo.bowed) { demo.bowed = true; tone(98, 1.3, 0.05); }
+        } else if (k < 9700) {                   // the colours drain —
+          const fi = k < 9100 ? 0 : 1;           // first table first
+          const t = demo.ts[fi];
+          const p = Math.min(1, (k - 8500 - fi * 600) / 600);
+          demo.fadeA[t] = 1 - p;
+          if (p >= 1) active.delete(t);
+        } else if (k < 10400) {                  // fade to black
+          darkA = Math.min(1, (k - 9700) / 700);
+        } else if (k < 11200) {                  // bring up fresh
+          darkA = 1 - (k - 10400) / 800;
         } else {
           s.state = 'parked'; s.x = hx; s.y = hy;
           demo = null; demoOver = false; demoDone = true;
+          darkA = 0; bowSat = s;
         }
       }
       const held = drag || (demo ? demo.s : null);
@@ -533,6 +660,21 @@
             blendFill(x + CELL_GAP / 2, y + CELL_GAP / 2,
               cell - CELL_GAP, ts);
           }
+          /* the unlaying: each table's colour drains toward the cell
+             dark in turn as the performance ends (Roger 2026-11-12) */
+          if (demo && demo.fadeA) {
+            for (const t of ts) {
+              const a = demo.fadeA[t];
+              if (a !== undefined && a < 1) {
+                ctx.save();
+                ctx.globalAlpha = 1 - a;
+                ctx.fillStyle = '#1a2430';
+                ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
+                  cell - CELL_GAP, cell - CELL_GAP);
+                ctx.restore();
+              }
+            }
+          }
           if (preview) {
             ctx.save();
             ctx.globalAlpha = PREVIEW_A;
@@ -568,17 +710,28 @@
       }
       /* the stage convention: while the demo plays, everyone but the
          performer falls back — "an animation is in progress" without
-         a word of it (Roger 2026-11-12) */
-      if (demo) {
-        ctx.fillStyle = 'rgba(16,20,24,.55)';
+         a word of it; when the show ends the house lights come up
+         slowly, never snap (Roger 2026-11-12) */
+      lights += ((demo ? 1 : 0) - lights) * (demo ? 0.18 : 0.05);
+      if (lights > 0.02) {
+        ctx.fillStyle = 'rgba(16,20,24,' + (0.55 * lights).toFixed(3) + ')';
+        const stage = demo ? demo.s : bowSat;
         for (const s of sats) {
-          if (s === demo.s) continue;
+          if (s === stage) continue;
           roundRect(s.x - sat / 2, s.y - sat / 2, sat, sat, sat * 0.14);
           ctx.fill();
         }
       }
+      if (!demo && lights < 0.02) bowSat = null;
       if (drag) drawSatellite(drag);
       else if (demo) drawSatellite(demo.s);
+
+      /* the ending dark — the stage fades out, then the fresh page
+         fades up on the other side of it */
+      if (darkA > 0) {
+        ctx.fillStyle = 'rgba(16,20,24,' + Math.min(1, darkA) + ')';
+        ctx.fillRect(0, 0, W, H);
+      }
     }
 
     layout();

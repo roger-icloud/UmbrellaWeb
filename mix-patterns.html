@@ -231,6 +231,7 @@
     let overBoard = false;      // held satellite is over the drop zone
     let grow = 0, growT = 0;    // hover colour: 0 none … 1 half the cell
     let lastDraw = 0;
+    let landed = null;          // {t, at, g0, mixing}: the table just laid, settling
 
     /* the self-demo: only when invited (?demo=1, the menu's eye) —
        a satellite lifts itself to the board, lays its pattern and
@@ -317,7 +318,20 @@
         s.refuseUntil = performance.now() + 450;
         return;
       }
+      noteLanded(s.t, performance.now());
       active.add(s.t);
+    }
+    /* the settle: a dropped table carries on shading at the hover's
+       pace — half a cell becomes whole, a shared cell finishes its
+       split, cells the hover kept back shade in from nothing */
+    function noteLanded(t, at) {
+      landed = { t, at, g0: growT === t ? easeIO(grow) : 0,
+                 mixing: active.size > 0 };
+    }
+    function settleW(from, span, el) {   // eased progress, from → span
+      if (from >= span) return span;
+      return from + (span - from)
+        * easeIO(Math.min(1, el / ((span - from) * PREVIEW_MS)));
     }
     /* a drop "takes" only if it would add within the limit or lift an
        active pattern off — used for preview and drop-zone glow */
@@ -603,7 +617,9 @@
            fresh page comes up — over to you. */
         const A = k < 3800 ? k : k - 3800;       // act-local clock
         if (k >= 9700) demo.ts.forEach(t => active.delete(t));  // drained — gone
-        if (k < 8000 && A >= 1800) active.add(s.t);  // landed — even if a slow frame skipped the moment
+        if (k < 8000 && A >= 1800 && !active.has(s.t)) {  // landed — even if a
+          noteLanded(s.t, now); active.add(s.t);           // slow frame skipped it
+        }
         if (k < 8000) {
           if (A < 1100) {                        // fly to the board
             const e = easeIO(A / 1100);
@@ -665,19 +681,28 @@
           const y = bY + r * cell;
           const ts = claims(v);
           const preview = growT && grow > 0 && !active.has(growT)
-                          && active.size < MAX_OVERLAY && member(growT, v);
+                          && active.size < MAX_OVERLAY && member(growT, v)
+                          && (active.size === 0 || ts.length > 0);  // shared only, once mixing
 
           ctx.fillStyle = '#1a2430';
           ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
             cell - CELL_GAP, cell - CELL_GAP);
 
-          if (ts.length === 1) {
+          const x0 = x + CELL_GAP / 2, y0 = y + CELL_GAP / 2, sz = cell - CELL_GAP;
+          const lt = landed && ts.includes(landed.t) ? landed.t : 0;
+          const el = lt ? now - landed.at : 0;
+          const w = lt && ts.length === 1
+            ? settleW(landed.mixing ? 0 : landed.g0, 2, el) : 2;
+          if (ts.length === 1 && w < 1) {          // shading in, up to half
+            blendFill(x0, y0, sz, [0, lt], { i: 1, g: w });
+          } else if (ts.length === 1 && w < 2) {   // half on to whole
+            blendFill(x0, y0, sz, [0, lt], { i: 0, g: 2 - w });
+          } else if (ts.length === 1) {
             ctx.fillStyle = tableColour(ts[0]);
-            ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
-              cell - CELL_GAP, cell - CELL_GAP);
+            ctx.fillRect(x0, y0, sz, sz);
           } else if (ts.length > 1) {
-            blendFill(x + CELL_GAP / 2, y + CELL_GAP / 2,
-              cell - CELL_GAP, ts);
+            const g = lt ? settleW(landed.g0, 1, el) : 1;
+            blendFill(x0, y0, sz, ts, g < 1 ? { i: ts.indexOf(lt), g } : undefined);
           }
           /* the unlaying: each table's colour drains toward the cell
              dark in turn as the performance ends (Roger 2026-11-12) */

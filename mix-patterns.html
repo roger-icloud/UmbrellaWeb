@@ -109,7 +109,7 @@
     const MAX_OVERLAY = 3;     // patterns may mix three deep, no deeper
     const FLY_MS = 320;        // satellite fly-home duration
     const DRAG_SCALE = 1.25;   // satellite grows a touch while held
-    const PREVIEW_A = 0.3;     // would-be pattern alpha during hover
+    const PREVIEW_MS = 400;    // hover colour grows into its share of the split
     const BLEND_FRAC = 0.3;    // sector fraction spent blending onward
     const PASTEL_LIFT = 0.7;   // how far toward white a chosen tile goes
     const DIM_ALPHA = 0.3;     // idle satellites keep out of the way
@@ -229,6 +229,8 @@
     const active = new Set();   // tables whose pattern is on the board
     let drag = null;            // the satellite currently held
     let overBoard = false;      // held satellite is over the drop zone
+    let grow = 0, growT = 0;    // hover colour: 0 none … 1 half the cell
+    let lastDraw = 0;
 
     /* the self-demo: only when invited (?demo=1, the menu's eye) —
        a satellite lifts itself to the board, lays its pattern and
@@ -528,9 +530,19 @@
        iPhone-8 vintage of Safari gets the same picture. Clipped to
        the cell: the blend never escapes the square (Roger 2026-11-12:
        bulging past the grid sent mixed messages). */
-    function blendFill(x, y, sz, ts) {
-      const cols = ts.map(tableRGB);
+    const CELL_RGB = [26, 36, 48];   // the empty cell's own dark, #1a2430
+    function blendFill(x, y, sz, ts, arriving) {
+      const cols = ts.map(t => t ? tableRGB(t) : CELL_RGB);
       const n = cols.length;
+      /* arriving = {i, g}: colour i is still growing in, g of its
+         share — centred where it will settle, so landing only
+         confirms what the hover already showed */
+      const w = cols.map((c, i) => arriving && i === arriving.i ? arriving.g : 1);
+      const tot = w.reduce((a, b) => a + b, 0);
+      const start = []; let acc = 0;
+      w.forEach(v => { start.push(acc); acc += v / tot; });
+      const rot = arriving
+        ? (arriving.i + 0.5) / n - (start[arriving.i] + w[arriving.i] / tot / 2) : 0;
       const cxp = x + sz / 2, cyp = y + sz / 2, rad = sz / Math.SQRT2;
       const STEPS = 120, da = Math.PI * 2 / STEPS;
       ctx.save();
@@ -539,13 +551,18 @@
       ctx.clip();
       for (let i = 0; i < STEPS; i++) {
         const a0 = -Math.PI / 2 + i * da;
-        const p = ((i + 0.5) / STEPS) * n;
-        const ci = Math.floor(p) % n, f = p - Math.floor(p);
+        const p = (((i + 0.5) / STEPS - rot) % 1 + 1) % 1;
+        let ci = n - 1;
+        while (ci > 0 && p < start[ci]) ci--;
+        const wd = w[ci] / tot;
+        const f = wd > 0 ? (p - start[ci]) / wd : 1;
         let col = cols[ci];
         if (f > 1 - BLEND_FRAC) {
-          const k = (f - (1 - BLEND_FRAC)) / BLEND_FRAC;
-          const e = k * k * (3 - 2 * k);           // smoothstep
-          const nx = cols[(ci + 1) % n];
+          const k = Math.min(1, (f - (1 - BLEND_FRAC)) / BLEND_FRAC);
+          const nj = (ci + 1) % n;                 // an arriving neighbour
+          const e = k * k * (3 - 2 * k)            // smoothstep, softened
+            * (arriving && nj === arriving.i ? arriving.g : 1);  // in by it
+          const nx = cols[nj];
           col = cols[ci].map((v, j) => Math.round(v + (nx[j] - v) * e));
         }
         ctx.fillStyle = 'rgb(' + col + ')';
@@ -586,6 +603,7 @@
            fresh page comes up — over to you. */
         const A = k < 3800 ? k : k - 3800;       // act-local clock
         if (k >= 9700) demo.ts.forEach(t => active.delete(t));  // drained — gone
+        if (k < 8000 && A >= 1800) active.add(s.t);  // landed — even if a slow frame skipped the moment
         if (k < 8000) {
           if (A < 1100) {                        // fly to the board
             const e = easeIO(A / 1100);
@@ -595,7 +613,6 @@
             s.x = cx; s.y = cy; demoOver = true;
           } else if (A < 1900) {                 // land
             s.x = cx; s.y = cy; demoOver = false;
-            if (!active.has(s.t)) active.add(s.t);
           } else if (A < 3000) {                 // home, pattern stays
             const e = easeIO((A - 1900) / 1100);
             s.x = lerp(cx, hx, e); s.y = lerp(cy, hy, e);
@@ -622,6 +639,10 @@
       }
       const held = drag || (demo ? demo.s : null);
       const overB = drag ? overBoard : (demo ? demoOver : false);
+      const growOn = held && overB && held.t !== 0;
+      if (growOn) growT = held.t;
+      const dt = Math.min(50, now - lastDraw); lastDraw = now;
+      grow = Math.max(0, Math.min(1, grow + (growOn ? 1 : -1) * dt / PREVIEW_MS));
 
       /* drop-zone glow while a satellite hovers over the board —
          amber when this one would be refused (three deep already) */
@@ -643,9 +664,8 @@
           const x = bX + c * cell;
           const y = bY + r * cell;
           const ts = claims(v);
-          const preview = held && overB && held.t !== 0
-                          && !active.has(held.t) && active.size < MAX_OVERLAY
-                          && member(held.t, v);
+          const preview = growT && grow > 0 && !active.has(growT)
+                          && active.size < MAX_OVERLAY && member(growT, v);
 
           ctx.fillStyle = '#1a2430';
           ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
@@ -674,13 +694,13 @@
               }
             }
           }
-          if (preview) {
-            ctx.save();
-            ctx.globalAlpha = PREVIEW_A;
-            ctx.fillStyle = tableColour(held.t);
-            ctx.fillRect(x + CELL_GAP / 2, y + CELL_GAP / 2,
-              cell - CELL_GAP, cell - CELL_GAP);
-            ctx.restore();
+          if (preview) {         // would-be colour grows in, soft as the real split
+            const mix = ts.length
+              ? sats.filter(s => s.t && (active.has(s.t) || s.t === growT)
+                                 && member(s.t, v)).map(s => s.t)
+              : [0, growT];
+            blendFill(x + CELL_GAP / 2, y + CELL_GAP / 2, cell - CELL_GAP,
+              mix, { i: mix.indexOf(growT), g: easeIO(grow) });
           }
 
           ctx.fillStyle = ts.length ? '#fff' : '#8a97a3';

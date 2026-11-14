@@ -160,7 +160,7 @@
          wrong-but-legal hole any more.
        · Tap a hole to send the live ball there; tilt or a dragged
          finger always overrides.
-       · Holes unlock in school-table order (2,10 → 5 → 4 → 3 → 6 →
+       · Holes unlock in school-table order (2,10,3 → 5 → 4 → 6 →
          8 → 9 → "?" → 7 → 13), rows centring on the table so odd
          counts stay symmetric.
        · "?" lives on the centre rail — always central when it opens.
@@ -228,21 +228,23 @@
          home first-try — otherwise the same stage re-deals
        Session-only for now; a saved profile just restores `stage`. */
     const STAGES = [
-      { holes: [2, 10] },                             // last digit: even and 0
-      { holes: [2, 10, 5] },                          // last digit: 5s join
-      { holes: [2, 10, 5, 4] },                       // ×4 arrives
-      { holes: [2, 10, 5, 4, 3] },                    // digit sum: 3s
-      { holes: [2, 10, 5, 4, 3, 6] },                 // 6 = fits 2 AND 3
-      { holes: [2, 10, 5, 4, 3, 6, 8] },              // ×8
-      { holes: [2, 10, 5, 4, 3, 6, 8, 9] },           // digit sum: 9s
-      { holes: [2, 10, 5, 4, 3, 6, 8, 9, 0] },        // "?" goes live
-      { holes: [2, 10, 5, 4, 3, 6, 8, 9, 0, 7] },     // 7: real division
-      { holes: [2, 10, 5, 4, 3, 6, 8, 9, 0, 7, 13] }, // 13: the deep shot
+      /* 3 opens with 2 and 10 (Roger, 2026-11-14): with 2 and 10
+         alone, eight of ten balls were bound for the 2 hole */
+      { holes: [2, 10, 3] },                          // even, 0, and the 3s
+      { holes: [2, 10, 3, 5] },                       // last digit: 5s join
+      { holes: [2, 10, 3, 5, 4] },                    // ×4 arrives
+      { holes: [2, 10, 3, 5, 4, 6] },                 // 6 = fits 2 AND 3
+      { holes: [2, 10, 3, 5, 4, 6, 8] },              // ×8
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9] },           // digit sum: 9s
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9, 0] },        // "?" goes live
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9, 0, 7] },     // 7: real division
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9, 0, 7, 13] }, // 13: the deep shot
     ];
     /* each hole deals only its own school-table range — Roger's
        ranges (2026-10-26): no 36 or 98 dumped down the 2 hole;
        values stay meaningful multiples, like flash-cards */
-    const EARLY_CEIL = 24;   // all deals stay below this while ≤3 holes
+    const EARLY_CEIL = 50;   /* all deals stay below this while ≤3 holes
+        (was 24 — it left the 10 hole only 10 and 20) */
     const MAX_CEIL = 100;    // absolute bound once the table grows
     const MULT_MAX = {       // highest multiplier each hole serves
       2: 12, 3: 12, 4: 12, 5: 11, 6: 12, 7: 12,
@@ -258,6 +260,49 @@
     const AXIS_FLIP = qs.get('tilt') === 'invert' ? true
       : qs.get('tilt') === 'normal' ? false
         : /android/i.test(navigator.userAgent);
+
+    /* ROGER NOTE (2026-11-14) — the twinkle is shelved: "too much
+       visual is pinball / one-arm-bandit territory". When a ball had
+       a choice of holes and went to the deepest, one soft chime —
+       sound only, so it stays a bonus (many children play muted).
+       One note, never a run: a rising run is a jingle. */
+    const SINK_GLINT = false;    // the old sparkle on every sink
+    const CHIME_VOL = qs.get('chime') === '0' ? 0 : 0.05;  // 0 = silent
+    const CHIME_HZ = 1760;       // a small high bell
+    const CHIME_SECS = 0.9;      // its ring-out
+    /* the rack's spread (Roger: "fewer numbers that have many common
+       factors"): numbers that fit MANY_HOLES or more of the open holes
+       are held to MANY_SHARE of the rack. Low = mostly numbers with
+       one home, each a real decision; a few many-home numbers keep
+       the "which hole?" choice. ?many=0.5 to compare */
+    const MANY_HOLES = 3;
+    const MANY_SHARE = qs.has('many') ? +qs.get('many') : 0.2;
+    /* the table's geography (Roger, 2026-10-31 / 11-14):
+       'lesson'  — the newest holes at the front, the proven ones
+                   drift back; the easy hole becomes the long shot
+       'classic' — easy near, hard far (the bar-billiards layout)
+       ?layout=classic to compare */
+    const LAYOUT = qs.get('layout') || 'lesson';
+    /* the ball rolls and its number rolls with it (Roger, 2026-11-14:
+       "we are having a game after all") — printed on the sphere like
+       a pool ball, it turns away and comes round again. The child
+       chose the ball, so they know its number; holding it in mind
+       is part of the game. ?roll=0 for the flat face */
+    const NUMBER_ROLLS = qs.get('roll') !== '0';
+    /* printed twice, on opposite sides, as real pool balls are — one
+       is nearly always somewhere on top, caught with a glance.
+       ?spots=1 for a single print */
+    const NUMBER_SPOTS = qs.get('spots') === '1' ? 1 : 2;
+    /* the printed spot's size, as a share of the ball's radius. Deals
+       stop at 100, the only three-digit number — it alone is squeezed
+       to fit; one and two digits print at full size */
+    const SPOT_SIZE = 0.72;
+    /* touch to release: no ball feeds by itself — the child picks
+       one from the rack, which asks them to choose rather than tap
+       idly. 'auto' is the old self-feeding rack. ?feed=auto */
+    const RACK_FEED = qs.get('feed') === 'auto' ? 'auto' : 'touch';
+    const RACK_BREATHE = 0.04;   // waiting rack's faint swell (0 = still)
+    const HOLE_GLIDE = 1.2;      // s for holes to slide to a new row between rounds
 
     /* ---------- canvas: virtual resolution ----------
        Same scheme as snake.html: the sim runs in "design px" on a board
@@ -304,7 +349,8 @@
     let sink = null;           // {hole, k} while a right hole swallows it
     let flashUntil = 0;        // wrong-hole amber rim timestamp
     let holeFlash = null;      // which hole is flashing
-    let stage = 0;             // curriculum level (index into STAGES)
+    let stage = Math.max(0, Math.min(STAGES.length - 1,
+      parseInt(qs.get('stage'), 10) - 1 || 0));   // ?stage=N to start at N             // curriculum level (index into STAGES)
     const hasTaken = new Set(); // holes that have taken ≥1 ball (new-hole halo)
     let rack = [];             // [{v, home}] waiting balls, order = display
     let rackBorn = 0;          // rack fade-in cascade clock
@@ -332,17 +378,78 @@
 
     /* rails lay each row out centred on the table, so any count
        reads symmetric; positions refresh on resize (Wd/Hd change) */
-    function layOut() {
+    function layOut(now) {
+      const hs = activeHoles();
+      let rowOf = h => h.rail;
+      if (LAYOUT !== 'classic') {
+        /* newest first: fill the front row, then the middle, then
+           the back; "?" keeps its centre rail */
+        const order = STAGES[STAGES.length - 1].holes;
+        const ranked = hs.filter(h => h.v !== 0)
+          .sort((a, b) => order.indexOf(b.v) - order.indexOf(a.v));
+        const hasQ = hs.some(h => h.v === 0);
+        const rowAt = new Map();
+        let i = 0;
+        for (const [name, cap] of [['near', 4], ['mid', 4], ['far', hasQ ? 2 : 3]])
+          for (let k = 0; k < cap && i < ranked.length; k++) rowAt.set(ranked[i++], name);
+        /* the 2 takes every even number, so it never sits at the
+           front — even on the first table it waits behind */
+        const two = hs.find(h => h.v === 2);
+        if (two && rowAt.get(two) === 'near') rowAt.set(two, 'mid');
+        rowOf = h => h.v === 0 ? 'ctr' : rowAt.get(h);
+      }
       for (const name in RAIL) {
         const r = RAIL[name];
-        r[name] = activeHoles().filter(h => h.rail === name);
-        r[name].forEach((h, i) => {
-          h.fx = r.xs[r[name].length][i];
-          h.fy = r.y;
+        let row = hs.filter(h => rowOf(h) === name);
+        if (LAYOUT !== 'classic') row = row.sort((a, b) => a.v - b.v);
+        row.forEach((h, i) => {
+          const fx = r.xs[row.length][i], fy = r.y;
+          if (now !== undefined && h.fx !== undefined &&
+              (h.fx !== fx || h.fy !== fy)) {
+            const [x, y] = holeAt(h, now);
+            h.ox = x; h.oy = y; h.moveAt = now;
+          }
+          h.fx = fx; h.fy = fy;
         });
       }
     }
-    const holeX = h => h.fx * Wd, holeY = h => h.fy * playH();
+    /* a hole that changed rows slides there, eased */
+    function holeAt(h, now) {
+      if (h.moveAt === undefined) return [h.fx, h.fy];
+      const k = Math.min(1, (now - h.moveAt) / (HOLE_GLIDE * 1000));
+      if (k >= 1) { h.moveAt = undefined; return [h.fx, h.fy]; }
+      const e = k * k * (3 - 2 * k);
+      return [h.ox + (h.fx - h.ox) * e, h.oy + (h.fy - h.oy) * e];
+    }
+    const holeX = h => holeAt(h, performance.now())[0] * Wd,
+      holeY = h => holeAt(h, performance.now())[1] * playH();
+
+    /* the chime — synthesised, no files; silent where the browser
+       holds sound until a touch */
+    let AC = null;
+    function wakeSound() {
+      try {
+        if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+        AC.resume();
+      } catch (e) { /* no voice here */ }
+    }
+    addEventListener('pointerdown', wakeSound, { passive: true });
+    addEventListener('touchstart', wakeSound, { passive: true });
+    function chime() {
+      if (!CHIME_VOL || !AC || AC.state !== 'running') return;
+      try {
+        const t0 = AC.currentTime;
+        for (const [f, v] of [[CHIME_HZ, 1], [CHIME_HZ * 2.76, 0.25]]) {
+          const o = AC.createOscillator(), g = AC.createGain();
+          o.type = 'sine'; o.frequency.value = f;
+          g.gain.setValueAtTime(0.0001, t0);
+          g.gain.exponentialRampToValueAtTime(CHIME_VOL * v, t0 + 0.006);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + CHIME_SECS * (v < 1 ? 0.4 : 1));
+          o.connect(g); g.connect(AC.destination);
+          o.start(t0); o.stop(t0 + CHIME_SECS + 0.05);
+        }
+      } catch (e) { /* stays silent */ }
+    }
 
     /* where each waiting ball sits — wraps to two rows, centred;
        the front of the queue is top-left */
@@ -449,11 +556,23 @@
         }
         left--;
       }
+      /* many-home numbers are rationed (MANY_SHARE); a hole whose
+         every value is many-home still gets its ball */
       rack = [];
+      let manyLeft = Math.round(MANY_SHARE * RACK_SIZE);
+      const isMany = n => fitsSet(n).length >= MANY_HOLES;
       for (const h of homes) {
         const pool = byHome.get(h).slice();
-        for (let i = 0; i < quota.get(h) && pool.length; i++)
-          rack.push({ v: pool.splice(Math.floor(Math.random() * pool.length), 1)[0], home: h });
+        for (let i = 0; i < quota.get(h) && pool.length; i++) {
+          const fewer = pool.filter(n => !isMany(n)), more = pool.filter(isMany);
+          const takeMore = more.length > 0 && (!fewer.length ||
+            (manyLeft > 0 && Math.random() < MANY_SHARE));
+          const from = takeMore ? more : fewer;
+          const v = from[Math.floor(Math.random() * from.length)];
+          pool.splice(pool.indexOf(v), 1);
+          if (takeMore) manyLeft--;
+          rack.push({ v, home: h });
+        }
       }
       /* shuffle so one home's balls don't arrive in a block, and
          trim if more homes than rack slots */
@@ -546,7 +665,7 @@
       stage = Math.min(stage + (adv ? 1 : 0), STAGES.length - 1);
       const prevVs = stage > 0 ? STAGES[stage - 1].holes : [];
       newHoleVs = STAGES[stage].holes.filter(v => !prevVs.includes(v));
-      layOut();
+      layOut(now);
       hasTaken.clear();
       for (const h of activeHoles())
         if (h.born === undefined) h.born = now;
@@ -724,7 +843,8 @@
       }
 
       /* feed the next waiting ball once the beat has passed */
-      if (!flight && !ballNum && rack.length && now >= launchAt) {
+      if (!flight && !ballNum && rack.length && now >= launchAt &&
+          (RACK_FEED === 'auto' || pendingPick >= 0)) {
         const idx = pendingPick >= 0 && pendingPick < rack.length ? pendingPick : 0;
         pendingPick = -1;
         launchBall(idx, now);
@@ -799,7 +919,11 @@
         if (e >= 1) {
           if (!refused) cleanSinks++;
           hasTaken.add(sink.hole);
-          glints.push({ hole: sink.hole, at: now, s: TWINKLE_SECS, kind: 'spark' });
+          if (SINK_GLINT)
+            glints.push({ hole: sink.hole, at: now, s: TWINKLE_SECS, kind: 'spark' });
+          const fs = fitsSet(ballNum).filter(h => h.v !== 0);
+          if (fs.length > 1 &&
+              sink.hole.depth === Math.max(...fs.map(h => h.depth))) chime();
           ballNum = 0; ballHome = null; sink = null; auto = null;
           if (rack.length) launchAt = now + LAUNCH_GAP;
           else endRound(now);
@@ -941,7 +1065,12 @@
         const a = Math.min((now - rackBorn - i * 60) / 500, 1);
         if (a <= 0) continue;
         ctx.globalAlpha = a;
-        if (i === 0) {
+        /* waiting for a choice: the whole rack breathes, a slow
+           wave along the rail */
+        const waiting = RACK_FEED === 'touch' && !ballNum && !flight;
+        const rr = RACK_R * (waiting
+          ? 1 + RACK_BREATHE * Math.sin(now / 650 - i * 0.6) : 1);
+        if (i === 0 && RACK_FEED === 'auto') {
           const p = 0.5 + 0.5 * Math.sin(now / 420);
           ctx.strokeStyle = `rgba(142,201,255,${0.25 + 0.2 * p})`;
           ctx.lineWidth = 1.4;
@@ -950,12 +1079,12 @@
           ctx.stroke();
         }
         ctx.fillStyle = '#16324e';
-        ctx.beginPath(); ctx.arc(s.x, s.y, RACK_R, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s.x, s.y, rr, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = 'rgba(120,150,175,.4)';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(s.x, s.y, RACK_R - 1, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(s.x, s.y, rr - 1, 0, Math.PI * 2); ctx.stroke();
         ctx.fillStyle = '#cfd8e0';
-        ctx.font = '700 ' + Math.round(RACK_R * 0.95) +
+        ctx.font = '700 ' + Math.round(rr * 0.95) +
           'px Andika, -apple-system, system-ui, sans-serif';
         ctx.fillText(String(it.v), s.x, s.y + 1);
         ctx.globalAlpha = 1;
@@ -971,7 +1100,8 @@
         const fr = flight.mode === 'launch'
           ? RACK_R + (BALL_R - RACK_R) * e
           : BALL_R + (RACK_R - BALL_R) * e;
-        drawBall(fx, fy, fr, flight.v, 1);
+        if (NUMBER_ROLLS) drawRolling(fx, fy, fr, flight.v, 1, [0, 0, 1], [0, -1, 0]);
+        else drawBall(fx, fy, fr, flight.v, 1);
         return;
       }
 
@@ -982,7 +1112,86 @@
       let r = BALL_R * (0.6 + 0.4 * Math.min(age / BALL_FADE, 1));
       if (sink) { r *= (1 - sink.k) * (1 - sink.k); a *= 1 - sink.k; }
       if (r < 0.5 || a <= 0) return;
-      drawBall(ball.x, ball.y, r, ballNum, a);
+      if (NUMBER_ROLLS) {
+        rollBall(ball.x, ball.y);
+        drawRolling(ball.x, ball.y, r, ballNum, a);
+      } else drawBall(ball.x, ball.y, r, ballNum, a);
+    }
+
+    /* the rolling ball's orientation: two unit vectors on the sphere
+       — spot = where the number is printed, up = the number's top.
+       z points at the viewer; a fresh ball shows its number upright */
+    const roll = { born: -1, x: 0, y: 0,
+      spot: [0, 0, 1], up: [0, -1, 0] };
+    function turn(v, k, c, sn) {          // Rodrigues: v about unit k
+      const d = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+      const cx = k[1] * v[2] - k[2] * v[1], cy = k[2] * v[0] - k[0] * v[2],
+        cz = k[0] * v[1] - k[1] * v[0];
+      return [v[0] * c + cx * sn + k[0] * d * (1 - c),
+        v[1] * c + cy * sn + k[1] * d * (1 - c),
+        v[2] * c + cz * sn + k[2] * d * (1 - c)];
+    }
+    function rollBall(x, y) {
+      if (roll.born !== ballBorn) {
+        roll.born = ballBorn; roll.x = x; roll.y = y;
+        roll.spot = [0, 0, 1]; roll.up = [0, -1, 0];
+        return;
+      }
+      const dx = x - roll.x, dy = y - roll.y, d = Math.hypot(dx, dy);
+      roll.x = x; roll.y = y;
+      if (d < 1e-3 || d > BALL_R * 3) return;   // still, or a jump
+      /* rolling distance d turns the ball d/r about the axis lying
+         flat and square to the travel — the top runs forward */
+      const k = [-dy / d, dx / d, 0], th = d / BALL_R;
+      const c = Math.cos(th), sn = Math.sin(th);
+      const sp = turn(roll.spot, k, c, sn), up = turn(roll.up, k, c, sn);
+      const ls = Math.hypot(...sp);
+      roll.spot = sp.map(q => q / ls);
+      const dot = up[0] * roll.spot[0] + up[1] * roll.spot[1] + up[2] * roll.spot[2];
+      const u = up.map((q, i) => q - dot * roll.spot[i]), lu = Math.hypot(...u);
+      roll.up = u.map(q => q / lu);
+    }
+    function drawRolling(x, y, r, num, a, p0 = roll.spot, q = roll.up) {
+      ctx.globalAlpha = a;
+      const grd = ctx.createRadialGradient(
+        x - r * 0.35, y - r * 0.35, r * 0.2, x, y, r);
+      grd.addColorStop(0, '#8ec9ff');
+      grd.addColorStop(1, '#1660c8');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      for (const sg of NUMBER_SPOTS === 2 ? [1, -1] : [1]) {
+        const p = p0.map(c => c * sg);
+        if (p[2] <= 0) continue;
+        /* the printed spot, seen from straight above: map its flat
+           axes (right, down) onto the sphere's tangent plane there —
+           foreshortening and turning come free */
+        const rt = [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2],
+          p[0] * q[1] - p[1] * q[0]];
+        const u = r / 50;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+        ctx.globalAlpha = a * Math.min(1, p[2] / 0.25);
+        ctx.transform(rt[0] * u, rt[1] * u, -q[0] * u, -q[1] * u,
+          x + p[0] * r, y + p[1] * r);
+        ctx.fillStyle = 'rgba(240,247,255,.95)';
+        const sr = 50 * SPOT_SIZE;   // spot radius, in ball-radius/50 units
+        ctx.beginPath(); ctx.arc(0, 0, sr, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#123a66';
+        ctx.font = '700 ' + Math.round(sr * 1.22) +
+          'px Andika, -apple-system, system-ui, sans-serif';
+        const t = String(num), w = ctx.measureText(t).width;
+        if (w > sr * 1.66) { const f = sr * 1.66 / w; ctx.scale(f, f); }
+        ctx.fillText(t, 0, 1);
+        ctx.restore();
+      }
+      /* the light stays put while the ball turns under it */
+      const sh = ctx.createRadialGradient(
+        x - r * 0.4, y - r * 0.45, 0, x - r * 0.4, y - r * 0.45, r * 0.45);
+      sh.addColorStop(0, 'rgba(255,255,255,.35)');
+      sh.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sh;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
     }
 
     function drawBall(x, y, r, num, a) {

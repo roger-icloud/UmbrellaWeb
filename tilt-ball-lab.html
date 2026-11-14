@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Tilt Ball lab — hints — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, ui-monospace, Menlo, monospace;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .85);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    #overlay button {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    #overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    #rotOverlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .85);
+      color: #cfd8e0;
+      z-index: 9;
+      text-align: center;
+      padding: 24px;
+    }
+
+    #rotOverlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+
+  <div id="rotOverlay" class="hidden">
+    <div style="font-size:22px">Rotate back</div>
+    <div class="sub">Tilt maths assumes portrait — paused until you're upright again.</div>
+  </div>
+
+  <div id="overlay">
+    <div style="font-size:22px">Tilt Ball</div>
+    <div class="sub">Tap the hole the ball belongs in —
+      or steer it with a tilt or a finger.</div>
+    <button id="go">Tap to enable tilt</button>
+    <div class="sub" id="why">iOS requires this tap before it will share motion data.</div>
+  </div>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ----------
+       Steering matches the tilt-snake head: tilt (or a dragged finger)
+       sets a target heading, the ball turns toward it proportionally
+       capped by TURN_RATE, and speed scales with tilt magnitude.
+       A tap on a hole sends the ball there itself (autopilot); any
+       manual steering retakes control. */
+    const SMOOTHING = 0.18;   // low-pass on gravity input (0=none … 1=frozen)
+    const BALL_SPEED = 200;   // design-px/s at full drive (was 150 — felt sluggish, Roger 2026-10-28)
+    const SPEED_STAGE = 0.07; // +7% per stage — the table livelens as the player proves themselves
+    const SPEED_CAP = 1.5;    // ceiling on the stage multiplier
+    const TURN_RATE = 5.0;    // rad/s hard cap on heading change
+    const TURN_RESPOND = 6;   // /s proportional approach to target heading
+    const TILT_DEAD = 0.4;    // gravity magnitude below which heading holds
+    const FULL_TILT = 3.5;    // gravity magnitude giving full speed
+    const IDLE_DRIVE = 0.15;  // fraction of speed while level / holding
+    const TOUCH_FULL = 120;   // drag distance (design-px) giving full speed
+    const AUTO_DRIVE = 1.0;   // top drive while homing on a tapped hole
+    /* drive falls to IDLE_DRIVE on arrival — a floor above it left the
+       ball orbiting just outside the capture radius: turn radius at
+       cruising speed exceeds HOLE_R - CAPTURE_IN, a limit cycle.
+       Slowing into the hole reads as "rolling in", billiards-style */
+    const MANUAL_TILT = 1.5;  /* gravity change since the tap that retakes
+        control — the tilt-snake rule: only a real lean overrides */
+    const TAP_MS = 260;       // a down-up this quick is a tap, not a steer
+    const TAP_MOVE = 14;      // design-px of travel that makes it a drag
+    const TAP_SNAP = 1.8;     // hole-tap forgiveness (× HOLE_R)
+    const EJECT_SECS = 0.45;  // coast after a refusal before steering resumes
+    const FRICTION = 0.35;    // eject-coast damping per second
+    const RESTITUTION = 0.55;   // wall bounciness 0..1
+    const BALL_R = 26;
+    const MAX_SPEED = 2600;   // safety cap
+
+    /* ---------- bar-billiards holes ----------
+       ROGER NOTE —
+       · The table plays in ROUNDS of one RACK (like the pool-table
+         ball return, or a pinball magazine): RACK_SIZE balls wait in
+         a rail below the table, so "what remains to be placed" is
+         visible. One ball is live at a time; the next feeds
+         automatically, or tap a waiting ball to pick it.
+       · ANY fitting hole accepts (Roger, 2026-10-28): holes have no
+         capacity and no "best". 56 is 7×8 AND 8×7 — refusing one of
+         them would be a small lie. Multi-home values are the
+         strategy: which hole to feed is the child's real decision.
+       · Refusal is one honest thing: the number doesn't divide →
+         amber. No slate, no "legal but shallower" — there is no
+         wrong-but-legal hole any more.
+       · Tap a hole to send the live ball there; tilt or a dragged
+         finger always overrides.
+       · Holes unlock in school-table order (2,10,3 → 5 → 4 → 6 →
+         8 → 9 → "?" → 7 → 13), rows centring on the table so odd
+         counts stay symmetric.
+       · "?" lives on the centre rail — always central when it opens.
+         It accepts whatever no offered hole takes; it never claims
+         primality, only "no match". It is NOT a bin — composite
+         leftovers never go there; its job is widening the dealt
+         pool (11, 13, 17, 19, 23… become askable).
+       · capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
+    const HOLE_R = 30;        // hole rim radius
+    const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
+    const HOLE_PUSH = 300;    // refusal ejection speed
+    const HOLE_FLASH = 0.6;   // s of rim flash on refusal
+    const SINK_SECS = 0.55;   // right-hole sink animation
+    const BALL_FADE = 0.8;    // s for a dealt ball to fade in
+    const HOLE_FADE = 0.8;    // s for a newly-unlocked hole to fade in
+    const INTERLUDE_SECS = 2.6; // round-complete pause before re-deal
+    const DEAL_MIN = 2;
+    /* the rack — the round's magazine (Roger, 2026-10-28) */
+    const RACK_SIZE = 10;     // balls dealt per round (fewer while few homes)
+    const RACK_R = 19;        // waiting-ball radius
+    const RACK_GAP = 8;       // spacing between waiting balls
+    const RACK_H = 108;       // design-px reserved at the bottom for the rack
+    const LAUNCH_SECS = 0.32; // rack → table slide
+    const LAUNCH_GAP = 300;   // ms after a sink before the next ball feeds
+    const CLEAN_FRAC = 0.6;   /* share of balls homed first-try that
+        advances the stage — every dealt ball has a true home, so the
+        discrimination being tested is "did it go straight home" */
+    /* rails: each row centres on the table — odd hole counts stay
+       symmetric, per Roger's display note. "?" keeps its own centre
+       rail so it stays central and equally available when it opens. */
+    const RAIL = {
+      near: { y: 0.58, xs: [[], [0.50], [0.34, 0.66], [0.24, 0.50, 0.76], [0.14, 0.38, 0.62, 0.86]] },
+      mid:  { y: 0.38, xs: [[], [0.50], [0.34, 0.66], [0.24, 0.50, 0.76], [0.14, 0.38, 0.62, 0.86]] },
+      far:  { y: 0.19, xs: [[], [0.50], [0.34, 0.66], [0.24, 0.50, 0.76]] },
+      ctr:  { y: 0.19, xs: [[], [0.50]] },
+    };
+    const HOLES = [
+      // near row — the quick tests, always in reach
+      { v: 2,  rail: 'near', depth: 0 },
+      { v: 10, rail: 'near', depth: 1 },
+      { v: 5,  rail: 'near', depth: 1 },
+      { v: 3,  rail: 'near', depth: 2 },  // digit-sum joins the near tests
+      // middle row — table-membership tests, a deliberate aim
+      { v: 4,  rail: 'mid', depth: 2 },
+      { v: 6,  rail: 'mid', depth: 3 },
+      { v: 8,  rail: 'mid', depth: 3 },
+      { v: 9,  rail: 'mid', depth: 2 },
+      // far row — the deep shots, cushion as backstop
+      { v: 7,  rail: 'far', depth: 4 },
+      { v: 13, rail: 'far', depth: 5 },
+      // centre rail — opens last; central and equally available
+      { v: 0,  rail: 'ctr', depth: 6, label: '?' },
+    ];
+
+    /* ---------- curriculum: stages ----------
+       One scalar, `stage`, drives everything: which holes sit on the
+       table and which numbers can be dealt. Holes unlock in school-
+       table order; this table is the management surface — edit rows,
+       not code.
+       · every rack ball is guaranteed a home that stays open for it
+       · newest holes draw a bigger share of the rack
+         (NEW_HOLE_WEIGHT×) so arrivals get exercised
+       · a round ends when the rack is empty; the stage advances
+         between rounds if at least CLEAN_FRAC of the rack went
+         home first-try — otherwise the same stage re-deals
+       Session-only for now; a saved profile just restores `stage`. */
+    const STAGES = [
+      /* 3 opens with 2 and 10 (Roger, 2026-11-14): with 2 and 10
+         alone, eight of ten balls were bound for the 2 hole */
+      { holes: [2, 10, 3] },                          // even, 0, and the 3s
+      { holes: [2, 10, 3, 5] },                       // last digit: 5s join
+      { holes: [2, 10, 3, 5, 4] },                    // ×4 arrives
+      { holes: [2, 10, 3, 5, 4, 6] },                 // 6 = fits 2 AND 3
+      { holes: [2, 10, 3, 5, 4, 6, 8] },              // ×8
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9] },           // digit sum: 9s
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9, 0] },        // "?" goes live
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9, 0, 7] },     // 7: real division
+      { holes: [2, 10, 3, 5, 4, 6, 8, 9, 0, 7, 13] }, // 13: the deep shot
+    ];
+    /* each hole deals only its own school-table range — Roger's
+       ranges (2026-10-26): no 36 or 98 dumped down the 2 hole;
+       values stay meaningful multiples, like flash-cards */
+    const EARLY_CEIL = 50;   /* all deals stay below this while ≤3 holes
+        (was 24 — it left the 10 hole only 10 and 20) */
+    const MAX_CEIL = 100;    // absolute bound once the table grows
+    const MULT_MAX = {       // highest multiplier each hole serves
+      2: 12, 3: 12, 4: 12, 5: 11, 6: 12, 7: 12,
+      8: 12, 9: 12, 10: 9, 13: 12,   // "?" takes what nothing wants
+    };
+    const NEW_HOLE_WEIGHT = 3;   // newest holes' share of the rack
+    const TWINKLE_SECS = 0.7;    // glint on a correct-home sink
+
+    // Many Android devices report the motion axes with the opposite sign
+    // convention to iOS. Auto-flip on Android; ?tilt=normal / ?tilt=invert
+    // in the URL forces either way for testing.
+    const qs = new URLSearchParams(location.search);
+    const AXIS_FLIP = qs.get('tilt') === 'invert' ? true
+      : qs.get('tilt') === 'normal' ? false
+        : /android/i.test(navigator.userAgent);
+
+    /* ROGER NOTE (2026-11-14) — the twinkle is shelved: "too much
+       visual is pinball / one-arm-bandit territory". When a ball had
+       a choice of holes and went to the deepest, one soft chime —
+       sound only, so it stays a bonus (many children play muted).
+       One note, never a run: a rising run is a jingle. */
+    const SINK_GLINT = false;    // the old sparkle on every sink
+    const CHIME_VOL = qs.get('chime') === '0' ? 0 : 0.05;  // 0 = silent
+    const CHIME_HZ = 1760;       // a small high bell
+    const CHIME_SECS = 0.9;      // its ring-out
+    /* the rack's spread (Roger: "fewer numbers that have many common
+       factors"): numbers that fit MANY_HOLES or more of the open holes
+       are held to MANY_SHARE of the rack. Low = mostly numbers with
+       one home, each a real decision; a few many-home numbers keep
+       the "which hole?" choice. ?many=0.5 to compare */
+    const MANY_HOLES = 3;
+    const MANY_SHARE = qs.has('many') ? +qs.get('many') : 0.2;
+    /* the table's geography (Roger, 2026-10-31 / 11-14):
+       'lesson'  — the newest holes at the front, the proven ones
+                   drift back; the easy hole becomes the long shot
+       'classic' — easy near, hard far (the bar-billiards layout)
+       ?layout=classic to compare */
+    const LAYOUT = qs.get('layout') || 'lesson';
+    /* the ball rolls and its number rolls with it (Roger, 2026-11-14:
+       "we are having a game after all") — printed on the sphere like
+       a pool ball, it turns away and comes round again. The child
+       chose the ball, so they know its number; holding it in mind
+       is part of the game. ?roll=0 for the flat face */
+    const NUMBER_ROLLS = qs.get('roll') !== '0';
+    /* printed twice, on opposite sides, as real pool balls are — one
+       is nearly always somewhere on top, caught with a glance.
+       ?spots=1 for a single print */
+    const NUMBER_SPOTS = qs.get('spots') === '1' ? 1 : 2;
+    /* the printed spot's size, as a share of the ball's radius. Deals
+       stop at 100, the only three-digit number — it alone is squeezed
+       to fit; one and two digits print at full size */
+    const SPOT_SIZE = 0.72;
+    /* LAB (Roger, 2026-11-14) — delayed colour hints. Not a cue at the
+       moment of choosing: help for a ball still rolling after a while.
+       1. after HINT_BALL_SECS the ball glows in its home hole's table
+          colour (the Cuisenaire-born colours) — an answer only to a
+          child who links colour with table, and each time it happens
+          the link grows;
+       2. after HINT_HOLE_SECS the home hole glows the same colour —
+          an outright answer, for a child who has truly stalled.
+       The home is the hole the ball was dealt for — with the newest
+       holes in front, usually this round's lesson. ?hint=0 for none.
+       HOLE_TINT: the holes always wear their colour faintly, so step 1
+       reads on its own. ?holes=colour */
+    const HINTS = qs.get('hint') !== '0';
+    const HINT_BALL_SECS = qs.has('hb') ? +qs.get('hb') : 6;
+    const HINT_HOLE_SECS = qs.has('hh') ? +qs.get('hh') : 12;
+    const HINT_FADE = 1.5;       // s for a hint to come up
+    const HINT_GLOW = 0.55;      // the ball's glow at full strength
+    const HOLE_TINT = qs.get('holes') === 'colour' ? 0.55 : 0;
+    /* the shared table colour code (as Honeycomb, Snake Puzzle) */
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    const holeColour = h => h.v === 0 ? '#35c795' : tableColour(h.v);
+    /* 0→1 as hint step n comes up, for the live ball */
+    function hintK(now, secs) {
+      if (!HINTS || !ballNum || sink || !ballHome) return 0;
+      const t = (now - ballBorn) / 1000 - secs;
+      return Math.max(0, Math.min(1, t / HINT_FADE));
+    }
+    /* touch to release: no ball feeds by itself — the child picks
+       one from the rack, which asks them to choose rather than tap
+       idly. 'auto' is the old self-feeding rack. ?feed=auto */
+    const RACK_FEED = qs.get('feed') === 'auto' ? 'auto' : 'touch';
+    const RACK_BREATHE = 0.04;   // waiting rack's faint swell (0 = still)
+    const HOLE_GLIDE = 1.2;      // s for holes to slide to a new row between rounds
+
+    /* ---------- canvas: virtual resolution ----------
+       Same scheme as snake.html: the sim runs in "design px" on a board
+       DESIGN_W wide and a single scale K maps it to the device at render
+       time, so distances and accelerations are a constant fraction of
+       screen on any device. Height breathes. */
+    const DESIGN_W = 375;
+    /* same cap as tilt-snake: past K_MAX, widen the logical world rather
+       than inflating the ball to parade size */
+    const K_MAX = 1.8;
+    const MIN_DESIGN_H = 480;
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, Wd = 0, Hd = 0, DPR = 1, K = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      const w = vv ? vv.width : window.innerWidth;
+      const h = vv ? vv.height : window.innerHeight;
+      if (w < 50 || h < 50) return;   // transient degenerate sizes
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      W = w; H = h;
+      K = Math.min(W / DESIGN_W, H / MIN_DESIGN_H, K_MAX);
+      Wd = W / K; Hd = H / K;
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR * K, 0, 0, DPR * K, 0, 0);
+      ball.x = Math.min(Math.max(ball.x, BALL_R), Wd - BALL_R);
+      ball.y = Math.min(Math.max(ball.y, BALL_R), playH() - BALL_R);
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    document.addEventListener('fullscreenchange', () => {
+      resize();
+      setTimeout(resize, 400);
+    });
+
+    /* ---------- state ---------- */
+    const ball = { x: 0, y: 0, vx: 0, vy: 0 };
+    let ballNum = 0;           // the numeral the live ball carries (0 = none)
+    let ballHome = null;       // the hole this ball was dealt for
+    let ballBorn = 0;          // fade-in clock (performance.now ms)
+    let refused = false;       // the live ball met a refusal this play
+    let sink = null;           // {hole, k} while a right hole swallows it
+    let flashUntil = 0;        // wrong-hole amber rim timestamp
+    let holeFlash = null;      // which hole is flashing
+    let stage = Math.max(0, Math.min(STAGES.length - 1,
+      parseInt(qs.get('stage'), 10) - 1 || 0));   // ?stage=N to start at N             // curriculum level (index into STAGES)
+    const hasTaken = new Set(); // holes that have taken ≥1 ball (new-hole halo)
+    let rack = [];             // [{v, home}] waiting balls, order = display
+    let rackBorn = 0;          // rack fade-in cascade clock
+    let flight = null;         // {x0,y0,x1,y1,t0,dur,mode,v,home,idx}
+    let launchAt = 0;          // timestamp the next ball may feed
+    let pendingPick = -1;      // rack index chosen during the feed gap
+    let auto = null;           // {x,y,hole} tapped destination
+    let queuedAuto = null;     // destination tapped while a ball is in flight
+    let tiltBase = null;       // gravity snapshot when the tap landed
+    let cleanSinks = 0;        // balls homed first-try this round
+    let dealtCount = 0;        // rack size this round
+    let roundInterlude = null; // {t0, secs, adv} during the table-rest
+    let glints = [];           // {hole, at, s, kind:'spark'|'glow'}
+    let newHoleVs = STAGES[0].holes.slice(); /* values that arrived
+        this stage — drawn with a soft halo until their first ball
+        sinks; the wordless "this one is new" (Roger, 2026-10-26:
+        no text at all — text is a hurdle unrelated to the task) */
+    resize();
+    ball.x = Wd / 2; ball.y = Hd / 2;
+
+    /* the table sits above the rack rail — holes and walls use the
+       play height, the strip below belongs to the waiting balls.
+       (a function declaration so the early resize() call sees it) */
+    function playH() { return Hd - RACK_H; }
+
+    /* rails lay each row out centred on the table, so any count
+       reads symmetric; positions refresh on resize (Wd/Hd change) */
+    function layOut(now) {
+      const hs = activeHoles();
+      let rowOf = h => h.rail;
+      if (LAYOUT !== 'classic') {
+        /* newest first: fill the front row, then the middle, then
+           the back; "?" keeps its centre rail */
+        const order = STAGES[STAGES.length - 1].holes;
+        const ranked = hs.filter(h => h.v !== 0)
+          .sort((a, b) => order.indexOf(b.v) - order.indexOf(a.v));
+        const hasQ = hs.some(h => h.v === 0);
+        const rowAt = new Map();
+        let i = 0;
+        for (const [name, cap] of [['near', 4], ['mid', 4], ['far', hasQ ? 2 : 3]])
+          for (let k = 0; k < cap && i < ranked.length; k++) rowAt.set(ranked[i++], name);
+        /* the 2 takes every even number, so it never sits at the
+           front — even on the first table it waits behind */
+        const two = hs.find(h => h.v === 2);
+        if (two && rowAt.get(two) === 'near') rowAt.set(two, 'mid');
+        rowOf = h => h.v === 0 ? 'ctr' : rowAt.get(h);
+      }
+      for (const name in RAIL) {
+        const r = RAIL[name];
+        let row = hs.filter(h => rowOf(h) === name);
+        if (LAYOUT !== 'classic') row = row.sort((a, b) => a.v - b.v);
+        row.forEach((h, i) => {
+          const fx = r.xs[row.length][i], fy = r.y;
+          if (now !== undefined && h.fx !== undefined &&
+              (h.fx !== fx || h.fy !== fy)) {
+            const [x, y] = holeAt(h, now);
+            h.ox = x; h.oy = y; h.moveAt = now;
+          }
+          h.fx = fx; h.fy = fy;
+        });
+      }
+    }
+    /* a hole that changed rows slides there, eased */
+    function holeAt(h, now) {
+      if (h.moveAt === undefined) return [h.fx, h.fy];
+      const k = Math.min(1, (now - h.moveAt) / (HOLE_GLIDE * 1000));
+      if (k >= 1) { h.moveAt = undefined; return [h.fx, h.fy]; }
+      const e = k * k * (3 - 2 * k);
+      return [h.ox + (h.fx - h.ox) * e, h.oy + (h.fy - h.oy) * e];
+    }
+    const holeX = h => holeAt(h, performance.now())[0] * Wd,
+      holeY = h => holeAt(h, performance.now())[1] * playH();
+
+    /* the chime — synthesised, no files; silent where the browser
+       holds sound until a touch */
+    let AC = null;
+    function wakeSound() {
+      try {
+        if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+        AC.resume();
+      } catch (e) { /* no voice here */ }
+    }
+    addEventListener('pointerdown', wakeSound, { passive: true });
+    addEventListener('touchstart', wakeSound, { passive: true });
+    function chime() {
+      if (!CHIME_VOL || !AC || AC.state !== 'running') return;
+      try {
+        const t0 = AC.currentTime;
+        for (const [f, v] of [[CHIME_HZ, 1], [CHIME_HZ * 2.76, 0.25]]) {
+          const o = AC.createOscillator(), g = AC.createGain();
+          o.type = 'sine'; o.frequency.value = f;
+          g.gain.setValueAtTime(0.0001, t0);
+          g.gain.exponentialRampToValueAtTime(CHIME_VOL * v, t0 + 0.006);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + CHIME_SECS * (v < 1 ? 0.4 : 1));
+          o.connect(g); g.connect(AC.destination);
+          o.start(t0); o.stop(t0 + CHIME_SECS + 0.05);
+        }
+      } catch (e) { /* stays silent */ }
+    }
+
+    /* where each waiting ball sits — wraps to two rows, centred;
+       the front of the queue is top-left */
+    function rackSlots() {
+      const n = rack.length;
+      const per = Math.max(1, Math.floor((Wd - 24) / (RACK_R * 2 + RACK_GAP)));
+      const rows = Math.ceil(n / per) || 1;
+      const y0 = playH() +
+        (RACK_H - (rows * (RACK_R * 2 + RACK_GAP) - RACK_GAP)) / 2 + RACK_R;
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const r = Math.floor(i / per), c = i % per;
+        const cols = Math.min(per, n - r * per);
+        out.push({
+          x: Wd / 2 + (c - (cols - 1) / 2) * (RACK_R * 2 + RACK_GAP),
+          y: y0 + r * (RACK_R * 2 + RACK_GAP)
+        });
+      }
+      return out;
+    }
+
+    function holeFits(h, n) {
+      return h.v === 0
+        ? !activeHoles().some(o => o.v !== 0 && n % o.v === 0)
+        : n % h.v === 0;
+    }
+
+    /* the holes on the table at this stage — index into HOLES */
+    const activeHoles = () =>
+      HOLES.filter(h => STAGES[stage].holes.includes(h.v));
+
+    /* which holes would accept n — every hole is always open */
+    function fitsSet(n) {
+      return activeHoles().filter(h => holeFits(h, n));
+    }
+
+    /* the values a hole will ever serve: its own multiples up to
+       MULT_MAX, kept meaningful — "?" takes the rest (values no
+       offered hole wants), so its list always exists */
+    function holePool(h, ceil) {
+      if (h.v === 0) {
+        const out = [];
+        for (let n = DEAL_MIN; n <= ceil; n++)
+          if (!activeHoles().some(o => o.v !== 0 && holeFits(o, n))) out.push(n);
+        return out;
+      }
+      const out = [];
+      const lim = MULT_MAX[h.v] || 12;
+      for (let m = 1; m <= lim && h.v * m <= ceil; m++) out.push(h.v * m);
+      return out;
+    }
+
+    /* deepest fitting hole = the insight being tested —
+       "?" is excluded: it's never a discrimination */
+    function deepestHole(n, fs) {
+      let best = null;
+      for (const h of fs || fitsSet(n))
+        if (h.v !== 0 && (!best || h.depth > best.depth)) best = h;
+      return best;
+    }
+
+    /* ---------- the rack ----------
+       A round's balls are dealt together into the rail below the
+       table. Each value is bucketed to the deepest hole that serves
+       it — PURELY for coverage, so every offered hole gets exercised
+       in the rack. Bucketing is never a rule: at the table any
+       fitting hole accepts. */
+
+    function buildRack(now) {
+      const hs = activeHoles();
+      const ceil = hs.length <= 3 ? EARLY_CEIL : MAX_CEIL;
+      const servings = hs.map(h => [h, holePool(h, ceil)]);
+      const byHome = new Map();
+      for (const [h, list] of servings) {
+        for (const n of list) {
+          let home = null;
+          for (const [h2, l2] of servings)
+            if (l2.includes(n) && (!home || h2.depth > home.depth)) home = h2;
+          if (!home) continue;
+          if (!byHome.has(home)) byHome.set(home, []);
+          const arr = byHome.get(home);
+          if (!arr.includes(n)) arr.push(n);
+        }
+      }
+      /* quotas: every hole represented, the rest of the rack shared
+         out weighted toward the newest holes, bounded only by how
+         many values each hole can serve */
+      const homes = hs.filter(h => byHome.has(h));
+      const quota = new Map();
+      for (const h of homes) quota.set(h, 1);
+      const room = h => byHome.get(h).length;
+      let left = Math.min(RACK_SIZE,
+        homes.reduce((s, h) => s + Math.max(0, room(h)), 0)) - homes.length;
+      const prev = stage === 0 ? [] : STAGES[stage - 1].holes;
+      const newVs = STAGES[stage].holes.filter(v => !prev.includes(v));
+      while (left > 0) {
+        const cand = homes.filter(h => quota.get(h) < room(h));
+        if (!cand.length) break;
+        const w = h => newVs.includes(h.v) ? NEW_HOLE_WEIGHT : 1;
+        let acc = Math.random() * cand.reduce((s, h) => s + w(h), 0);
+        for (const h of cand) {
+          acc -= w(h);
+          if (acc <= 0) { quota.set(h, quota.get(h) + 1); break; }
+        }
+        left--;
+      }
+      /* many-home numbers are rationed (MANY_SHARE); a hole whose
+         every value is many-home still gets its ball */
+      rack = [];
+      let manyLeft = Math.round(MANY_SHARE * RACK_SIZE);
+      const isMany = n => fitsSet(n).length >= MANY_HOLES;
+      for (const h of homes) {
+        const pool = byHome.get(h).slice();
+        for (let i = 0; i < quota.get(h) && pool.length; i++) {
+          const fewer = pool.filter(n => !isMany(n)), more = pool.filter(isMany);
+          const takeMore = more.length > 0 && (!fewer.length ||
+            (manyLeft > 0 && Math.random() < MANY_SHARE));
+          const from = takeMore ? more : fewer;
+          const v = from[Math.floor(Math.random() * from.length)];
+          pool.splice(pool.indexOf(v), 1);
+          if (takeMore) manyLeft--;
+          rack.push({ v, home: h });
+        }
+      }
+      /* shuffle so one home's balls don't arrive in a block, and
+         trim if more homes than rack slots */
+      for (let i = rack.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = rack[i]; rack[i] = rack[j]; rack[j] = t;
+      }
+      rack = rack.slice(0, RACK_SIZE);
+      rackBorn = now;
+      dealtCount = rack.length;
+      cleanSinks = 0;
+    }
+
+    /* rack ball idx slides onto the table and goes live */
+    function launchBall(idx, now) {
+      const s = rackSlots()[idx];
+      const it = rack.splice(idx, 1)[0];
+      flight = {
+        x0: s.x, y0: s.y,
+        x1: Wd / 2 + (Math.random() - 0.5) * Wd * 0.2,
+        y1: playH() - 70,
+        t0: now, dur: LAUNCH_SECS * 1000,
+        mode: 'launch', v: it.v, home: it.home
+      };
+      auto = null;
+    }
+
+    /* free pick with a live ball: the live ball flies back into the
+       tapped slot and the tapped ball launches in its place —
+       the swap is a true exchange: the flight remembers which value
+       was picked (pickV) and which is coming home (v) */
+    function swapLive(idx, now) {
+      const s = rackSlots()[idx];
+      const pick = rack[idx];
+      flight = {
+        x0: ball.x, y0: ball.y, x1: s.x, y1: s.y,
+        t0: now, dur: LAUNCH_SECS * 700,
+        mode: 'return', v: ballNum, home: ballHome, idx,
+        pickV: pick.v, pickHome: pick.home
+      };
+      auto = null; sink = null;
+    }
+
+    /* a tap (not a drag): rack ball first, then a hole sends the
+       live ball, then bare table cancels a send */
+    function handleTap(x, y, now) {
+      const slots = rackSlots();
+      for (let i = 0; i < slots.length; i++) {
+        if (Math.hypot(x - slots[i].x, y - slots[i].y) < RACK_R + 10) {
+          if (flight) return;
+          if (ballNum && !sink) { swapLive(i, now); return; }
+          if (!ballNum) { pendingPick = i; return; }
+          return;
+        }
+      }
+      if (!ballNum && !flight) return;
+      if (sink) return;
+      let best = null, bd = 1e9;
+      for (const h of activeHoles()) {
+        const d = Math.hypot(x - holeX(h), y - holeY(h));
+        if (d < bd) { bd = d; best = h; }
+      }
+      if (best && bd < HOLE_R * TAP_SNAP) {
+        /* a tap mid-flight queues onto the incoming ball — no dead
+           time waiting for the launch to land before commanding it */
+        const t = { x: holeX(best), y: holeY(best), hole: best };
+        if (flight) queuedAuto = t;
+        else { auto = t; tiltBase = { x: smX, y: smY }; }
+      } else { auto = null; queuedAuto = null; }
+    }
+
+    /* the shared round-complete register: the holes glint in
+       sequence and a warm glow swells and fades over the table —
+       where strings-of-collected-numbers can later emerge */
+    function endRound(now) {
+      const adv = stage < STAGES.length - 1 &&
+        cleanSinks >= Math.ceil(CLEAN_FRAC * dealtCount);
+      roundInterlude = {
+        t0: now,
+        secs: INTERLUDE_SECS + (adv ? 0.9 : 0),
+        adv: adv,
+      };
+      activeHoles().forEach((h, i) => {
+        glints.push({ hole: h, at: now + 250 + i * 120, s: TWINKLE_SECS, kind: 'spark' });
+      });
+      glints.push({ hole: activeHoles()[0], at: now + 400, s: 1.2, kind: 'spark' });
+    }
+
+    function startRound(now, adv) {
+      stage = Math.min(stage + (adv ? 1 : 0), STAGES.length - 1);
+      const prevVs = stage > 0 ? STAGES[stage - 1].holes : [];
+      newHoleVs = STAGES[stage].holes.filter(v => !prevVs.includes(v));
+      layOut(now);
+      hasTaken.clear();
+      for (const h of activeHoles())
+        if (h.born === undefined) h.born = now;
+      buildRack(now);
+      pendingPick = -1;
+      launchAt = now + 700;   // let the rack fade in before the feed
+    }
+    let smX = 0, smY = 0;            // smoothed gravity
+    let tiltOn = false;
+    let touch = null;                // {x,y} while dragging
+    let heading = -Math.PI / 2;      // direction of travel
+    let ejectUntil = 0;              // timestamp: refusal coast ends
+    let paused = false;              // true while rotated out of portrait
+
+    /* ---------- motion permission (iOS 13+) ---------- */
+    const overlay = document.getElementById('overlay');
+    const whyEl = document.getElementById('why');
+
+    function motionNeedsPermission() {
+      return typeof DeviceMotionEvent !== 'undefined'
+        && typeof DeviceMotionEvent.requestPermission === 'function';
+    }
+
+    document.getElementById('go').addEventListener('click', async () => {
+      try {
+        if (motionNeedsPermission()) {
+          const res = await DeviceMotionEvent.requestPermission();
+          if (res !== 'granted') {
+            whyEl.textContent = 'Permission was "' + res +
+              '" — tilt unavailable. Touch-drag still works; close this overlay?';
+            document.getElementById('go').textContent = 'Continue without tilt';
+            motionNeedsPermission.always = true;
+            document.getElementById('go').onclick = () => overlay.classList.add('hidden');
+            return;
+          }
+        }
+        overlay.classList.add('hidden');
+        tiltOn = true;
+        // keep screen awake while probing (best-effort)
+        if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => { });
+        // try JS fullscreen (needs this user gesture); orientation lock has
+        // better odds inside fullscreen, so attempt it after — both may be
+        // refused, and the detect-and-warn guard copes either way
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        Promise.resolve(req ? req.call(el) : null)
+          .catch(() => { })
+          .then(() => {
+            if (screen.orientation && screen.orientation.lock)
+              screen.orientation.lock('portrait').catch(() => { });
+          });
+      } catch (e) {
+        whyEl.textContent = 'Motion request failed: ' + e.message;
+      }
+    });
+
+    // Non-iOS browsers expose no requestPermission; still offer the button as an OK.
+    if (!motionNeedsPermission()) {
+      document.getElementById('go').textContent = 'Start';
+      whyEl.textContent = 'This browser does not gate motion behind a permission prompt.';
+    }
+    if (qs.has('peek')) overlay.classList.add('hidden');   // stills diagnostic
+
+    window.addEventListener('devicemotion', (e) => {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.x === null) return;
+      const gx = AXIS_FLIP ? -g.x : g.x;
+      const gy = AXIS_FLIP ? -g.y : g.y;
+      smX += (gx - smX) * SMOOTHING;
+      smY += (gy - smY) * SMOOTHING;
+    });
+
+    /* ---------- touch: drag steers, tap commands ----------
+       Down always engages manual steering (any touch retakes from
+       autopilot); a quick still down-up is a TAP — rack ball picks,
+       hole sends. */
+    let down = null;               // {x,y,t,moved} while a finger is down
+    cv.addEventListener('pointerdown', (t) => {
+      down = { x: t.clientX / K, y: t.clientY / K, t: performance.now(), moved: false };
+      touch = { x: down.x, y: down.y };
+      auto = null;
+    });
+    cv.addEventListener('pointermove', (t) => {
+      if (!t.buttons || !down) return;
+      touch = { x: t.clientX / K, y: t.clientY / K };
+      if (Math.hypot(touch.x - down.x, touch.y - down.y) > TAP_MOVE) down.moved = true;
+    });
+    window.addEventListener('pointerup', () => {
+      touch = null;
+      if (down && !down.moved && performance.now() - down.t < TAP_MS)
+        handleTap(down.x, down.y, performance.now());
+      down = null;
+    });
+    window.addEventListener('pointercancel', () => { touch = null; down = null; });
+    cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
+
+    /* ---------- orientation guard ---------- */
+    const rotOverlay = document.getElementById('rotOverlay');
+    const handheld = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    function checkOrientation() {
+      const portrait = screen.orientation && screen.orientation.type
+        ? screen.orientation.type.startsWith('portrait')
+        : matchMedia('(orientation: portrait)').matches;
+      // only handhelds need the upright guard — desktop landscape is legitimate
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', portrait || !handheld);
+    }
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+    checkOrientation();
+
+    // returning from lock/tab-switch: motion values can be stale —
+    // drop the smoothed state so the ball doesn't lurch on resume
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { smX = smY = 0; lastT = performance.now(); }
+    });
+
+    /* ---------- physics ----------
+       Same steering model as tilt-snake's head: tilt (or a dragged
+       finger) names a target heading, the ball turns toward it
+       proportionally capped by TURN_RATE, and speed scales with
+       tilt magnitude / drag distance. A refusal ejection coasts the
+       ball out under FRICTION for EJECT_SECS, then steering resumes. */
+    let lastT = performance.now();
+
+    function wrapAngle(d) {
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    }
+
+    function step(dt) {
+      if (paused) return;
+      const now = performance.now();
+
+      if (roundInterlude) {
+        if (now - roundInterlude.t0 > roundInterlude.secs * 1000) {
+          const adv = roundInterlude.adv;
+          roundInterlude = null;
+          startRound(now, adv);
+          if (!rack.length) endRound(now);   // nothing to deal — rest again
+        }
+        return;
+      }
+
+      /* a ball in flight (launch or swap-return) rides its tween;
+         no physics, no captures until it lands */
+      if (flight) {
+        if (now - flight.t0 >= flight.dur) {
+          const f = flight; flight = null;
+          if (f.mode === 'launch') {
+            ballNum = f.v; ballHome = f.home;
+            ball.x = f.x1; ball.y = f.y1; ball.vx = ball.vy = 0;
+            heading = -Math.PI / 2;
+            refused = false; sink = null;
+            ballBorn = now - BALL_FADE * 1000;   // the slide WAS the
+                // entrance — skip the deal fade or the ball flashes
+                // away and re-appears (Roger, 2026-10-28)
+            if (queuedAuto) { auto = queuedAuto; queuedAuto = null;
+              tiltBase = { x: smX, y: smY }; }
+          } else { // 'return' — the live ball lands in the tapped
+            // slot; the picked value launches out in its place
+            const s = rackSlots()[f.idx];
+            rack[f.idx] = { v: f.v, home: f.home };
+            ballNum = 0; ballHome = null;
+            flight = {
+              x0: s.x, y0: s.y,
+              x1: Wd / 2 + (Math.random() - 0.5) * Wd * 0.2,
+              y1: playH() - 70,
+              t0: now, dur: LAUNCH_SECS * 1000,
+              mode: 'launch', v: f.pickV, home: f.pickHome
+            };
+          }
+        } else return;
+      }
+
+      /* feed the next waiting ball once the beat has passed */
+      if (!flight && !ballNum && rack.length && now >= launchAt &&
+          (RACK_FEED === 'auto' || pendingPick >= 0)) {
+        const idx = pendingPick >= 0 && pendingPick < rack.length ? pendingPick : 0;
+        pendingPick = -1;
+        launchBall(idx, now);
+        return;
+      }
+      if (!ballNum) return;
+
+      if (now < ejectUntil) {
+        const damp = Math.exp(-FRICTION * dt);
+        ball.vx *= damp; ball.vy *= damp;
+      } else {
+        let target = null, drive = IDLE_DRIVE;
+        if (touch) {
+          const dx = touch.x - ball.x, dy = touch.y - ball.y;
+          target = Math.atan2(dy, dx);
+          drive = Math.max(IDLE_DRIVE, Math.min(Math.hypot(dx, dy) / TOUCH_FULL, 1));
+        } else if (auto) {
+          /* tapped destination: cruise to it; a real lean retakes
+             control (the tilt-snake tiltBase rule) */
+          if (tiltOn && tiltBase &&
+            Math.hypot(smX - tiltBase.x, smY - tiltBase.y) > MANUAL_TILT) {
+            auto = null;
+          } else {
+            const dx = auto.x - ball.x, dy = auto.y - ball.y;
+            target = Math.atan2(dy, dx);
+            drive = Math.max(IDLE_DRIVE,
+              Math.min(Math.hypot(dx, dy) / TOUCH_FULL, AUTO_DRIVE));
+          }
+        }
+        if (target === null && tiltOn) {
+          // portrait assumption: gravity.x → screen right, gravity.y →
+          // up-screen, so tilt top-of-device away → roll down ⇒ use -y
+          const mag = Math.hypot(smX, smY);
+          if (mag > TILT_DEAD) {
+            target = Math.atan2(-smY, smX);
+            drive = Math.max(IDLE_DRIVE, Math.min(mag / FULL_TILT, 1));
+          }
+        }
+        if (target !== null) {
+          const d = wrapAngle(target - heading);
+          const amt = d * Math.min(1, TURN_RESPOND * dt);
+          heading += Math.max(-TURN_RATE * dt, Math.min(TURN_RATE * dt, amt));
+        }
+        const spd = BALL_SPEED * Math.min(1 + stage * SPEED_STAGE, SPEED_CAP);
+        ball.vx = Math.cos(heading) * spd * drive;
+        ball.vy = Math.sin(heading) * spd * drive;
+      }
+
+      const sp = Math.hypot(ball.vx, ball.vy);
+      if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED / sp; ball.vy *= MAX_SPEED / sp; }
+
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      /* walls: reflect heading (the drive) AND velocity (the eject
+         coast) — whichever mode the ball is in, it comes back in play */
+      if (ball.x < BALL_R) { ball.x = BALL_R; heading = Math.PI - heading; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.x > Wd - BALL_R) { ball.x = Wd - BALL_R; heading = Math.PI - heading; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.y < BALL_R) { ball.y = BALL_R; heading = -heading; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
+      if (ball.y > playH() - BALL_R) { ball.y = playH() - BALL_R; heading = -heading; ball.vy = -Math.abs(ball.vy) * RESTITUTION; }
+
+      /* holes: the ball sinks only where its number belongs.
+         While autopiloted, only the tapped hole can take it — a sent
+         ball rolls past holes it wasn't aimed at. */
+      if (sink) {
+        const hx = holeX(sink.hole), hy = holeY(sink.hole);
+        sink.k = Math.min(sink.k + dt / SINK_SECS, 1);
+        const e = sink.k;
+        ball.x += (hx - ball.x) * Math.min(1, 10 * dt);
+        ball.y += (hy - ball.y) * Math.min(1, 10 * dt);
+        ball.vx = ball.vy = 0;
+        if (e >= 1) {
+          if (!refused) cleanSinks++;
+          hasTaken.add(sink.hole);
+          if (SINK_GLINT)
+            glints.push({ hole: sink.hole, at: now, s: TWINKLE_SECS, kind: 'spark' });
+          const fs = fitsSet(ballNum).filter(h => h.v !== 0);
+          if (fs.length > 1 &&
+              sink.hole.depth === Math.max(...fs.map(h => h.depth))) chime();
+          ballNum = 0; ballHome = null; sink = null; auto = null;
+          if (rack.length) launchAt = now + LAUNCH_GAP;
+          else endRound(now);
+        }
+      } else {
+        for (const h of activeHoles()) {
+          if (auto && h !== auto.hole) continue;
+          const dx = ball.x - holeX(h), dy = ball.y - holeY(h);
+          const d = Math.hypot(dx, dy);
+          if (d < HOLE_R - CAPTURE_IN) {
+            /* the one honest rule: the hole takes the ball iff the
+               number divides. Any fitting hole accepts — "best fit"
+               was an invented ranking, retired 2026-10-28 */
+            if (holeFits(h, ballNum)) {
+              sink = { hole: h, k: 0 };
+              ball.vx = ball.vy = 0;
+            } else {
+              flashUntil = now + HOLE_FLASH * 1000;
+              holeFlash = h;
+              refused = true; auto = null;
+              ejectUntil = now + EJECT_SECS * 1000;
+              const ux = dx / (d || 1), uy = dy / (d || 1);
+              const sp = Math.max(Math.hypot(ball.vx, ball.vy), HOLE_PUSH);
+              ball.vx = ux * sp; ball.vy = uy * sp;
+              ball.x = holeX(h) + ux * (HOLE_R - CAPTURE_IN + 1);
+              ball.y = holeY(h) + uy * (HOLE_R - CAPTURE_IN + 1);
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    /* ---------- draw ---------- */
+    function draw(now) {
+      ctx.clearRect(0, 0, Wd, Hd);
+
+      /* the holes — sunken dark circles, rim, factor numeral; only the
+         stage's offered set, each fading in on the frame it's unlocked */
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const h of activeHoles()) {
+        const appear = h.born === undefined ? 1
+          : Math.min((now - h.born) / (HOLE_FADE * 1000), 1);
+        ctx.globalAlpha = appear;
+        const hx = holeX(h), hy = holeY(h);
+        /* new arrivals — a soft neutral halo that holds until the
+           hole takes its first ball: wordless "this one is new",
+           cool slate-blue so it never reads as refusal amber */
+        if (newHoleVs.includes(h.v) && !hasTaken.has(h)) {
+          const pulse = 0.5 + 0.5 * Math.sin(now / 380);
+          const hg = ctx.createRadialGradient(hx, hy, HOLE_R * 0.6,
+            hx, hy, HOLE_R * 2.2);
+          hg.addColorStop(0, 'rgba(200,225,255,' + (0.20 + 0.10 * pulse) + ')');
+          hg.addColorStop(1, 'rgba(200,225,255,0)');
+          ctx.fillStyle = hg;
+          ctx.beginPath(); ctx.arc(hx, hy, HOLE_R * 2.2, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = 'rgba(215,235,255,' + (0.30 + 0.20 * pulse) + ')';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(hx, hy, HOLE_R + 3 + 1.5 * pulse, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        const flashing = h === holeFlash && now < flashUntil;
+        ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
+        ctx.beginPath(); ctx.arc(hx, hy, HOLE_R, 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = flashing ? '#e0a53a'
+          : (h.v === 0 ? 'rgba(53,199,149,.45)' : 'rgba(120,150,175,.5)');
+        ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
+        if (HOLE_TINT && !flashing && h.v !== 0) {
+          ctx.save();
+          ctx.globalAlpha = appear * HOLE_TINT;
+          ctx.strokeStyle = holeColour(h); ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1.5, 0, Math.PI * 2); ctx.stroke();
+          ctx.restore();
+        }
+        const hk = h === ballHome ? hintK(now, HINT_HOLE_SECS) : 0;
+        if (hk > 0) {
+          const p = 0.5 + 0.5 * Math.sin(now / 520);
+          ctx.save();
+          ctx.globalAlpha = appear * hk * (0.55 + 0.3 * p);
+          ctx.strokeStyle = holeColour(h); ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(hx, hy, HOLE_R + 4 + 2 * p, 0, Math.PI * 2); ctx.stroke();
+          ctx.restore();
+        }
+        ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
+        ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
+          ' Andika, -apple-system, system-ui, sans-serif';
+        ctx.fillText(h.label || String(h.v), hx, hy);
+        ctx.globalAlpha = 1;
+      }
+
+      /* glints — a brief sparkle on a hole, acknowledging a sink
+         and playing in sequence at a round's rest */
+      for (const g of glints) {
+        const e = (now - g.at) / (g.s * 1000);
+        if (e < 0 || e > 1) continue;
+        const a = Math.sin(e * Math.PI);          // 0→1→0 fade
+        const hxc = holeX(g.hole), hyc = holeY(g.hole);
+        const gx = hxc + HOLE_R * 0.55;
+        const gy = hyc - HOLE_R * 0.55;
+        const s = 6 + 4 * a;                      // arm length swells mid-glint
+        ctx.strokeStyle = `rgba(255,244,196,${a * 0.9})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(gx - s, gy); ctx.lineTo(gx + s, gy);
+        ctx.moveTo(gx, gy - s); ctx.lineTo(gx, gy + s);
+        ctx.moveTo(gx - s * 0.45, gy - s * 0.45); ctx.lineTo(gx + s * 0.45, gy + s * 0.45);
+        ctx.moveTo(gx + s * 0.45, gy - s * 0.45); ctx.lineTo(gx - s * 0.45, gy + s * 0.45);
+        ctx.stroke();
+      }
+      glints = glints.filter(g => now - g.at < g.s * 1000 + 500);
+
+      /* a tapped destination holds a soft ring while the ball is on
+         its way — "going there" stays legible */
+      if (auto) {
+        const p = 0.5 + 0.5 * Math.sin(now / 300);
+        ctx.strokeStyle = `rgba(142,201,255,${0.35 + 0.25 * p})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(auto.x, auto.y, HOLE_R + 5 + 3 * p, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      /* the table-rest: a warm glow swells over the table while the
+         holes glint in sequence — no words; the arriving holes
+           carry their own halo into the next round */
+      if (roundInterlude) {
+        const k = Math.min((now - roundInterlude.t0) / (roundInterlude.secs * 1000), 1);
+        const ga = Math.sin(Math.PI * k) * 0.7;
+        const r = playH() * 0.10 * (0.85 + 0.35 * k);
+        const cx = Wd / 2, cy = playH() * 0.40;
+        const kk = f => Math.min(1, f * ga);
+        const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g2.addColorStop(0, 'rgba(255,250,225,' + kk(0.9) + ')');
+        g2.addColorStop(0.35, 'rgba(255,220,130,' + kk(0.75) + ')');
+        g2.addColorStop(0.75, 'rgba(255,175,60,' + kk(0.5) + ')');
+        g2.addColorStop(1, 'rgba(255,150,40,' + kk(0.28) + ')');
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+        ctx.fillStyle = g2; ctx.fill();
+        ctx.restore();
+
+      }
+
+      /* the rack — the round's waiting balls below the divider;
+         front of the queue carries a gentle "you're next" pulse */
+      const slots = rackSlots();
+      ctx.strokeStyle = 'rgba(120,150,175,.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, playH()); ctx.lineTo(Wd, playH()); ctx.stroke();
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i], it = rack[i];
+        const a = Math.min((now - rackBorn - i * 60) / 500, 1);
+        if (a <= 0) continue;
+        ctx.globalAlpha = a;
+        /* waiting for a choice: the whole rack breathes, a slow
+           wave along the rail */
+        const waiting = RACK_FEED === 'touch' && !ballNum && !flight;
+        const rr = RACK_R * (waiting
+          ? 1 + RACK_BREATHE * Math.sin(now / 650 - i * 0.6) : 1);
+        if (i === 0 && RACK_FEED === 'auto') {
+          const p = 0.5 + 0.5 * Math.sin(now / 420);
+          ctx.strokeStyle = `rgba(142,201,255,${0.25 + 0.2 * p})`;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, RACK_R + 4 + 2 * p, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#16324e';
+        ctx.beginPath(); ctx.arc(s.x, s.y, rr, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(120,150,175,.4)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(s.x, s.y, rr - 1, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#cfd8e0';
+        ctx.font = '700 ' + Math.round(rr * 0.95) +
+          'px Andika, -apple-system, system-ui, sans-serif';
+        ctx.fillText(String(it.v), s.x, s.y + 1);
+        ctx.globalAlpha = 1;
+      }
+
+      /* a ball in flight — launch grows rack-size → live, return
+         shrinks back to a slot */
+      if (flight) {
+        const k = Math.min((now - flight.t0) / flight.dur, 1);
+        const e = k * k * (3 - 2 * k);
+        const fx = flight.x0 + (flight.x1 - flight.x0) * e;
+        const fy = flight.y0 + (flight.y1 - flight.y0) * e;
+        const fr = flight.mode === 'launch'
+          ? RACK_R + (BALL_R - RACK_R) * e
+          : BALL_R + (RACK_R - BALL_R) * e;
+        if (NUMBER_ROLLS) drawRolling(fx, fy, fr, flight.v, 1, [0, 0, 1], [0, -1, 0]);
+        else drawBall(fx, fy, fr, flight.v, 1);
+        return;
+      }
+
+      /* the ball — fades/scales in on deal, shrinks away on sinking */
+      if (!ballNum) return;
+      const age = (now - ballBorn) / 1000;
+      let a = Math.min(age / BALL_FADE, 1);
+      let r = BALL_R * (0.6 + 0.4 * Math.min(age / BALL_FADE, 1));
+      if (sink) { r *= (1 - sink.k) * (1 - sink.k); a *= 1 - sink.k; }
+      if (r < 0.5 || a <= 0) return;
+      const bk = hintK(now, HINT_BALL_SECS);
+      if (bk > 0) {
+        /* the ball's glow — its home's colour, breathing slowly */
+        const p = 0.5 + 0.5 * Math.sin(now / 700);
+        const g = ctx.createRadialGradient(ball.x, ball.y, r * 0.9,
+          ball.x, ball.y, r * 1.9);
+        ctx.save();
+        ctx.globalAlpha = a * bk * HINT_GLOW * (0.75 + 0.25 * p);
+        g.addColorStop(0, holeColour(ballHome));
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(ball.x, ball.y, r * 1.9, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+      if (NUMBER_ROLLS) {
+        rollBall(ball.x, ball.y);
+        drawRolling(ball.x, ball.y, r, ballNum, a);
+      } else drawBall(ball.x, ball.y, r, ballNum, a);
+    }
+
+    /* the rolling ball's orientation: two unit vectors on the sphere
+       — spot = where the number is printed, up = the number's top.
+       z points at the viewer; a fresh ball shows its number upright */
+    const roll = { born: -1, x: 0, y: 0,
+      spot: [0, 0, 1], up: [0, -1, 0] };
+    function turn(v, k, c, sn) {          // Rodrigues: v about unit k
+      const d = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+      const cx = k[1] * v[2] - k[2] * v[1], cy = k[2] * v[0] - k[0] * v[2],
+        cz = k[0] * v[1] - k[1] * v[0];
+      return [v[0] * c + cx * sn + k[0] * d * (1 - c),
+        v[1] * c + cy * sn + k[1] * d * (1 - c),
+        v[2] * c + cz * sn + k[2] * d * (1 - c)];
+    }
+    function rollBall(x, y) {
+      if (roll.born !== ballBorn) {
+        roll.born = ballBorn; roll.x = x; roll.y = y;
+        roll.spot = [0, 0, 1]; roll.up = [0, -1, 0];
+        return;
+      }
+      const dx = x - roll.x, dy = y - roll.y, d = Math.hypot(dx, dy);
+      roll.x = x; roll.y = y;
+      if (d < 1e-3 || d > BALL_R * 3) return;   // still, or a jump
+      /* rolling distance d turns the ball d/r about the axis lying
+         flat and square to the travel — the top runs forward */
+      const k = [-dy / d, dx / d, 0], th = d / BALL_R;
+      const c = Math.cos(th), sn = Math.sin(th);
+      const sp = turn(roll.spot, k, c, sn), up = turn(roll.up, k, c, sn);
+      const ls = Math.hypot(...sp);
+      roll.spot = sp.map(q => q / ls);
+      const dot = up[0] * roll.spot[0] + up[1] * roll.spot[1] + up[2] * roll.spot[2];
+      const u = up.map((q, i) => q - dot * roll.spot[i]), lu = Math.hypot(...u);
+      roll.up = u.map(q => q / lu);
+    }
+    function drawRolling(x, y, r, num, a, p0 = roll.spot, q = roll.up) {
+      ctx.globalAlpha = a;
+      const grd = ctx.createRadialGradient(
+        x - r * 0.35, y - r * 0.35, r * 0.2, x, y, r);
+      grd.addColorStop(0, '#8ec9ff');
+      grd.addColorStop(1, '#1660c8');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      for (const sg of NUMBER_SPOTS === 2 ? [1, -1] : [1]) {
+        const p = p0.map(c => c * sg);
+        if (p[2] <= 0) continue;
+        /* the printed spot, seen from straight above: map its flat
+           axes (right, down) onto the sphere's tangent plane there —
+           foreshortening and turning come free */
+        const rt = [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2],
+          p[0] * q[1] - p[1] * q[0]];
+        const u = r / 50;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+        ctx.globalAlpha = a * Math.min(1, p[2] / 0.25);
+        ctx.transform(rt[0] * u, rt[1] * u, -q[0] * u, -q[1] * u,
+          x + p[0] * r, y + p[1] * r);
+        ctx.fillStyle = 'rgba(240,247,255,.95)';
+        const sr = 50 * SPOT_SIZE;   // spot radius, in ball-radius/50 units
+        ctx.beginPath(); ctx.arc(0, 0, sr, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#123a66';
+        ctx.font = '700 ' + Math.round(sr * 1.22) +
+          'px Andika, -apple-system, system-ui, sans-serif';
+        const t = String(num), w = ctx.measureText(t).width;
+        if (w > sr * 1.66) { const f = sr * 1.66 / w; ctx.scale(f, f); }
+        ctx.fillText(t, 0, 1);
+        ctx.restore();
+      }
+      /* the light stays put while the ball turns under it */
+      const sh = ctx.createRadialGradient(
+        x - r * 0.4, y - r * 0.45, 0, x - r * 0.4, y - r * 0.45, r * 0.45);
+      sh.addColorStop(0, 'rgba(255,255,255,.35)');
+      sh.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sh;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBall(x, y, r, num, a) {
+      ctx.globalAlpha = a;
+      const grd = ctx.createRadialGradient(
+        x - r * 0.35, y - r * 0.35, r * 0.2,
+        x, y, r);
+      grd.addColorStop(0, '#8ec9ff');
+      grd.addColorStop(1, '#1660c8');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 ' + Math.round(r * 0.9) + 'px Andika, -apple-system, system-ui, sans-serif';
+      ctx.fillText(String(num), x, y + 1);
+      ctx.globalAlpha = 1;
+    }
+
+    function frame(now) {
+      const dt = Math.min((now - lastT) / 1000, 0.05);
+      lastT = now;
+      step(dt);
+      draw(now);
+      requestAnimationFrame(frame);
+    }
+    layOut();
+    startRound(performance.now());
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=15"></script>
+</body>
+
+</html>

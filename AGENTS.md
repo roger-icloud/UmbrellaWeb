@@ -38,6 +38,8 @@ is for the next session's agent, not for Roger.
 - **Numbers are objects** — collected (Tilt Snake), found (Patterns,
   Honeycomb), carried home (Snake Puzzle). Three mechanics, one family.
 - **Table colour-coding** is shared: `hsl((t*31+200)%360, 60%, 45%)`.
+  The colours originated with Cuisenaire rods, though the hues have
+  drifted (Roger, 2026-11-14) — one code, not two.
 - **Table selection happens between games** — chips lock once a round
   has started.
 - **Steering, never forcing** — e.g. Honeycomb's kin glow (a chip glows
@@ -793,6 +795,51 @@ per-commit; no global git identity is set.
   (×3 bows, ×4 runs straighter between crossings). Two fit an
   iPhone 8 at ~¾ segment size; three need iPad/desktop or shorter
   runs (×1–×6). Choose pairs sharing 2–3 values; ×2/×4 nearly overlap.
+
+## Tilt Ball — current thread (2026-11-14)
+
+Settings live at the top of `tilt-ball.html`; each change has a `?`
+switch to compare with the old behaviour. Uncommitted until Roger
+says it's settled.
+
+- **Twinkle shelved** ("too much visual is pinball / one-arm-bandit
+  territory"). `SINK_GLINT = false`. In its place one soft high chime
+  when a ball with a choice of holes takes the deepest — sound only,
+  a bonus, never a run (`CHIME_VOL`, `?chime=0`). The end-of-round
+  sparkle is untouched; it belongs with the ending, still to design.
+- **Rack spread** (`MANY_HOLES`, `MANY_SHARE`, `?many=`): numbers
+  fitting 3+ open holes are rationed. A soft weighting — the 6 and 8
+  holes' numbers all fit 2 (and 3 or 4), so it can't go much below
+  ~35%; geography does the rest.
+- **Geography** (`LAYOUT`, `?layout=classic`): newest holes at the
+  front, proven ones drift back between rounds (`HOLE_GLIDE`). The 2
+  hole never sits in the front row.
+- **First table is 2, 3, 10** (3 and 10 front, 2 behind) and
+  `EARLY_CEIL` is 50: with 2 and 10 under 24, eight of ten balls were
+  for 2. Nine stages now.
+- **Touch to release** (`RACK_FEED`, `?feed=auto`): nothing feeds by
+  itself; the child chooses a ball, so they know its number. The
+  waiting rack breathes faintly (`RACK_BREATHE`).
+- **The rolling number** (`NUMBER_ROLLS`, `?roll=0`): printed on a pale
+  spot like a pool ball, turning with the roll (Rodrigues rotation of
+  two unit vectors; orthographic projection of the spot's tangent
+  plane gives foreshortening free). **Printed twice, opposite sides**
+  (`NUMBER_SPOTS`, `?spots=1`) — one print hid the number ⅔ of the
+  time; two keep it caught with a glance. `SPOT_SIZE` 0.72 ("spot on");
+  only 100 (the deal ceiling) is squeezed.
+- Roger: "developed properly this can become an almost recreational
+  part of the app".
+- **Back burner — ball colour as a cue** (Roger, 2026-11-14): colour
+  the ball from the Cuisenaire-derived table colours. Caution: a
+  colour pointing to a factor gives the answer away (colour matching
+  instead of number thinking). A use may yet appear; an honest
+  variant is colour *after* the choice (the hole glows its table's
+  colour on a sink). Why blue: inherited, neutral — every other
+  colour already means something.
+- Still open: tap-a-hole autopilot (keep or remove, after play); the
+  round's ending; the opening card's wording ("Tap the hole the ball
+  belongs in") now that the first move is choosing a ball — Roger's
+  text.
 
 ## Priorities (Roger, 2026-10-17; updated 2026-10-19)
 

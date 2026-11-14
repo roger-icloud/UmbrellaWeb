@@ -184,8 +184,7 @@ window.Anim = (function () {
   //   anyone else must clear a full disc or the pose reads as a knot
   const POSE_HT = 4.0;        // min head↔tail distance, ×segD — the
   //   openness gate: open poses hold ≥5.5; a folded block sits ~3.5
-  //   (measured per family — serpentine self-excludes from random draws
-  //   but stays available as the compact small-board fallback)
+  //   (measured per family)
   const POSE_TRIES = 90;
   const POSE_FAMILIES = {
     diagonal: () => Math.PI / 4,
@@ -202,8 +201,15 @@ window.Anim = (function () {
       if (c < 3) return Math.floor(i / 5) % 2 ? Math.PI : 0;
       return Math.PI / 2;
     },
+    // a hook: tight at the head, opening toward the tail — rounded and
+    // compact, the small-board fallback (Roger, 2026-11-14)
+    hook: i => Math.PI / 4 + 0.55 * i - 0.02 * i * i,
   };
-  const POSE_NAMES = Object.keys(POSE_FAMILIES);
+  /* the poses a deal draws from — flowing curves only. diagonal, zigzag
+     and serpentine stay above for ?pose= auditions but aren't dealt:
+     the straight line and the up-down step read as "military" (Roger,
+     2026-11-14) */
+  const POSE_DRAW = ['wave', 'scurve', 'coil', 'hook'];
 
   function walkPose(fam, n, sp, r) {
     const pts = [{ x: 0, y: 0 }];
@@ -239,18 +245,22 @@ window.Anim = (function () {
       let s = (o.seed >>> 0) || 1;
       r = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
     }
-    const names = o.family && o.family !== 'any' ? [o.family] : POSE_NAMES;
+    const names = o.family && o.family !== 'any' ? [o.family] : POSE_DRAW;
     const clear = POSE_CLEAR * o.segD / sq;   // normalized min pair distance
     // two margin tiers: full clearance first, then nearly edge-to-edge —
-    // on small boards the strict margin leaves only the serpentine,
-    // so loosen before surrendering variety. No pose is accepted where
+    // on small boards the strict margin leaves only the hook, so
+    // loosen before surrendering variety. No pose is accepted where
     // any two segments sit close enough to crowd a numeral (the lab's
     // PAIR_MIN) — falling back to the least crowded that fit.
-    let best = null, bestD = 0, bestFam = 'serpentine';
+    let best = null, bestD = 0, bestFam = 'hook';
     for (let pass = 0; pass < 2; pass++) {
       const m = pass ? POSE_MARGIN * 0.35 : POSE_MARGIN;
       for (let a = 0; a < POSE_TRIES; a++) {
-        const fam = names[Math.floor(r() * names.length)];
+        // the hook waits for the loosened margin — it fits almost
+        // anywhere, so drawn first it would crowd out the others
+        const pool = pass || names.length < 2 ? names
+          : names.filter(f => f !== 'hook');
+        const fam = pool[Math.floor(r() * pool.length)];
         const rail = walkPose(fam, n, sp, r);
         let worst = Infinity;
         for (let i = 0; i < n; i++)
@@ -267,7 +277,7 @@ window.Anim = (function () {
       }
     }
     return best ? { fam: bestFam, rail: best }
-      : { fam: 'serpentine', rail: walkPose('serpentine', n, sp, r) };
+      : { fam: 'hook', rail: walkPose('hook', n, sp, r) };
   }
 
   /* ---------- handed over by the page ---------- */

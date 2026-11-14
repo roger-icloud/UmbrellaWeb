@@ -773,6 +773,26 @@ per-commit; no global git identity is set.
   no count, no completion, no fanfare. Thermometer / Apple-style
   filling ring were considered and declined (a full ring is itself
   the reward).
+- **Curves only (Roger, 2026-11-14)**: "a straight snake looks like a
+  broom or a caterpillar … curves are relaxing and natural". Deals draw
+  from `POSE_DRAW` in anim.js (wave, scurve, coil, hook); diagonal,
+  zigzag and serpentine stay in `POSE_FAMILIES` for `?pose=` only.
+  `hook` is the rounded compact fallback and waits for the loosened
+  margin pass (it fits almost anywhere, so drawn first it would crowd
+  the others out on phones). Wide desktop windows only fit the coil.
+- **Project shape (Roger, 2026-11-14)** — one verb per activity:
+  Tilt Snake collects, Snake Puzzle completes, Honeycomb finds (the
+  one search; its shape invites), Patterns shows, Tilt Ball tests.
+  The search labs ("find tables") are parked, not forgotten — they
+  read as a mix of the other two. Snake Puzzle's three extension
+  threads: more gaps, longer runs of gaps, more snakes. **Twined
+  snakes** (successor to the single snake, not a new tile): two
+  snakes cross at shared multiples (×3/×4 at 12, 24, 36), so the
+  crossing teaches common multiples by hand. Costs: compute trivial;
+  the pose maker must make rails meet at the shared segments
+  (×3 bows, ×4 runs straighter between crossings). Two fit an
+  iPhone 8 at ~¾ segment size; three need iPad/desktop or shorter
+  runs (×1–×6). Choose pairs sharing 2–3 values; ×2/×4 nearly overlap.
 
 ## Priorities (Roger, 2026-10-17; updated 2026-10-19)
 

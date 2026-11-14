@@ -149,7 +149,9 @@
     const RC = 34;                 // corner radius — snakes soften it
     const CURVE_AMP = 5;           // resting S-curve, px lateral
     const CRUISE_V = 90;           // border cruising speed, px/s
-    const TRAVEL_SWAY = 3;         // slither undulation while moving
+    const EASE_IN = 110;           // px to reach cruising speed from rest
+    const EASE_OUT = 150;          // px to slow from cruise to a stop
+    const SETTLE_MS = 900;         // ease of the body onto the rail on arrival
     const WAND_AMP = 16;           // route weave — she makes a lane
     const BRATE = 64;              // braid advance, px/s
     const CHASE_GAP = 60;          // nose-to-tail chase spacing, px
@@ -157,7 +159,13 @@
     const SEAT_IN = 55;            // corner seats sit this far past the arc
     const MORPH_MS = 650;          // ease when the frame refits
     const TRAV_MIN = 25, TRAV_MAX = 70;    // s between wanderings
-    const WRIG_MIN = 9, WRIG_MAX = 22, WRIG_SECS = 1.3, WRIG_AMP = 3.2;
+    /* the wriggle — same wave as Snake Puzzle's waiting snake: a
+       sway running head to tail, about 1.4 times a second */
+    const WRIG_FREQ = 9;           // rad/s
+    const WRIG_K = 0.9;            // rad per segment along the body
+    const WRIG_AMP = 4.8;          // peak sway, px (0.14 × segment)
+    const TRAVEL_WRIG = 1;         // × WRIG_AMP while cruising
+    const WRIG_MIN = 9, WRIG_MAX = 22, WRIG_SECS = 1.6;
     const BLINK_MIN = 2.6, BLINK_MAX = 7, BLINK_SECS = 0.26;
     const SWAY_AMP = 1.1;          // breathing, px
     const DEMO = new URLSearchParams(location.search).get('demo') === '1';
@@ -246,7 +254,7 @@
           c.ox = c.x; c.oy = c.y;
           c.x += dx; c.y += dy;
         }
-        sn.morphT0 = t0;
+        sn.morphT0 = t0; sn.morphMs = 0;
         if (sn.state === 'travel') {
           sn.target = (SEATS[sn.seat] || SEATS[0]).s;
           const fwd = ((sn.target - sn.s) % B.per + B.per) % B.per;
@@ -326,6 +334,8 @@
         moved: 0, wph: 0,              // distance gone + weave phase
         du: null, arrived: false,      // duet part
         motionK: 0,                    // 0 rest … 1 cruising (eased)
+        wigK: 0,                       // travelling wriggle (eased)
+        lastT: -1,                     // previous frame time
         morphT0: -1,                   // frame-refit ease
         wrigT0: -1,                    // active wriggle window
         nextWrig: 4000 + rng() * 6000,
@@ -470,14 +480,48 @@
       return 1 - Math.sin(k * Math.PI) * 0.9;
     }
 
+    /* one wave for both kinds of wriggle; the head keeps a little
+       of it, the neck builds to the full sway */
+    function wave(sn, i, now) {
+      return Math.sin(now / 1000 * WRIG_FREQ - i * WRIG_K + sn.t)
+        * WRIG_AMP * Math.min(1, 0.3 + i / 4);
+    }
+
     function wriggleAmp(sn, i, now) {
-      /* the restless ripple: a wave that travels head-to-tail over
-         WRIG_SECS, lateral to the body, dying at the tail */
+      /* the restless wriggle at rest: a burst of WRIG_SECS that
+         swells and fades */
       if (sn.wrigT0 < 0) return 0;
       const k = (now - sn.wrigT0) / 1000 / WRIG_SECS;
       if (k >= 1) { sn.wrigT0 = -1; return 0; }
-      return Math.sin(k * Math.PI * 3 - i * 0.55) * WRIG_AMP *
-        Math.sin(k * Math.PI) * (i / N_SEG);
+      return wave(sn, i, now) * Math.sin(k * Math.PI);
+    }
+
+    /* speed along a trip: gathers pace from rest, slows into the
+       seat — constant pick-up and slow-down, so no lurch at either
+       end (Roger, 2026-11-14) */
+    function tripSpeed(sn) {
+      return CRUISE_V * Math.min(1,
+        Math.sqrt((sn.moved + 1) / EASE_IN),
+        Math.sqrt((sn.togo + 0.5) / EASE_OUT));
+    }
+
+    /* arrival: the trail is re-laid flat on the rail, and the body
+       eases from where it was onto it, rather than snapping */
+    function settle(sn, now) {
+      const old = sn.hist.map(c => cpNow(sn, c, now));
+      perch(sn);
+      sn.hist.forEach((c, j) => {
+        const o = old[Math.min(j, old.length - 1)];
+        if (o) { c.ox = o.x; c.oy = o.y; }
+      });
+      sn.morphT0 = now; sn.morphMs = SETTLE_MS;
+    }
+
+    function cpNow(sn, c, now) {
+      if (sn.morphT0 < 0 || c.ox === undefined) return { x: c.x, y: c.y };
+      const mk = Math.min(1, (now - sn.morphT0) / (sn.morphMs || MORPH_MS));
+      const me = mk * mk * (3 - 2 * mk);
+      return { x: c.ox + (c.x - c.ox) * me, y: c.oy + (c.y - c.oy) * me };
     }
 
     function drawSnake(sn, now) {
@@ -485,13 +529,19 @@
          body reads the trail behind it — one mechanism for both */
       const approach = sn.state === 'duet' && duet
         && duet.stage === 'approach' && !sn.arrived;
+      const dt = sn.lastT < 0 ? 1 / 60
+        : Math.min(0.05, Math.max(0, (now - sn.lastT) / 1000));
+      sn.lastT = now;
+      let wigTo = 0;
       if (sn.state === 'travel' || approach) {
         /* breadcrumbs every 2px of travel, not every frame — the
            trail keeps the resting spacing, so the body neither
            bunches nor stretches while it cruises. A soft pulse only:
            the jitter-bug is barred (Roger, 2026-11-11) */
+        const v = tripSpeed(sn);
+        wigTo = v / CRUISE_V;
         const step = Math.min(sn.togo + 0.01,
-          CRUISE_V / 60 * (0.94 + 0.12 * Math.sin(now * 0.0012 + sn.t)));
+          v * dt * (0.94 + 0.12 * Math.sin(now * 0.0012 + sn.t)));
         sn.s += sn.tdir * step; sn.togo -= step;
         sn.crumb += step; sn.moved += step;
         /* the road wanders (Roger, 2026-11-11): a straight rail reads
@@ -513,7 +563,7 @@
             sn.s = sn.target; sn.dir = sn.tdir;
             sn.nextTravel = now
               + (TMIN + rng() * (TMAX - TMIN)) * 1000;
-            perch(sn);
+            settle(sn, now);
           }
         }
       } else if (sn.state === 'duet' && duet && duet.kind === 'braid'
@@ -541,6 +591,7 @@
            to CHASE_GAP behind its tail and holds there — the two of
            them become one loop round the frame */
         const lead = snakes[duet.lead];
+        wigTo = 1;
         let step;
         if (sn === lead) {
           step = CRUISE_V / 60
@@ -575,10 +626,10 @@
          onto the new frame — the translate was rigid, this snaps it
          exact. */
       const mk = sn.morphT0 >= 0
-        ? Math.min(1, (now - sn.morphT0) / MORPH_MS) : 1;
+        ? Math.min(1, (now - sn.morphT0) / (sn.morphMs || MORPH_MS)) : 1;
       const me = mk * mk * (3 - 2 * mk);
       if (mk >= 1 && sn.morphT0 >= 0) {
-        sn.morphT0 = -1;
+        sn.morphT0 = -1; sn.morphMs = 0;
         if (sn.state === 'rest') perch(sn);
       }
       const cp = c => (mk < 1 && c && c.ox !== undefined)
@@ -593,6 +644,7 @@
       sn.motionK += (((sn.state === 'travel' || sn.state === 'duet')
         ? 1 : 0) - sn.motionK) * 0.06;
       const calmK = 1 - sn.motionK * 0.85;
+      sn.wigK += (wigTo - sn.wigK) * Math.min(1, dt * 8);
       const breathe = Math.sin(now / 1100 + sn.t * 5) * SWAY_AMP
         * calmK;
       const R = SEG_R;
@@ -612,13 +664,10 @@
            is not a ruler — a slow-drifting S lives along the body */
         const restCurve = Math.sin(i * 0.5 + now / 16000 + sn.t * 2.3)
           * CURVE_AMP * calmK;
-        /* the slither (Roger, 2026-11-11): one slow S slides tailward
-           as she goes — keyed on distance travelled, so it IS the
-           motion, growing toward the tail; the head keeps the rail */
-        const braiding = sn.state === 'duet' && duet
-          && duet.kind === 'braid' && duet.stage === 'braid';
-        const sway = Math.sin(i * 0.6 - sn.s * 0.02) * TRAVEL_SWAY
-          * sn.motionK * (i / N_SEG) * (braiding ? 0 : 1);
+        /* the slither (Roger, 2026-11-14): while she goes, the
+           waiting snake's wriggle runs along her body, swelling as
+           she gathers pace and fading as she slows into her seat */
+        const sway = wave(sn, i, now) * TRAVEL_WRIG * sn.wigK;
         const off = (i ? breathe * (i / N_SEG) + restCurve : 0)
           + sway + wriggleAmp(sn, i, now);
         const x = p.x + nx * off, y = p.y + ny * off;
@@ -731,7 +780,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=14"></script>
+  <script src="nav.js?v=15"></script>
 </body>
 
 </html>

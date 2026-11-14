@@ -55,6 +55,11 @@
       color: #cfd8e0;
     }
 
+    /* a table finished this visit keeps a faint ring in its colour */
+    #chipRow button.made {
+      box-shadow: 0 0 0 2px var(--made);
+    }
+
     #chipRow button.on {
       border-color: #4da3ff;
       color: #fff;
@@ -186,7 +191,7 @@
 <body>
 
   <canvas id="c"></canvas>
-  <div id="buildTag">11</div>
+  <div id="buildTag">18</div>
   <div id="chipRow"></div>
 
   <div id="rotOverlay" class="overlay hidden">
@@ -206,10 +211,28 @@
     'use strict';
 
     /* ---------- tunables ---------- */
-    const BLANK_COUNT = 4;      // body cells left empty per deal
+    /* the ladder: each finished snake makes the next a step harder.
+       Same for every child (exploratory, not yet adaptive); held for
+       the visit only. gaps = empty places, big = how strongly the gaps
+       lean to the large multiples, run = gaps side by side */
+    const LADDER = [
+      { gaps: 4, big: 0,   run: 0 },  // as it was
+      { gaps: 4, big: 0.7, run: 0 },  // larger multiples more often
+      { gaps: 5, big: 0.7, run: 0 },  // a fifth gap
+      { gaps: 5, big: 0.7, run: 2 },  // a pair side by side
+      { gaps: 6, big: 0.8, run: 3 },  // a run of three
+      { gaps: 7, big: 0.8, run: 3 },  // seven gaps, a run of three
+    ];
+    const BIG_FROM = 7;         // "large" means ×7 and above
     const DROP_TOL = 1.1;       // drop acceptance radius, in segment diameters
     const SPAWN_POS = { x: 0.88, y: 0.12 }; // normalized point the numbers appear at
-    const SPAWN_SECS = 0.5;     // fade/rise-in duration for each spawned number
+    /* the number's arrival — a moment after the snake, with a pop
+       and a spreading ring: "here I am, ready to be placed" */
+    const SPAWN_DELAY = 0.9;    // s after the snake before the first number
+    const SPAWN_NEXT = 0.35;    // s after a placement before the next number
+    const FLOURISH_SECS = 0.6;  // the pop: grows past full size, settles
+    const RING_SECS = 0.9;      // the ring of light spreading from it
+    const READY_EVERY = 2.6;    // s between softer rings while it waits; 0 = none
     const SHAKE_SECS = 0.45;    // refusal shake on the mistaken segment
     const FLASH_SECS = 0.6;     // amber ring on a refused drop
     const TOP_RESERVE = 92;     // clearance below the menu button
@@ -226,6 +249,41 @@
     const GAZE_EASE = 0.14;     // per-frame approach of gaze to its target
     const BLINK_MIN = 2.4, BLINK_MAX = 6;  // s between blinks
     const BLINK_SECS = 0.28;    // lid dip duration
+    /* the celebration — the snake stays where it is: its segments light
+       ×1…×12, a satisfied wiggle, then it looks up at you and winks */
+    const BEAT_STAGGER = 0.11;  // s between segment highlights, head → tail
+    const BEAT_HOLD = 0.45;     // each highlight lingers this long
+    const CHEER_AT = 1.6;       // s in: the wiggle starts, over the beat's tail
+    const CHEER_SECS = 1.4;     // s of wiggling
+    const CHEER_AMP = 0.3;      // peak sway, × segD
+    const LOOK_AT = 2.8;        // s in: the head turns to face you
+    const LOOK_SECS = 0.5;      // s for the turn
+    const LOOK_GROW = 0.1;      // the head comes a little toward you
+    const WINK_AT = 3.5;        // s in: one slow wink
+    const WINK_SECS = 0.7;      // s for the wink, held shut in the middle
+    const ASK_AT = 4.2;         // s in: "Another snake?" fades up
+    const MADE_RING = 0.7;      // ring a finished table's chip keeps; 0 = none
+    /* the opening — once per device, on the first visit */
+    const DEMO_TABLE = 2;       // easy to follow
+    const DEMO_BLANKS = 2;      // numbers the opening completes
+    const DEMO_START = 1.6;     // s the snake is seen before the first number
+    const DEMO_LOOK = 1.8;      // s the new number is seen before it's carried
+    const DEMO_LIFT = 0.5;      // s it lifts before it moves, and settles after
+    const DEMO_CARRY = 2.4;     // s to carry it home
+    const DEMO_NEXT = 1.2;      // s after a placement before the next number
+    const DEMO_PAUSE = 2.6;     // s the finished snake stands
+    const DEMO_DARK = 1.1;      // s fade out
+    const DEMO_UP = 1.1;        // s fade up to the fresh puzzle
+    /* the opening's number floats; a child's drag stays plain */
+    const FLOAT_RISE = 0.35;    // × segment: how high it lifts before moving
+    const SHADOW = 0.8;         // shadow strength under it; 0 = none
+    const SHADOW_GROUND = true; // true: shadow keeps to the straight path
+                                // false: shadow stays directly beneath it
+    const SHADOW_STYLE = 'outline';  // 'dark' shadow, 'light' — a pale
+                                  // reflection on the dark floor, or
+                                  // 'outline' — a faint ring on the floor
+                                  // (?shadow=light / ?shadow=outline
+                                  // try them without editing)
 
     /* ---------- canvas ---------- */
     const cv = document.getElementById('c');
@@ -279,8 +337,26 @@
     let lastAct = 0;             // last touch — a still patch wriggles
     let misses = 0;
     let poseSeed = 0;            // seed of the dealt pose — shareable
+    let cheerT = 0;              // when the celebration began
 
     const qs = new URLSearchParams(location.search);
+    // the ladder rung, for this visit only; ?rung=N starts on rung N (from 1)
+    const RUNG_KEY = 'snakePuzzleRung';
+    let rung = 0;
+    function setRung(n) {
+      rung = Math.max(0, Math.min(LADDER.length - 1, n));
+      try { sessionStorage.setItem(RUNG_KEY, String(rung)); } catch (e) {}
+    }
+    try { rung = +sessionStorage.getItem(RUNG_KEY) || 0; } catch (e) {}
+    if (qs.has('rung')) setRung((+qs.get('rung') || 1) - 1);
+    // the tables finished this visit — their chips keep a faint ring
+    const MADE_KEY = 'snakePuzzleMade';
+    let made = [];
+    try { made = JSON.parse(sessionStorage.getItem(MADE_KEY)) || []; } catch (e) {}
+    function addMade(t) {
+      if (!made.includes(t)) made.push(t);
+      try { sessionStorage.setItem(MADE_KEY, JSON.stringify(made)); } catch (e) {}
+    }
     // ?poseSeed=N pins every deal's pose for reproduction/auditioning
     const pinSeed = qs.has('poseSeed') ?
       (parseInt(qs.get('poseSeed'), 10) || 0) : null;
@@ -311,15 +387,50 @@
       spawned.x = p.x; spawned.y = p.y;
     }
 
-    function spawnNext() {
+    function spawnNext(delay) {
       if (!remaining.length) { spawned = null; return; }
       const k = Math.floor(Math.random() * remaining.length);
       const value = remaining.splice(k, 1)[0];
-      spawned = { value, x: 0, y: 0, born: performance.now() };
+      spawned = { value, x: 0, y: 0,
+        born: performance.now() + (delay || 0) * 1000 };
       homeSpawn();
     }
 
-    function deal() {
+    /* which places are empty: a fixed count (the opening) is spread
+       evenly; otherwise the current rung of the ladder decides. Never
+       the head, never ×1 — the first multiple stays as the foothold */
+    function pickBlanks(fixed) {
+      const pool = [];
+      for (let i = 2; i < N; i++) pool.push(i);
+      const take = i => { pool.splice(pool.indexOf(i), 1); return i; };
+      const any = list => list[Math.floor(Math.random() * list.length)];
+      const out = [];
+      if (fixed !== undefined) {
+        while (out.length < fixed && pool.length) out.push(take(any(pool)));
+        return out;
+      }
+      const r = LADDER[Math.min(rung, LADDER.length - 1)];
+      if (r.run > 1) {
+        const last = N - r.run;
+        const lo = Math.random() < r.big ? Math.min(Math.max(2, BIG_FROM), last) : 2;
+        const s0 = lo + Math.floor(Math.random() * (last - lo + 1));
+        for (let i = 0; i < r.run; i++) out.push(take(s0 + i));
+      }
+      // after the first rung the other gaps keep a neighbour each, so
+      // the only gaps side by side are the run the rung asks for
+      const apart = r.big > 0 || r.run > 0;
+      while (out.length < r.gaps && pool.length) {
+        let free = apart
+          ? pool.filter(i => !out.includes(i - 1) && !out.includes(i + 1))
+          : pool;
+        if (!free.length) free = pool;
+        const big = free.filter(i => i >= BIG_FROM);
+        out.push(take(any(big.length && Math.random() < r.big ? big : free)));
+      }
+      return out;
+    }
+
+    function deal(fixedBlanks) {
       poseSeed = pinSeed !== null ? pinSeed
         : Math.floor(Math.random() * 1e9);
       rail = Anim.pose({
@@ -336,15 +447,7 @@
           filled: true, blank: false
         });
       }
-      // choose BLANK_COUNT uniform body indices (never the head, never the
-      // first body cell — the first multiple stays as the foothold)
-      const pool = [];
-      for (let i = 2; i < N; i++) pool.push(i);
-      blanks = [];
-      for (let k = 0; k < BLANK_COUNT && pool.length; k++) {
-        const j = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-        blanks.push(j);
-      }
+      blanks = pickBlanks(fixedBlanks);
       remaining = [];
       for (const j of blanks) {
         segs[j].filled = false; segs[j].blank = true;
@@ -352,7 +455,7 @@
       }
       remaining.sort(() => Math.random() - 0.5);
       layout();
-      spawnNext();
+      spawnNext(SPAWN_DELAY);
       hasInteracted = false;
       misses = 0;
       state = 'play';
@@ -383,7 +486,13 @@
       chipRow.appendChild(b);
     }
     function syncChips() {
-      chipBtns.forEach((b, i) => b.classList.toggle('on', i + 2 === table));
+      chipBtns.forEach((b, i) => {
+        const t = i + 2, m = MADE_RING > 0 && made.includes(t);
+        b.classList.toggle('on', t === table);
+        b.classList.toggle('made', m);
+        b.style.setProperty('--made', m ?
+          'hsla(' + ((t * 31 + 200) % 360) + ',60%,55%,' + MADE_RING + ')' : '');
+      });
       chipRow.classList.toggle('locked',
         hasInteracted && (state === 'play' || state === 'celebrate'));
     }
@@ -397,6 +506,7 @@
     cv.addEventListener('pointerdown', e => {
       lastAct = performance.now();
       if (state !== 'play' || !spawned) return;
+      if (performance.now() < spawned.born) return;   // not arrived yet
       const p = pt(e);
       if (Math.hypot(p.x - spawned.x, p.y - spawned.y) <= segD * 0.7) {
         dragging = true;
@@ -427,7 +537,7 @@
       }
       if (best >= 0 && segs[best].blank && segs[best].expected === spawned.value) {
         segs[best].filled = true; segs[best].blank = false;
-        spawnNext();
+        spawnNext(SPAWN_NEXT);
         if (!spawned) finish();
       } else if (best >= 0) {
         // a real target, but not this number's home — refusal is information
@@ -440,28 +550,22 @@
       }
     });
 
-    /* the win hands the assembled snake to the shared engine — the
-       reinforcement beat, then the wind: circuits, then the track
-       contracts until the body closes the loop (the still path on
-       macOS). wind, not tour — the ring phrase renders incoherently
-       on some devices */
+    /* the win: the snake celebrates where it lies — the reinforcement
+       beat (×1…×12 light in turn), a satisfied wiggle, a look straight
+       at the child and a wink. Then "Another snake?" */
     function finish() {
       state = 'celebrate';
+      setRung(rung + 1);
+      addMade(table);
       doneMs = Math.round(performance.now() - startT);
+      cheerT = performance.now();
+      nextBlinkAt = cheerT + (WINK_AT + WINK_SECS + 1.5) * 1000;
+      blinkT0 = -1;
       syncChips();
-      if (window.NF && NF.complete) NF.complete(table);  // home to the den
-      Anim.begin({
-        ctx, W, H,
-        board: { x: bX, y: bY, w: bW, h: bH },
-        segD, table, segs,
-        kind: 'wind',
-        hold: true,
-        onDone: showDone
-      });
     }
 
-    /* the bottom prompt fades up while the coiled snake and its numeral
-       remain on screen until the user responds */
+    /* the bottom prompt fades up while the snake stays on screen,
+       still looking out, until the user responds */
     function showDone() {
       state = 'done';
       chipRow.classList.add('hidden');
@@ -508,7 +612,7 @@
        nothing to place they rest on the pose's facing direction */
     function eyeLook(s, facing) {
       let t = facing;
-      if (spawned) {
+      if (spawned && performance.now() >= spawned.born) {
         const d = wrapAngle(Math.atan2(spawned.y - s.y, spawned.x - s.x) - facing);
         t = facing + Math.max(-GAZE_MAX, Math.min(GAZE_MAX, d));
       }
@@ -535,10 +639,12 @@
     /* same construction as the tilt-snake head — radial-shaded ball,
        rim stroke, pupil pair forward and across — but the hue comes
        from the table so the snake takes its table's colour */
-    function drawHead(s, now) {
+    /* face: 0 = eyes on the heading, 1 = turned to look out at you;
+       wink: 0..1 — how far the right eye is shut */
+    function drawHead(s, now, face = 0, wink = 0) {
       const nxt = segs[1] || { x: s.x, y: s.y + 1 };
       const ang = Math.atan2(s.y - nxt.y, s.x - nxt.x);
-      const r = segD / 2;
+      const r = segD / 2 * (1 + LOOK_GROW * face);
       const hue = (table * 31 + 200) % 360;
 
       const g = ctx.createRadialGradient(
@@ -556,16 +662,27 @@
       const ex = Math.cos(look), ey = Math.sin(look);
       const px = -ey, py = ex;
       const sq = blinkScale(now);
-      for (const side of [-1, 1]) {
+      // each eye eases from its place on the heading to the front of the
+      // face — the left-hand eye stays the left-hand eye, so none cross
+      const eyes = [-1, 1].map(side => ({
+        x: s.x + ex * r * 0.38 + px * side * r * 0.36,
+        y: s.y + ey * r * 0.38 + py * side * r * 0.36
+      })).sort((a, b) => a.x - b.x);
+      eyes.forEach((e, k) => {
+        const fx = s.x + (k ? 1 : -1) * r * 0.34, fy = s.y - r * 0.06;
+        const x = e.x + (fx - e.x) * face, y = e.y + (fy - e.y) * face;
+        const er = r * (0.16 + 0.03 * face);
+        const lid = k ? Math.min(sq, 1 - wink * 0.94)
+          : Math.min(sq, 1 - wink * 0.15);
         ctx.beginPath();
-        ctx.ellipse(s.x + ex * r * 0.38 + px * side * r * 0.36,
-          s.y + ey * r * 0.38 + py * side * r * 0.36,
-          r * 0.16, Math.max(r * 0.16 * sq, r * 0.03), look, 0, 7);
+        ctx.ellipse(x, y, er, Math.max(er * lid, r * 0.03),
+          look * (1 - face), 0, 7);
         ctx.fillStyle = '#101418'; ctx.fill();
-      }
+      });
     }
 
     function draw(now) {
+      if (demo) stepDemo(now);
       if (state === 'choose') {
         // chips alone offer the next round — no snake until one is picked
         ctx.fillStyle = '#101418';
@@ -576,7 +693,14 @@
         ctx.fillText('pick a table', bX + bW / 2, bY + bH / 2);
         return;
       }
-      if (state !== 'play') { Anim.frame(now); return; }
+      // the celebration's clock: 0 while playing
+      const el = state === 'celebrate' ? (now - cheerT) / 1000
+        : state === 'done' ? Infinity : -1;
+      if (state === 'celebrate' && el >= ASK_AT) showDone();
+      const ease = k => { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); };
+      const face = el < 0 ? 0 : ease((el - LOOK_AT) / LOOK_SECS);
+      const wk = (el - WINK_AT) / WINK_SECS;
+      const wink = wk > 0 && wk < 1 ? Math.min(1, Math.sin(wk * Math.PI) * 1.8) : 0;
       ctx.fillStyle = '#101418';
       ctx.fillRect(0, 0, W, H);
 
@@ -584,7 +708,17 @@
       // draw-time only, so dealt positions (and drop targets) never move
       const idleAge = (now - lastAct) / 1000;
       let wob = null;
-      if (idleAge > IDLE_WRIG_S) {
+      const ck = (el - CHEER_AT) / CHEER_SECS;
+      if (ck > 0 && ck < 1) {
+        // the satisfied wiggle — head to tail, swelling and dying away
+        const k = Math.sin(ck * Math.PI);
+        wob = segs.map((s, i) => {
+          const a = segs[Math.max(0, i - 1)], b = segs[Math.min(N - 1, i + 1)];
+          const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+          const m = Math.sin(now / 1000 * 9 - i * 0.9) * CHEER_AMP * segD * k;
+          return { x: -dy / d * m, y: dx / d * m };
+        });
+      } else if (idleAge > IDLE_WRIG_S) {
         const c = (idleAge - IDLE_WRIG_S) % WRIG_CYCLE;
         if (c < WRIG_SECS) {
           const k = Math.sin(c / WRIG_SECS * Math.PI);
@@ -618,7 +752,7 @@
         }
         const cx = s.x + ox + (wob ? wob[i].x : 0),
           cy = s.y + (wob ? wob[i].y : 0), r = segD / 2;
-        if (i === 0) { drawHead({ x: cx, y: cy }, now); continue; }
+        if (i === 0) { drawHead({ x: cx, y: cy }, now, face, wink); continue; }
         if (s.blank) {
           ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
           ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();
@@ -628,8 +762,16 @@
           ctx.stroke();
           ctx.setLineDash([]);
         } else {
-          ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+          // the reinforcement beat: each member swells and rings in turn
+          const bk = el - i * BEAT_STAGGER;
+          const pop = bk > 0 && bk < BEAT_HOLD ? Math.sin(bk / BEAT_HOLD * Math.PI) : 0;
+          ctx.beginPath(); ctx.arc(cx, cy, r * (1 + pop * 0.12), 0, 7);
           ctx.fillStyle = tableColour(table); ctx.fill();
+          if (pop > 0) {
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * pop) + ')';
+            ctx.stroke();
+          }
           numeral(s.expected, cx, cy, segD * 0.34, '#fff');
         }
         if (i === flashIdx) {
@@ -644,21 +786,180 @@
         }
       }
 
-      // the piece in hand — fades and rises in from the spawn point
       if (spawned) {
         const age = (now - spawned.born) / 1000;
-        const k = dragging ? 1 : Math.min(1, age / SPAWN_SECS);
-        const r = segD / 2;
-        ctx.globalAlpha = k;
-        ctx.beginPath();
-        ctx.arc(spawned.x, spawned.y - (1 - k) * 18, r, 0, 7);
-        ctx.fillStyle = tableColour(table); ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke();
-        numeral(spawned.value, spawned.x, spawned.y - (1 - k) * 18, segD * 0.34, '#fff');
-        ctx.globalAlpha = 1;
+        if (age >= 0) drawSpawn(age);
+      }
+
+      /* the opening's ending — the stage fades out, then the fresh
+         puzzle fades up on the other side of it */
+      if (darkA > 0) {
+        ctx.fillStyle = 'rgba(16,20,24,' + Math.min(1, darkA) + ')';
+        ctx.fillRect(0, 0, W, H);
       }
     }
+
+    /* the piece in hand — arrives with a flourish: pops up past full
+       size and settles, a ring of light spreading from it; while it
+       waits, a softer ring now and then says "still here" */
+    /* soft oval on the ground: slides out from under the number as it
+       lifts, widens and fades with height, closes up again on landing */
+    function drawShadow(r) {
+      const d = demo, top = segD * (1.2 + FLOAT_RISE);
+      const k = Math.min(1, (d.h || 0) / top);
+      const sx = SHADOW_GROUND ? d.gx : spawned.x;
+      const sy = (SHADOW_GROUND ? d.gy : spawned.y + (d.h || 0)) + r * 0.25;
+      const style = qs.get('shadow') || SHADOW_STYLE;
+      const light = style === 'light';
+      const hue = (table * 31 + 200) % 360;
+      if (style === 'outline') {
+        /* a thin soft line where the shadow's edge would be: shows on
+           the dark page where a dark fill disappears */
+        const w = r * (1.0 + 0.35 * k), h = w * 0.35;
+        const a = SHADOW * 0.5 * (1 - 0.45 * k);
+        ctx.save();
+        ctx.strokeStyle = 'hsla(' + hue + ',30%,80%,' + a * 0.35 + ')';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.ellipse(sx, sy, w, h, 0, 0, 7); ctx.stroke();
+        ctx.strokeStyle = 'hsla(' + hue + ',30%,82%,' + a + ')';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.ellipse(sx, sy, w, h, 0, 0, 7); ctx.stroke();
+        ctx.restore();
+        return;
+      }
+      /* the pale one is flatter and crisper-edged, so it reads as a
+         reflection on the floor rather than a puff of cloud */
+      const w = r * (1.05 + 0.35 * k), h = w * (light ? 0.3 : 0.45);
+      const rgb = light ? 'hsla(' + hue + ',35%,80%,' : 'rgba(0,0,0,';
+      const alpha = SHADOW * (light ? 0.22 : 1) * (1 - 0.4 * k);
+      ctx.save();
+      ctx.translate(sx, sy); ctx.scale(1, h / w);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, w);
+      g.addColorStop(0, rgb + alpha + ')');
+      if (light) g.addColorStop(0.8 - 0.2 * k, rgb + alpha * 0.8 + ')');
+      else g.addColorStop(0.55 - 0.25 * k, rgb + alpha * 0.7 + ')');
+      g.addColorStop(1, rgb + '0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(0, 0, w, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+
+    function drawSpawn(age) {
+      const r = segD / 2, hue = (table * 31 + 200) % 360;
+      const held = dragging || (demo && demo.phase === 'carry');
+      const a = held ? 1 : Math.min(1, age / FLOURISH_SECS);
+      const u = a - 1;
+      const lifted = demo && demo.phase === 'carry' ? demo.lift || 0 : 0;
+      const sc = held ? 1 + 0.1 * lifted
+        : Math.max(0, 1 + 3.2 * u * u * u + 2.2 * u * u);
+      const x = spawned.x, y = spawned.y - (1 - a) * 14;
+      if (demo && demo.phase === 'carry' && SHADOW > 0) drawShadow(r);
+      if (!held) {
+        let ring = -1, ringA = 0.6;
+        if (age < RING_SECS) ring = age / RING_SECS;
+        else if (READY_EVERY > 0) {
+          const c = (age - RING_SECS) % READY_EVERY;
+          if (c > READY_EVERY - RING_SECS) {
+            ring = (c - (READY_EVERY - RING_SECS)) / RING_SECS; ringA = 0.3;
+          }
+        }
+        if (ring >= 0) {
+          ctx.beginPath(); ctx.arc(x, y, r * (1 + 1.3 * ring), 0, 7);
+          ctx.lineWidth = 3 * (1 - ring) + 1;
+          ctx.strokeStyle = 'hsla(' + hue + ',75%,72%,' + ringA * (1 - ring) + ')';
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = held ? 1 : Math.min(1, age / 0.15);
+      ctx.beginPath();
+      ctx.arc(x, y, r * sc, 0, 7);
+      ctx.fillStyle = tableColour(table); ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke();
+      if (sc > 0.2) numeral(spawned.value, x, y, segD * 0.34 * sc, '#fff');
+      ctx.globalAlpha = 1;
+    }
+
+    /* ---------- the opening (Roger, 2026-11-14) ----------
+       Once per device, on the first visit: a ×2 snake missing two
+       numbers completes itself — each number arrives as it will in
+       play, is seen, and is carried home. The finished snake stands
+       a moment, the stage fades out, and the fresh puzzle fades up.
+       The first touch anywhere ends it.
+       ?demo=1 plays it on request; ?demo=reset forgets it was seen */
+    const DEMO_KEY = 'snakePuzzleDemoSeen';
+    function demoSeen(mark) {          // private browsing may refuse storage
+      try {
+        if (mark === undefined) return !!localStorage.getItem(DEMO_KEY);
+        if (mark) localStorage.setItem(DEMO_KEY, '1');
+        else localStorage.removeItem(DEMO_KEY);
+      } catch (e) { return false; }
+    }
+    if (qs.get('demo') === 'reset') demoSeen(false);
+    let demo = null;                   // {phase, t0, keep, idx, from}
+    let darkA = 0;                     // fade-to-dark level at the ending
+
+    function startDemo() {
+      demo = { phase: 'wait', t0: 0, keep: table, idx: -1, from: null };
+      table = DEMO_TABLE; syncChips(); deal(DEMO_BLANKS);
+      if (spawned) spawned.born = performance.now() + DEMO_START * 1000;
+      chipRow.classList.add('locked');
+      demoSeen(true);
+    }
+
+    function stepDemo(now) {
+      const d = demo;
+      if (d.phase === 'wait') {
+        if (spawned && now >= spawned.born
+            + (FLOURISH_SECS + DEMO_LOOK) * 1000) {
+          d.idx = segs.findIndex(s => s.blank && s.expected === spawned.value);
+          d.from = { x: spawned.x, y: spawned.y };
+          d.phase = 'carry'; d.t0 = now;
+        }
+      } else if (d.phase === 'carry') {
+        /* lifted, carried, set down: the piece swells a little as
+           it's picked up and settles back as it lands */
+        const T = DEMO_LIFT * 2 + DEMO_CARRY, el = (now - d.t0) / 1000;
+        d.lift = Math.min(1, el / DEMO_LIFT, Math.max(0, (T - el) / DEMO_LIFT));
+        const e = Math.min(1, Math.max(0, (el - DEMO_LIFT) / DEMO_CARRY));
+        const q = e < 0.5 ? 2 * e * e : 1 - Math.pow(2 - 2 * e, 2) / 2;
+        const to = segs[d.idx];
+        const dx = to.x - d.from.x, dy = to.y - d.from.y;
+        const L = Math.hypot(dx, dy) || 1;
+        let nx = -dy / L, ny = dx / L;           // carried in a gentle arc,
+        if (ny > 0) { nx = -nx; ny = -ny; }      // lifted, not slid
+        const lift = Math.sin(q * Math.PI) * Math.min(L * 0.18, segD * 1.2);
+        const rise = d.lift * FLOAT_RISE * segD;
+        d.gx = d.from.x + dx * q; d.gy = d.from.y + dy * q;
+        d.h = lift + rise;
+        spawned.x = d.gx + nx * lift;
+        spawned.y = d.gy + ny * lift - rise;
+        if (el >= T) {
+          to.filled = true; to.blank = false;
+          spawnNext(DEMO_NEXT);
+          d.phase = spawned ? 'wait' : 'pause'; d.t0 = now;
+        }
+      } else if (d.phase === 'pause') {
+        if (now - d.t0 >= DEMO_PAUSE * 1000) { d.phase = 'dark'; d.t0 = now; }
+      } else if (d.phase === 'dark') {
+        darkA = Math.min(1, (now - d.t0) / 1000 / DEMO_DARK);
+        if (darkA >= 1) {
+          table = d.keep; syncChips(); deal();
+          d.phase = 'up'; d.t0 = now;
+        }
+      } else if (d.phase === 'up') {
+        darkA = 1 - (now - d.t0) / 1000 / DEMO_UP;
+        if (darkA <= 0) { darkA = 0; demo = null; }
+      }
+    }
+
+    /* a real touch ends the opening — the fresh puzzle at once */
+    window.addEventListener('pointerdown', () => {
+      if (!demo) return;
+      const fresh = demo.phase === 'up';
+      table = demo.keep; demo = null; darkA = 0;
+      if (!fresh) { syncChips(); deal(); }
+    }, true);
 
     function frame(now) {
       try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
@@ -670,8 +971,7 @@
     syncChips();
     deal();
     // lab aids: ?t=N picks the table, ?pose=fam pins the pose, ?done jumps
-    // to a completed round; ?depart=kind & ?departAt=N (inside anim.js)
-    // then audition the ending
+    // to a completed round (watch the celebration)
     if (qs.has('t')) {
       table = Math.min(12, Math.max(2, +qs.get('t') || table));
       syncChips();
@@ -682,10 +982,12 @@
       remaining = []; spawned = null;
       finish();
     }
+    if (qs.get('demo') === '1'
+        || (!qs.has('t') && !qs.has('done') && !demoSeen())) startDemo();
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=14"></script>
+  <script src="nav.js?v=15"></script>
 </body>
 
 </html>

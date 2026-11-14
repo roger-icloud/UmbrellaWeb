@@ -736,6 +736,44 @@ first paint, then screenshot (`?ff=` hook in a temp copy; seeds via
 work. Commits pass `-c user.name=rogereve -c user.email=roger@eve.co.uk`
 per-commit; no global git identity is set.
 
+## Snake Puzzle — opening, ladder; the den retired (2026-11-14)
+
+- **The den is retired everywhere** (Roger: "kill it everywhere").
+  The den block is gone from `nav.js` (now `?v=15` on every page) and
+  the `NF.complete` calls from Snake Puzzle, Tilt Snake and Honeycomb.
+  `square.html`, `rest-lab.html`, `scroll-lab.html` and anim.js's
+  `den` exit remain as dormant files/code — nothing links to them.
+- **Opening demo** (`snakePuzzleDemoSeen`, `?demo=1` / `?demo=reset`):
+  ×2 snake, two gaps, each number arrives with the flourish, lifts,
+  floats home on an arc, sets down; pause, fade, fresh puzzle. Slow
+  on purpose ("graceful and instructive rather than direct").
+  **Float vs direct** (Roger's distinction): the demo's carried piece
+  floats with a ground shadow; a child's drag stays plain. Shadow
+  style `outline` chosen — dark fills vanish on the dark page and pale
+  ones get lost in tablet glare. A halo on the number was declined:
+  rings already mean "arrived" and "complete".
+- **The ladder** (`LADDER`, `BIG_FROM`; `snakePuzzleRung` in
+  sessionStorage; `?rung=N`): each finished snake makes the next a
+  step harder — larger multiples, more gaps, then designed runs of
+  2–3 adjacent gaps ("exactly where?"). Non-run gaps keep a neighbour
+  each, so the only adjacent gaps are the designed run. Exploratory,
+  the same for every child; the adaptive phase comes later. An
+  anonymous visit counter (Cloudflare) was discussed and is Roger's
+  decision — not built.
+- **Short celebration** (Roger: "celebration is now too long"): no
+  wind, lap, ring or numeral. The snake stays where it lies: the
+  reinforcement beat (×1…×12 light in turn), a satisfied wiggle, the
+  head turns to face the child, one slow wink, then "Another snake?"
+  (~4 s; `BEAT_*`, `CHEER_*`, `LOOK_*`, `WINK_*`, `ASK_AT`). Drawn by
+  the page itself — the posed snake never moves, so anim.js isn't
+  needed (Snake Puzzle still uses `Anim.pose` for its poses).
+- **Chips that remember** (`MADE_RING`, `snakePuzzleMade` in
+  sessionStorage): a table finished this visit keeps a faint ring in
+  its colour on its chip. Progress as what was made, not how much —
+  no count, no completion, no fanfare. Thermometer / Apple-style
+  filling ring were considered and declined (a full ring is itself
+  the reward).
+
 ## Priorities (Roger, 2026-10-17; updated 2026-10-19)
 
 **Bread-and-butter first (2026-10-19):** complete the EXISTING

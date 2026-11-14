@@ -717,7 +717,6 @@
           logEvent('collect', { table: tables[ti], v: cell.v, ord: idx[ti] });
           if (idx[ti] === 12 && !rippleAt[ti]) {
             rippleAt[ti] = now;
-            if (window.NF && NF.complete) NF.complete(tables[ti]); // a snake earns its place in the den
           }
         }
       }
@@ -1015,7 +1014,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=14"></script>
+  <script src="nav.js?v=15"></script>
 </body>
 
 </html>

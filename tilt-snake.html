@@ -463,7 +463,6 @@
       autoTarget = null;
       logEvent('complete', { table, ms: doneMs, misses });
       gamesDone++;
-      if (window.NF && NF.complete) NF.complete(table);  // home to the den
       const fullSegs = [
         { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
         ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
@@ -936,7 +935,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=14"></script>
+  <script src="nav.js?v=15"></script>
 </body>
 
 </html>

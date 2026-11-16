@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- pad and pencil for "tell Roger what you think" — chosen over
+       the envelope (a page invites writing; an envelope only sends),
+       Roger 2026-11-16 -->
+  <g>
+    <rect x="10" y="8" width="32" height="48" rx="4"
+          fill="#f2f4f0" stroke="#c6cdc0" stroke-width="2.5"/>
+    <g stroke="#aeb8a8" stroke-width="2.5" stroke-linecap="round">
+      <path d="M17 19h18M17 26h18M17 33h14M17 40h18"/>
+    </g>
+    <g stroke="#8a9484" stroke-width="3" stroke-linecap="round">
+      <path d="M14 8v-2M20 8v-2M26 8v-2M32 8v-2M38 8v-2"/>
+    </g>
+    <!-- pencil, angled across the corner -->
+    <g transform="translate(38,44) rotate(38)">
+      <rect x="-2.6" y="-17" width="5.2" height="24" rx="1.4"
+            fill="#79b168" stroke="#3f6b34" stroke-width="1.6"/>
+      <path d="M-2.6 7 0 14 2.6 7 Z" fill="#e8d8b0" stroke="#3f6b34" stroke-width="1.4"/>
+      <circle cx="0" cy="12.4" r="1.1" fill="#3f6b34"/>
+      <rect x="-2.6" y="-17" width="5.2" height="4.5" rx="1.4" fill="#e8ece6"/>
+    </g>
+  </g>
+</svg>

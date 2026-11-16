@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- the x12 pattern: a mini 10x10 number grid (1-100) with the
+       twelve-table lit — a staggered weave, monochrome per Roger,
+       2026-11-16 (x12 replaces x11: the diagonal read as stairs) -->
+  <g stroke="#5a635a" stroke-width="1" fill="none">
+    <rect x="4" y="4" width="56" height="56" rx="2"/>
+    <path d="M9.6 4v56M15.2 4v56M20.8 4v56M26.4 4v56M32 4v56M37.6 4v56M43.2 4v56M48.8 4v56M54.4 4v56"/>
+    <path d="M4 9.6h56M4 15.2h56M4 20.8h56M4 26.4h56M4 32h56M4 37.6h56M4 43.2h56M4 48.8h56M4 54.4h56"/>
+  </g>
+  <g fill="#e8ece6">
+    <!-- 12, 24, 36, 48, 60, 72, 84, 96 -->
+    <rect x="10.4" y="9.6"  width="4.8" height="5.6"/>
+    <rect x="21.6" y="15.2" width="4.8" height="5.6"/>
+    <rect x="32.8" y="20.8" width="4.8" height="5.6"/>
+    <rect x="44"   y="26.4" width="4.8" height="5.6"/>
+    <rect x="55.2" y="32"   width="4.8" height="5.6"/>
+    <rect x="10.4" y="43.2" width="4.8" height="5.6"/>
+    <rect x="21.6" y="48.8" width="4.8" height="5.6"/>
+    <rect x="32.8" y="54.4" width="4.8" height="5.6"/>
+  </g>
+</svg>

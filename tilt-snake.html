@@ -222,6 +222,10 @@
     const BUMP_INWARD = 0.35;   // rad the path along a wall leans away from it
     const BUMP_LOOP = 0.6;      // rad past straight-out when looping out of a corner
     const BUMP_CORNER = 60;     // design-px from a wall's end that counts as a corner
+    const MISS_STALL = 1.4;     // s of dazed stall after a wrong catch —
+                                // carelessness costs a moment, not spectacle
+    const MISS_DRIVE = 0;       // a stall is a true stop — the paused snake
+                                // cannot travel over a wrong number
     // propped and left alone, the snake sleepwalks a slow figure of eight
     // along the downhill wall instead of pressing into it
     const SLEEP_DRIVE = 0.3;    // fraction of speed while sleepwalking
@@ -261,6 +265,7 @@
     let feintFrom = null;        // where the current feint began
     let feintTo = null;          // the numeral the snake is pretending to head for
     let bumpUntil = 0, bumpT0 = 0, bumpTarget = 0;  // puzzled spell after meeting a wall
+    let dazeUntil = 0, dazeT0 = 0, dazeHeading = 0; // stall after a wrong catch
     let sleepy = false, sleepWall = null, sleepT = 0;  // sleepwalk state; sleepT runs along the eight
     let lastDrive = 0;           // last frame's drive, so sleepwalking slows in gently
     let nextBlinkAt = 0, blinkT0 = -1;
@@ -419,6 +424,7 @@
       try {
         if (motionNeedsPermission()) {
           const res = await DeviceMotionEvent.requestPermission();
+          if (window._motionGrant) _motionGrant(res);
           if (res !== 'granted') {
             whyEl.textContent = 'Permission "' + res +
               '" — tilt unavailable, but touch-drag still works.';
@@ -638,7 +644,13 @@
 
       let target = null;
       let drive = IDLE_DRIVE;
-      if (touch) {
+      if (now < dazeUntil) {
+        // wrong catch: steering is withheld for a beat — a quiet penalty
+        // that makes slapdash cost time (flat, per the Cargo lesson)
+        const k = (now - dazeT0) / (MISS_STALL * 1000);
+        target = dazeHeading + BUMP_WOBBLE * Math.sin(4 * Math.PI * k) * (1 - k);
+        drive = MISS_DRIVE;
+      } else if (touch) {
         autoTarget = null;
         const dx = touch.x - head.x, dy = touch.y - head.y;
         target = Math.atan2(dy, dx);
@@ -782,9 +794,28 @@
             nextIdx++;
             logEvent('collect', { v: n.v, ord: nextIdx });
             if (nextIdx === 12) finish();
-          } else if (!holdPhase && !sleepy && now > n.flashUntil) {   // a bump while dithering or sleepwalking is not the child's
+          } else if (!holdPhase && !sleepy && now > dazeUntil
+            && now > n.flashUntil && now > (n.forgiveUntil || 0)) {   // dithering, sleepwalking and stalling are not the child's
             n.flashUntil = now + FLASH_SECS * 1000;
+            n.forgiveUntil = now + (MISS_STALL + 1.5) * 1000;   // can't re-offend while the snake sits on it
             misses++;
+            if (!autoTarget) {   // a numeral the autopilot merely crossed isn't the child's either
+              /* a firm rebuff: the head recoils off the numeral's rim and
+                 points away, with a veer so it doesn't turn straight back
+                 (Roger's instinct, 2026-11-16) — then the stall applies */
+              const nx = head.x - n.x, ny = head.y - n.y;
+              const nd = Math.hypot(nx, ny) || 1;
+              head.x = Math.max(HEAD_R, Math.min(Wd - HEAD_R, n.x + nx / nd * (EAT_DIST + 2)));
+              head.y = Math.max(HEAD_R, Math.min(Hd - HEAD_R, n.y + ny / nd * (EAT_DIST + 2)));
+              const ux = nx / nd, uy = ny / nd;
+              const hx2 = Math.cos(heading), hy2 = Math.sin(heading);
+              const dot = hx2 * ux + hy2 * uy;
+              heading = Math.atan2(hy2 - 2 * dot * uy, hx2 - 2 * dot * ux)
+                + (Math.random() - 0.5) * 0.9;
+              dazeT0 = now;
+              dazeUntil = now + MISS_STALL * 1000;
+              dazeHeading = heading;
+            }
             logEvent('refuse', { v: n.v, want: table * (nextIdx + 1) });
           }
         }
@@ -818,13 +849,23 @@
       ctx.strokeStyle = flash ? '#e0a53a' : (isTarget ? '#4da3ff' : '#2c3e50');
       ctx.lineWidth = isTarget ? 2.5 : 1.5;
       ctx.stroke();
-      if (isTarget && TARGET_GLOW) {
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, NUM_R + (hot ? 9 : 5)
-          + Math.sin(performance.now() / (hot ? 160 : 300)) * 3, 0, Math.PI * 2);
-        ctx.strokeStyle = hot ? 'rgba(77,163,255,0.7)' : 'rgba(77,163,255,0.35)';
-        ctx.lineWidth = hot ? 3 : 2;
-        ctx.stroke();
+      if (isTarget && TARGET_GLOW && hot) {
+        /* idle long enough to need prompting: a soft fuzzy halo that
+           breathes once every ~3s — it nudges, then backs off
+           (Roger 2026-11-16: static is too passive) */
+        const a = Math.sin((performance.now() % 3000) / 3000 * Math.PI * 2
+          - Math.PI / 2) * 0.5 + 0.5;   // 0…1…0, one breath
+        if (a > 0.02) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(190,220,255,0.85)';
+          ctx.shadowBlur = 14 * a + 4;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, NUM_R + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(200,225,255,' + (0.25 + 0.45 * a) + ')';
+          ctx.lineWidth = 4;
+          ctx.stroke();
+          ctx.restore();
+        }
       }
       ctx.fillStyle = flash ? '#e0a53a' : '#cfd8e0';
       ctx.font = 'bold ' + (NUM_R - 2) + 'px Andika, -apple-system, sans-serif';
@@ -935,7 +976,28 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=15"></script>
+  <script src="nav.js?v=17"></script>
+    <div id="mstat"></div>
+    <script>
+      /* motion diagnostic — one line, bottom-left, so a home-screen
+         webapp can say which gate it's hitting (Roger, Nov 2026) */
+      (function () {
+        const el = document.getElementById('mstat');
+        el.style.cssText = 'position:fixed;left:6px;bottom:3px;' +
+          'font:10px/1.2 system-ui;color:#888;z-index:99;pointer-events:none';
+        let n = 0, grant = '-';
+        function show() {
+          const d = typeof DeviceMotionEvent !== 'undefined';
+          const p = d && typeof DeviceMotionEvent.requestPermission === 'function';
+          el.textContent = 'motion:' + (d ? 'y' : 'n') + ' ask:' +
+            (p ? 'y' : 'n') + ' grant:' + grant + ' events:' + n;
+        }
+        window._motionGrant = r => { grant = r; show(); };
+        window.addEventListener('devicemotion',
+          () => { n++; if (n < 8 || !(n % 60)) show(); });
+        show();
+      })();
+    </script>
 </body>
 
 </html>

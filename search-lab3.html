@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#101418">
-  <title>Search Lab 3 — NumberFun</title>
+  <title>Search Tables — NumberFun</title>
   <style>
     html,
     body {
@@ -23,10 +23,34 @@
       font-family: Andika, -apple-system, system-ui, sans-serif;
     }
 
+    /* flip stage: both turns run on #flipper, pivoted on the hexagon's
+       own centre (set at flip time from geom()). The canvas hides its
+       back so #boardBack's snake shows through mid-tumble (Roger's
+       winking snake, 2026-11-15) */
+    #stage {
+      position: fixed; inset: 0;
+      perspective: 1200px;
+    }
+    #flipper {
+      position: absolute; inset: 0;
+      transform-style: preserve-3d;
+    }
     canvas {
       display: block;
-      position: fixed;
+      position: absolute;
       inset: 0;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+    #boardBack {
+      position: absolute; inset: 0;
+      transform: rotateX(180deg);
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      pointer-events: none;
+    }
+    #boardBack .hsWrap {
+      position: absolute;
     }
 
     #chipRow {
@@ -93,7 +117,12 @@
 
 <body>
 
-  <canvas id="c"></canvas>
+  <div id="stage">
+    <div id="flipper">
+      <canvas id="c"></canvas>
+      <div id="boardBack"></div>
+    </div>
+  </div>
   <div id="chipRow"></div>
   <button id="again">Again ▸</button>
   <div id="params"></div>
@@ -140,7 +169,15 @@
        ?amber=0..1    discount-wash strength (fainter + wider = the
                       more-able dial, Roger 2026-11-10)
        ?tall=N        force the vertical stretch (0 = circles even
-                      on a phone; unset = auto under TALL_BELOW) */
+                      on a phone; unset = auto under TALL_BELOW)
+       ?flip=spin|tumble|off   completion turn (spin default; tumble
+                      holds on the obverse — the puzzle snake's head
+                      looks, winks, holds, asks Again? Yes = fresh
+                      board, No = main menu)
+       ?back=cartoon   the green cartoon snake on the obverse instead
+       ?expr=wink|blink|spin|flip|swivel  force its expression
+                      (default: random)
+       ?demo=1        play the completion turn once after load */
 
     /* ---------- tunables ---------- */
     let   SIDE = 7;                    // side 6 starves crossing arms
@@ -231,6 +268,20 @@
     const TRI_P = Math.max(0, Math.min(1, num('tri', 0.5)));
     const TALL_Q = qs.has('tall')
       ? Math.max(0, Math.min(TALL_MAX, num('tall', 1))) : null;
+    /* completion turn (Roger, 2026-11-15): one full 360° circuit when
+       the last word lands — once, never a loop, so it stays a quiet
+       signal. spin turns in the page's own plane; tumble flips the
+       board over like a coin and needs the perspective() in the
+       transform to read as depth. ?flip=off silences it. */
+    const FLIP = qs.get('flip') === 'off' ? null
+      : qs.get('flip') === 'tumble' ? 'tumble' : 'spin';
+    const DEMO_FLIP = qs.get('demo') === '1';
+    /* ?expr=wink|blink|spin|flip|swivel forces the house snake's
+       expression; unset it picks at random — anticipation by design.
+       ?back=cartoon brings back the green snake on the obverse — the
+       default is the puzzle's own mute head (Roger, 2026-11-15). */
+    const EXPR = qs.get('expr');
+    const BACK = qs.get('back') === 'cartoon' ? 'cartoon' : 'snake';
 
     /* ---------- rng ---------- */
     function mulberry32(a) {
@@ -468,6 +519,7 @@
     }
 
     function deal(ts) {
+      resumeFlip();   // a fresh deal sends a held tumble home first
       tables = ts;
       rng = mulberry32(seed = (seed + 0x9e3779b9) >>> 0);
       /* keep the deal's promise or reroll it: every word a line,
@@ -587,7 +639,8 @@
        faint possible-glint. The reveal lives only under the circle —
        the app insists on concentration — and on release it freezes for
        LINGER_S before fading, the beat that lets the finger become a
-       tap. Mouse hover previews at half strength. */
+       tap. It exists only while held — a hint on demand, not a
+       permanent guide (Roger, 2026-11-15). */
     const hexDist = (a, b) =>
       (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) +
        Math.abs(a.q + a.r - b.q - b.r)) / 2;
@@ -624,7 +677,7 @@
        release, then fades over LINGER_FADE */
     function lensAlpha(now) {
       if (!halo) return 0;
-      if (!halo.held) return halo.hover ? 0.55 : 1;
+      if (!halo.held) return 1;
       const age = (now - halo.held) / 1000;
       if (age <= LINGER_S) return 1;
       return Math.max(0, 1 - (age - LINGER_S) / LINGER_FADE);
@@ -638,11 +691,10 @@
 
     cv.addEventListener('pointermove', e => {
       if (!WASH || state !== 'play') return;
-      if (!press) {
-        if (e.pointerType === 'mouse')
-          lensUpdate(e.clientX, e.clientY, 'mouse', true);
-        return;
-      }
+      /* the desk lamp exists only while held — finger or mouse
+         button — a hint on demand, never a permanent guide
+         (Roger 2026-11-15: hover left it lit forever) */
+      if (!press) return;
       const g = geom();
       if (press.mode === null &&
           Math.hypot(e.clientX - press.x, e.clientY - press.y) >
@@ -838,7 +890,194 @@
       if (state === 'beat' &&
           (now - beatT0) / 1000 > BEAT_S * MEMBERS + 0.4) {
         state = 'done';
-        document.getElementById('again').style.display = 'block';
+        boardFlip();
+        /* the tumble asks Again? on its own back — the front button
+           only shows when there's no obverse to hold it */
+        if (FLIP !== 'tumble')
+          document.getElementById('again').style.display = 'block';
+      }
+    }
+
+    /* tumble holds on its back — snake side up — until the next tap,
+       which runs the second half home (Roger: "a temporary pause for a
+       second tap whilst back is visible", 2026-11-15). A fresh deal
+       releases it too, via deal()'s resumeFlip() call. */
+    let flipAnim = null;
+    let _hs = null;
+    function houseSnake() {
+      if (!_hs) _hs = HouseSnake.mount(document.getElementById('boardBack'));
+      return _hs;
+    }
+    function resumeFlip() {
+      const a = flipAnim;
+      if (!a) return;
+      flipAnim = null;
+      a.finished.then(() => {
+        const fp = document.getElementById('flipper');
+        fp.animate(
+          [{ transform: 'rotateX(180deg)' },
+           { transform: 'rotateX(360deg)' }],
+          { duration: 750, easing: 'cubic-bezier(.3,.5,.55,1)' });
+        a.cancel();
+      });
+    }
+
+    /* the obverse cameo: the puzzle snake's own mute head — radial
+       ball in the completed table's colour, dark pupil pair — held on
+       a small canvas on the board's back. Its clock: turn to look
+       (0.5s), a random face action, hold (0.8s), then Again?
+
+       The mute head's little repertoire — which one arrives stays a
+       surprise each completion (Roger's anticipation idea). Force one
+       with ?expr=wink|blink|double|glance|nod|squint|yaw|tour, or
+       'all' for the whole programme in sequence. */
+    function backCameo(g) {
+      const host = document.getElementById('boardBack');
+      host.innerHTML = '';
+      const px = Math.min(devicePixelRatio || 1, 3);
+      const d = Math.round(g.pitch * 8);
+      const c2 = document.createElement('canvas');
+      c2.width = c2.height = Math.round(d * px);
+      c2.style.cssText = 'position:absolute;left:' + g.cx + 'px;top:' +
+        g.cy + 'px;width:' + d + 'px;height:' + d + 'px;' +
+        'transform:translate(-50%,-50%)';
+      host.appendChild(c2);
+      const ctx2 = c2.getContext('2d');
+      const pickT = tables[(Math.random() * tables.length) | 0];
+      const hue = (pickT * 31 + 200) % 360;
+      const tilt = Math.random() * 0.16 - 0.08;
+      const gazeSide = Math.random() < 0.5 ? 1 : -1;
+      const t0 = performance.now();
+      const ease = k => { k = Math.max(0, Math.min(1, k));
+        return k * k * (3 - 2 * k); };
+      /* the repertoire lives in snake.js — one table serves the
+         lab's obverse and the puzzle's own little head alike */
+      const ACTS = HouseSnake.FACES;
+      const ACT_AT = 0.7, GAP = 0.35;
+      const NAMES = Object.keys(ACTS);
+      /* ?expr=all plays the whole repertoire back-to-back on the one
+         back (Roger: see the designs in sequence on one completion) */
+      const list = EXPR === 'all' ? NAMES.slice()
+        : [ACTS[EXPR] ? EXPR : NAMES[(Math.random() * NAMES.length) | 0]];
+      let ai = 0, actT0 = ACT_AT;
+      function frame2(now) {
+        const t = (now - t0) / 1000;
+        ctx2.setTransform(px, 0, 0, px, 0, 0);
+        ctx2.clearRect(0, 0, d, d);
+        const last = ai === list.length - 1;
+        let act = ACTS[list[ai]];
+        if (!last && t - actT0 > act.dur + GAP) { ai++; actT0 = t; }
+        act = ACTS[list[ai]];
+        const tA = t - actT0;
+        /* past an action's end the face rests open — a beat of quiet
+           before the next act in the sequence */
+        const s = tA >= 0 && tA <= act.dur
+          ? act.f(tA / act.dur) : { l: 1, r: 1 };
+        ctx2.save();
+        ctx2.translate(d / 2, d / 2);
+        ctx2.rotate(tilt + (s.bob || 0));
+        const face = ease(t / 0.5);
+        const r = d * 0.3 * (1 + 0.1 * face);
+        /* the ball stays a ball through the yaw — a hint of travelling
+           light on the surface is what suggests the sphere turning */
+        const yaw = s.yaw || 0;
+        const gr = ctx2.createRadialGradient(
+          -r * .33 - Math.sin(yaw) * r * .25, -r * .33, r * .2, 0, 0, r);
+        gr.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+        gr.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+        ctx2.beginPath(); ctx2.arc(0, 0, r, 0, 7);
+        ctx2.fillStyle = gr; ctx2.fill();
+        ctx2.lineWidth = 1.5;
+        ctx2.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+        ctx2.stroke();
+        /* pupils clipped to the head's rim — on the yaw they leave
+           round one edge and come back round the other */
+        ctx2.save();
+        ctx2.beginPath(); ctx2.arc(0, 0, r, 0, 7);
+        ctx2.clip();
+        for (const side of [-1, 1]) {
+          /* pupils travel from an aside gaze to the front of the face —
+             the same look-out the puzzle head makes at LOOK_AT */
+          const gx = gazeSide * r * 0.3, gy = r * 0.05;
+          const fx = side * r * 0.34, fy = -r * 0.06;
+          const x = gx + (fx - gx) * face + (s.gx || 0) * r +
+              Math.sin(yaw) * r * 0.5,
+            y = gy + (fy - gy) * face + (s.gy || 0) * r;
+          const er = r * (0.16 + 0.03 * face);
+          const lid = side > 0 ? s.r : s.l;
+          ctx2.beginPath();
+          ctx2.ellipse(x, y, er, Math.max(er * lid, r * 0.03), 0, 0, 7);
+          ctx2.fillStyle = '#101418'; ctx2.fill();
+        }
+        ctx2.restore();
+        ctx2.restore();
+        if (!(last && t - actT0 > act.dur + 0.8))
+          requestAnimationFrame(frame2);
+        else showBackPrompt(g.cx, g.cy + d * 0.62);
+      }
+      requestAnimationFrame(frame2);
+    }
+
+    /* Again? on the obverse: Yes sends the board home onto a fresh,
+       cleared deal; No returns to the main menu (Roger 2026-11-15). */
+    function showBackPrompt(x, y) {
+      if (document.getElementById('backPrompt')) return;
+      const host = document.getElementById('boardBack');
+      const pr = document.createElement('div');
+      pr.id = 'backPrompt';
+      pr.style.cssText = 'position:absolute;left:' + x + 'px;top:' + y +
+        'px;transform:translateX(-50%);opacity:0;transition:opacity .5s;' +
+        'pointer-events:auto;text-align:center;color:#e8eef4;' +
+        'font-family:Andika,-apple-system,system-ui,sans-serif';
+      const q = document.createElement('div');
+      q.textContent = 'Again?';
+      q.style.cssText = 'font-size:24px;margin-bottom:6px';
+      pr.appendChild(q);
+      const mk = (label, fn, quiet) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.style.cssText = 'font:inherit;font-size:20px;margin:0 6px;' +
+          'padding:10px 26px;border-radius:10px;cursor:pointer;' +
+          'border:1px solid #3a4a58;color:#e8eef4;background:' +
+          (quiet ? 'rgba(20,28,36,.5)' : 'rgba(20,28,36,.9)');
+        b.addEventListener('click', fn);
+        return b;
+      };
+      pr.appendChild(mk('Yes', () => deal(tables)));
+      pr.appendChild(mk('No', () => { location.href = 'index.html'; }, true));
+      host.appendChild(pr);
+      requestAnimationFrame(() => { pr.style.opacity = '1'; });
+    }
+
+    function boardFlip() {
+      if (!FLIP) return;
+      const g = geom();
+      const fp = document.getElementById('flipper');
+      fp.style.transformOrigin = g.cx + 'px ' + g.cy + 'px';
+      if (FLIP === 'tumble') {
+        flipAnim = fp.animate(
+          [{ transform: 'rotateX(0deg)' },
+           { transform: 'rotateX(180deg)' }],
+          { duration: 800, easing: 'cubic-bezier(.5,0,.7,.5)',
+            fill: 'forwards' });
+        if (BACK === 'cartoon') {
+          const hs = houseSnake();
+          hs.wrap.style.left = g.cx + 'px';
+          hs.wrap.style.top = g.cy + 'px';
+          hs.el.style.width = (12 * g.pitch) + 'px';
+          setTimeout(() => hs.play(EXPR), 700);
+          setTimeout(() => showBackPrompt(g.cx, g.cy + 6 * g.pitch),
+            1800);
+        } else {
+          /* the puzzle snake's head, in the colour of a table just
+             completed: turns to look, winks, holds, asks Again? */
+          backCameo(g);
+        }
+      } else {
+        fp.animate(
+          [{ transform: 'rotate(0deg)' },
+           { transform: 'rotate(360deg)' }],
+          { duration: 1100, easing: 'cubic-bezier(.45,0,.2,1)' });
       }
     }
 
@@ -889,6 +1128,7 @@
     syncChips();
     resize();
     draw(performance.now());            // synchronous first paint
+    if (DEMO_FLIP) setTimeout(boardFlip, 1200);
 
     function frame(now) {
       try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }
@@ -897,7 +1137,8 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=15"></script>
+  <script src="snake.js?v=2"></script>
+  <script src="nav.js?v=17"></script>
 </body>
 
 </html>

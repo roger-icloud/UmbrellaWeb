@@ -693,6 +693,7 @@
       try {
         if (motionNeedsPermission()) {
           const res = await DeviceMotionEvent.requestPermission();
+          if (window._motionGrant) _motionGrant(res);
           if (res !== 'granted') {
             whyEl.textContent = 'Permission was "' + res +
               '" — tilt unavailable. Touch-drag still works; close this overlay?';
@@ -764,17 +765,22 @@
 
     /* ---------- orientation guard ---------- */
     const rotOverlay = document.getElementById('rotOverlay');
-    const handheld = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    // desktops exempt — a wide window is legitimate there
+    const handheld = matchMedia('(pointer: coarse)').matches;
     function checkOrientation() {
-      const portrait = screen.orientation && screen.orientation.type
-        ? screen.orientation.type.startsWith('portrait')
-        : matchMedia('(orientation: portrait)').matches;
-      // only handhelds need the upright guard — desktop landscape is legitimate
+      // viewport dims, not the orientation label: during a rotation iOS
+      // fires the events while matchMedia/orientation still report the
+      // OLD facing — dims tell the truth at call time (tilt-snake rule)
+      const portrait = H >= W;
       paused = handheld && !portrait;
-      rotOverlay.classList.toggle('hidden', portrait || !handheld);
+      rotOverlay.classList.toggle('hidden', !paused);
     }
-    window.addEventListener('orientationchange', checkOrientation);
-    window.addEventListener('resize', checkOrientation);
+    function scheduleOrientationCheck() {
+      checkOrientation();
+      setTimeout(checkOrientation, 350);   // re-read once the turn settles
+    }
+    window.addEventListener('orientationchange', scheduleOrientationCheck);
+    window.addEventListener('resize', scheduleOrientationCheck);
     checkOrientation();
 
     // returning from lock/tab-switch: motion values can be stale —
@@ -1223,7 +1229,28 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=15"></script>
+  <script src="nav.js?v=17"></script>
+    <div id="mstat"></div>
+    <script>
+      /* motion diagnostic — one line, bottom-left, so a home-screen
+         webapp can say which gate it's hitting (Roger, Nov 2026) */
+      (function () {
+        const el = document.getElementById('mstat');
+        el.style.cssText = 'position:fixed;left:6px;bottom:3px;' +
+          'font:10px/1.2 system-ui;color:#888;z-index:99;pointer-events:none';
+        let n = 0, grant = '-';
+        function show() {
+          const d = typeof DeviceMotionEvent !== 'undefined';
+          const p = d && typeof DeviceMotionEvent.requestPermission === 'function';
+          el.textContent = 'motion:' + (d ? 'y' : 'n') + ' ask:' +
+            (p ? 'y' : 'n') + ' grant:' + grant + ' events:' + n;
+        }
+        window._motionGrant = r => { grant = r; show(); };
+        window.addEventListener('devicemotion',
+          () => { n++; if (n < 8 || !(n % 60)) show(); });
+        show();
+      })();
+    </script>
 </body>
 
 </html>

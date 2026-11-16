@@ -191,6 +191,7 @@
 <body>
 
   <canvas id="c"></canvas>
+  <div id="snakeCameo" style="position:fixed;inset:0;pointer-events:none;overflow:hidden"></div>
   <div id="buildTag">19</div>
   <div id="chipRow"></div>
 
@@ -205,6 +206,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
+  <script src="snake.js?v=2"></script>
   <script src="anim.js?v=16"></script>
 
   <script>
@@ -222,6 +224,10 @@
       { gaps: 5, big: 0.7, run: 2 },  // a pair side by side
       { gaps: 6, big: 0.8, run: 3 },  // a run of three
       { gaps: 7, big: 0.8, run: 3 },  // seven gaps, a run of three
+      { gaps: 9, big: 0.8, run: 4 },  // nine gaps, a run of four
+      { gaps: 11, big: 0, run: 0 },   // bald — every place but the x1
+                                      // foothold is missing; finishing
+                                      // this rung brings the second snake
     ];
     const BIG_FROM = 7;         // "large" means ×7 and above
     const DROP_TOL = 1.1;       // drop acceptance radius, in segment diameters
@@ -234,6 +240,10 @@
     const RING_SECS = 0.9;      // the ring of light spreading from it
     const READY_EVERY = 2.6;    // s between softer rings while it waits; 0 = none
     const SHAKE_SECS = 0.45;    // refusal shake on the mistaken segment
+    const RETURN_MS = 700;      // a missed piece glides home, not snaps
+    const TOUCH_LIFT = 1.0;     // bead-widths the piece rides above a finger
+    const TOUCH_RING = 0.95;    // the doughnut: a coin the finger pushes,
+                                // not a stick it balances
     const FLASH_SECS = 0.6;     // amber ring on a refused drop
     const TOP_RESERVE = 92;     // clearance below the menu button
     const BOT_RESERVE = 116;    // room for the table chips
@@ -318,6 +328,7 @@
 
     /* ---------- colours (same table-coding as the family) ---------- */
     function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    function lcm(a, b) { let x = Math.max(a, b); while (x % a || x % b) x++; return x; }
 
     /* ---------- state ---------- */
     const N = 13;                 // head + twelve body segments
@@ -328,8 +339,9 @@
     let remaining = [];          // values still to spawn
     let spawned = null;          // {value, x, y, born} — the piece in hand
     let dragging = false;
-    let shakeIdx = -1, shakeT = 0;
-    let flashIdx = -1, flashT = 0;
+    let touchDrag = false;         // finger drags lift the piece above
+    let shakeTgt = null, shakeT = 0;  // {sn, i} — the refused bead
+    let flashTgt = null, flashT = 0;
     let gaze = 0, nextBlinkAt = 0, blinkT0 = -1;
     let hasInteracted = false;
     let state = 'play';          // play | choose | celebrate | done
@@ -338,8 +350,46 @@
     let misses = 0;
     let poseSeed = 0;            // seed of the dealt pose — shareable
     let cheerT = 0;              // when the celebration began
-
+    let winAct = 'wink';         // this completion's closing expression
     const qs = new URLSearchParams(location.search);
+
+    /* two snakes sharing one bead — rung 2 of the tables progression
+       (Roger, 2026-11-15): the only blank on the board is the
+       crossover, the one number belonging to both tables; the child
+       can read it off either snake and meets the overlap without a
+       word of instruction. ?duo=a,b pins the pair; bare ?duo picks a
+       pair with exactly one shared multiple within x12. Chips hide —
+       the pair is fixed for the round. */
+    const DUO_ARG = qs.get('duo');
+    const DUO = DUO_ARG !== null;
+    const DUO_PAIRS = [
+      [2, 7], [2, 9], [2, 11], [3, 7], [3, 8], [3, 10], [3, 11],
+      [4, 7], [4, 9], [4, 11], [5, 6], [5, 7], [5, 8], [5, 9], [5, 11],
+      [5, 12], [6, 7], [6, 11], [7, 8], [7, 9], [7, 10], [7, 11],
+      [7, 12], [8, 9], [8, 11], [9, 10], [9, 11], [10, 11], [10, 12],
+      [11, 12]];
+    const duoOk = ([a, b]) => {
+      const v = lcm(a, b);
+      return v / a >= 2 && v / b >= 2 && v / a <= 12 && v / b <= 12;
+    };
+    function duoPair() {
+      const m = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(DUO_ARG || '');
+      if (m) {
+        const p = [Math.min(+m[1], +m[2]), Math.max(+m[1], +m[2])];
+        if (p[0] >= 2 && p[1] <= 12 && p[0] !== p[1] && duoOk(p))
+          return p;
+      }
+      /* in natural progression the pair keeps the table the child
+         was just playing, so the newcomer is the only stranger */
+      const anchored = DUO_PAIRS.filter(p => p[0] === table || p[1] === table);
+      const src = anchored.length ? anchored : DUO_PAIRS;
+      return src[(Math.random() * src.length) | 0];
+    }
+    let table2 = 0;                 // the second snake's table (duo)
+    let rail2 = [], segs2 = [];     // its pose and beads
+    let xA = -1, xB = -1, xVal = 0; // crossover: index in each, value
+    let duoNext = false;            // set once the bald rung is finished
+    let duoOn = false;              // this deal plays two snakes
     // the ladder rung, for this visit only; ?rung=N starts on rung N (from 1)
     const RUNG_KEY = 'snakePuzzleRung';
     let rung = 0;
@@ -360,6 +410,18 @@
     // ?poseSeed=N pins every deal's pose for reproduction/auditioning
     const pinSeed = qs.has('poseSeed') ?
       (parseInt(qs.get('poseSeed'), 10) || 0) : null;
+    /* house-snake curtain call (Roger, 2026-11-15): as "Another
+       snake?" fades up, the posed snake rises at the footlights and
+       plays a random expression — wink, double-blink, or a 360° turn
+       in one of the three planes. ?expr=<name> forces the
+       expression; ?demo=cameo previews it ~1s after load. */
+    /* cartoon cameo shelved while Roger thinks (2026-11-15) —
+       ?cameo=on brings it back for audition */
+    const CAMEO = qs.get('cameo') === 'on';
+    const EXPR = qs.get('expr');
+    /* ?expr=<face> also forces the celebration's closing action on
+       the little head (shared repertoire in snake.js); ?duo=a,b or
+       bare ?duo deals the two-snake crossover round (see below) */
 
     const chipRow = document.getElementById('chipRow');
     const rotOverlay = document.getElementById('rotOverlay');
@@ -372,6 +434,10 @@
       for (let i = 0; i < N; i++) {
         segs[i].x = bX + (bW - sq) / 2 + rail[i].x * sq;
         segs[i].y = bY + (bH - sq) / 2 + rail[i].y * sq;
+        if (duoOn && rail2.length) {
+          segs2[i].x = bX + (bW - sq) / 2 + rail2[i].x * sq;
+          segs2[i].y = bY + (bH - sq) / 2 + rail2[i].y * sq;
+        }
       }
       if (spawned && !dragging) homeSpawn();
       if (qs.has('dbg'))
@@ -382,9 +448,14 @@
     function spawnHome() {
       return { x: bX + SPAWN_POS.x * bW, y: bY + SPAWN_POS.y * bH };
     }
-    function homeSpawn() {
+    function homeSpawn(animate) {
       const p = spawnHome();
-      spawned.x = p.x; spawned.y = p.y;
+      if (animate && spawned) {
+        spawned.retT = performance.now();
+        spawned.retFrom = { x: spawned.x, y: spawned.y };
+      } else if (spawned) {
+        spawned.x = p.x; spawned.y = p.y; spawned.retT = 0;
+      }
     }
 
     function spawnNext(delay) {
@@ -394,6 +465,59 @@
       spawned = { value, x: 0, y: 0,
         born: performance.now() + (delay || 0) * 1000 };
       homeSpawn();
+    }
+
+    function dealCrossover() {
+      const pair = duoPair();
+      table = pair[0]; table2 = pair[1];
+      xVal = lcm(table, table2);
+      xA = xVal / table; xB = xVal / table2;
+      segs2 = [];
+      for (let i = 0; i < N; i++)
+        segs2.push({
+          x: 0, y: 0,
+          expected: i === 0 ? 0 : i * table2,
+          filled: true, blank: false
+        });
+      segs2[xB].filled = false; segs2[xB].blank = true;
+      const step = Math.hypot(rail[1].x - rail[0].x,
+        rail[1].y - rail[0].y);
+      const M = 0.05;
+      let best = null, bestGap = -1, lastB2 = null;
+      for (let k = 0; k < 120 && (!best || bestGap <= step * 1.05); k++) {
+        const r2 = Anim.pose({
+          board: { x: bX, y: bY, w: bW, h: bH },
+          segD, count: N,
+          family: qs.get('pose') || 'any',
+          seed: poseSeed + 1 + k
+        }).rail;
+        const dx = rail[xA].x - r2[xB].x, dy = rail[xA].y - r2[xB].y;
+        const m2 = r2.map(p => ({ x: p.x + dx, y: p.y + dy }));
+        /* slide the pair together so both snakes sit inside */
+        const all = rail.concat(m2);
+        const mnx = Math.min(...all.map(p => p.x)),
+          mxx = Math.max(...all.map(p => p.x)),
+          mny = Math.min(...all.map(p => p.y)),
+          mxy = Math.max(...all.map(p => p.y));
+        const sx = mnx < M ? M - mnx : mxx > 1 - M ? 1 - M - mxx : 0;
+        const sy = mny < M ? M - mny : mxy > 1 - M ? 1 - M - mxy : 0;
+        const a2 = rail.map(p => ({ x: p.x + sx, y: p.y + sy }));
+        const b2 = m2.map(p => ({ x: p.x + sx, y: p.y + sy }));
+        lastB2 = b2;
+        if (mnx + sx < M - 1e-9 || mxx + sx > 1 - M + 1e-9 ||
+            mny + sy < M - 1e-9 || mxy + sy > 1 - M + 1e-9) continue;
+        let gap = Infinity;
+        for (let i = 0; i < N; i++)
+          for (let j = 0; j < N; j++) {
+            if (i === xA && j === xB) continue;
+            const d = Math.hypot(a2[i].x - b2[j].x,
+              a2[i].y - b2[j].y);
+            if (d < gap) gap = d;
+          }
+        if (gap > bestGap) { bestGap = gap; best = { a2, b2 }; }
+      }
+      if (best) { rail = best.a2; rail2 = best.b2; }
+      else rail2 = lastB2;   // rare: accept the crossing anyway
     }
 
     /* which places are empty: a fixed count (the opening) is spread
@@ -433,12 +557,17 @@
     function deal(fixedBlanks) {
       poseSeed = pinSeed !== null ? pinSeed
         : Math.floor(Math.random() * 1e9);
+      duoOn = DUO || duoNext;
+      /* two bodies need more room — smaller beads on duo deals so
+         poses can still breathe on narrow screens */
+      if (duoOn) segD = Math.round(segD * 0.85);
       rail = Anim.pose({
         board: { x: bX, y: bY, w: bW, h: bH },
         segD, count: N,
         family: qs.get('pose') || 'any',
         seed: poseSeed
       }).rail;
+      if (duoOn) dealCrossover();
       segs = [];
       for (let i = 0; i < N; i++) {
         segs.push({
@@ -447,13 +576,37 @@
           filled: true, blank: false
         });
       }
-      blanks = pickBlanks(fixedBlanks);
-      remaining = [];
-      for (const j of blanks) {
-        segs[j].filled = false; segs[j].blank = true;
-        remaining.push(segs[j].expected);
+      if (duoOn) {
+        segs[xA].filled = false; segs[xA].blank = true;
+        blanks = [xA];
+        /* five blanks in all — the crossover plus two more on each
+           snake, so there's real choosing to do (Roger: only one
+           destination is no puzzle at all) */
+        remaining = [xVal];
+        const extra = (L, excl) => {
+          const pool = [];
+          for (let i = 2; i < N; i++) if (i !== excl) pool.push(i);
+          for (let k = 0; k < 2 && pool.length; k++) {
+            const i = pool.splice((Math.random() * pool.length) | 0, 1)[0];
+            L[i].filled = false; L[i].blank = true;
+            remaining.push(L[i].expected);
+          }
+        };
+        extra(segs, xA); extra(segs2, xB);
+        remaining.sort(() => Math.random() - 0.5);
+      } else {
+        blanks = pickBlanks(fixedBlanks);
+        remaining = [];
+        for (const j of blanks) {
+          segs[j].filled = false; segs[j].blank = true;
+          remaining.push(segs[j].expected);
+        }
+        remaining.sort(() => Math.random() - 0.5);
       }
-      remaining.sort(() => Math.random() - 0.5);
+      /* the crossover deal: snake B's pose is tried on seeds until
+         one sits clean — the shared bead pinned exactly on A's, the
+         rest of its body keeping a bead's width clear, and the pair
+         shifted together so both live inside the square */
       layout();
       spawnNext(SPAWN_DELAY);
       hasInteracted = false;
@@ -464,7 +617,8 @@
       gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
       nextBlinkAt = startT + 2000 + Math.random() * 2000;
       blinkT0 = -1;
-      chipRow.classList.remove('locked', 'hidden');
+      chipRow.classList.remove('locked');
+      chipRow.classList.toggle('hidden', duoOn);
       doneBar.classList.remove('show');
     }
 
@@ -510,6 +664,8 @@
       const p = pt(e);
       if (Math.hypot(p.x - spawned.x, p.y - spawned.y) <= segD * 0.7) {
         dragging = true;
+        touchDrag = e.pointerType === 'touch';
+        spawned.retT = 0;              // grabbing cancels a glide home
         hasInteracted = true;
         syncChips();
         cv.setPointerCapture(e.pointerId);
@@ -521,7 +677,8 @@
       if (!dragging || !spawned) return;
       lastAct = performance.now();
       const p = pt(e);
-      spawned.x = p.x; spawned.y = p.y;
+      spawned.x = p.x;
+      spawned.y = p.y - (touchDrag ? segD * TOUCH_LIFT : 0);
     });
 
     cv.addEventListener('pointerup', e => {
@@ -529,24 +686,34 @@
       dragging = false;
       lastAct = performance.now();
       const p = pt(e);
-      // nearest segment within tolerance
-      let best = -1, bestD = segD * DROP_TOL;
-      for (let i = 0; i < N; i++) {
-        const d = Math.hypot(p.x - segs[i].x, p.y - segs[i].y);
-        if (d < bestD) { bestD = d; best = i; }
-      }
-      if (best >= 0 && segs[best].blank && segs[best].expected === spawned.value) {
-        segs[best].filled = true; segs[best].blank = false;
+      /* judge the drop where the bead visibly sits, not the fingertip
+         — on touch the bead rides above the finger */
+      const ey = p.y - (touchDrag ? segD * TOUCH_LIFT : 0);
+      touchDrag = false;
+      // nearest bead within tolerance, across however many snakes
+      const lists = duoOn ? [segs, segs2] : [segs];
+      let hit = null, hitSn = 0, hitI = -1, bestD = segD * DROP_TOL;
+      lists.forEach((L, sn) => L.forEach((s, i) => {
+        const d = Math.hypot(p.x - s.x, ey - s.y);
+        if (d < bestD) { bestD = d; hit = s; hitSn = sn; hitI = i; }
+      }));
+      if (hit && hit.blank && hit.expected === spawned.value) {
+        // the shared bead fills both snakes at once
+        lists.forEach(L => L.forEach(s => {
+          if (s.blank && s.expected === spawned.value) {
+            s.filled = true; s.blank = false;
+          }
+        }));
         spawnNext(SPAWN_NEXT);
         if (!spawned) finish();
-      } else if (best >= 0) {
+      } else if (hit) {
         // a real target, but not this number's home — refusal is information
-        shakeIdx = best; shakeT = performance.now();
-        flashIdx = best; flashT = performance.now();
+        shakeTgt = { sn: hitSn, i: hitI }; shakeT = performance.now();
+        flashTgt = { sn: hitSn, i: hitI }; flashT = performance.now();
         misses++;
-        homeSpawn();
+        homeSpawn(true);
       } else {
-        homeSpawn(); // dropped on empty ground: quietly goes home
+        homeSpawn(true); // dropped on empty ground: quietly goes home
       }
     });
 
@@ -555,10 +722,21 @@
        at the child and a wink. Then "Another snake?" */
     function finish() {
       state = 'celebrate';
+      /* finishing the bald rung promotes the next deal to two
+         snakes — the rung the whole ladder was climbing toward */
+      if (!duoOn && rung >= LADDER.length - 1) duoNext = true;
       setRung(rung + 1);
       addMade(table);
+      if (duoOn) addMade(table2);
       doneMs = Math.round(performance.now() - startT);
       cheerT = performance.now();
+      /* the close of the celebration varies: one action from the
+         shared repertoire plays on the little head — the whole snake
+         stays put, the head does the acting (Roger, 2026-11-15).
+         ?expr=<name> forces it for a look. */
+      winAct = HouseSnake.FACES[EXPR] ? EXPR
+        : HouseSnake.FACE_NAMES[
+            (Math.random() * HouseSnake.FACE_NAMES.length) | 0];
       nextBlinkAt = cheerT + (WINK_AT + WINK_SECS + 1.5) * 1000;
       blinkT0 = -1;
       syncChips();
@@ -570,10 +748,35 @@
       state = 'done';
       chipRow.classList.add('hidden');
       doneBar.classList.add('show');
+      snakeCameo();
+    }
+    /* the curtain call: posed snake rises from below, settles, plays
+       its expression. A fresh table choice clears it with the prompt. */
+    function snakeCameo() {
+      if (!CAMEO) return;
+      const host = document.getElementById('snakeCameo');
+      const hs = HouseSnake.mount(host, { pose: 'rise' });
+      const size = Math.min(W, H) * 0.34;
+      hs.el.style.width = size + 'px';
+      hs.wrap.style.left = W / 2 + 'px';
+      hs.wrap.style.top = H * 0.68 + 'px';
+      hs.wrap.animate(
+        [{ transform: 'translate(-50%,-50%) translateY(45vh)' },
+         { transform: 'translate(-50%,-50%) translateY(0)' }],
+        { duration: 800, easing: 'cubic-bezier(.3,.8,.35,1)',
+          fill: 'forwards' })
+        .finished.then(() => hs.play(EXPR));
+    }
+    function clearCameo() {
+      document.getElementById('snakeCameo').innerHTML = '';
     }
     /* Yes doesn't redeal — it offers the chips. No snake is drawn
        until a table is chosen */
     document.getElementById('againYes').addEventListener('click', () => {
+      clearCameo();
+      /* duo keeps its pair — a fresh deal of the same two tables
+         rather than the single-table chooser */
+      if (duoOn) { doneBar.classList.remove('show'); deal(); return; }
       doneBar.classList.remove('show');
       chipRow.classList.remove('hidden');
       segs = []; rail = []; spawned = null; remaining = [];
@@ -640,12 +843,15 @@
        rim stroke, pupil pair forward and across — but the hue comes
        from the table so the snake takes its table's colour */
     /* face: 0 = eyes on the heading, 1 = turned to look out at you;
-       wink: 0..1 — how far the right eye is shut */
-    function drawHead(s, now, face = 0, wink = 0) {
-      const nxt = segs[1] || { x: s.x, y: s.y + 1 };
+       fac: the shared repertoire's per-frame recipe — {l,r} lid
+       factors, gaze offsets gx/gy, a bob and a yaw slide (snake.js) */
+    function drawHead(s, nxt, tbl, now, face = 0, fac = { l: 1, r: 1 }) {
+      nxt = nxt || { x: s.x, y: s.y + 1 };
       const ang = Math.atan2(s.y - nxt.y, s.x - nxt.x);
       const r = segD / 2 * (1 + LOOK_GROW * face);
-      const hue = (table * 31 + 200) % 360;
+      const hue = (tbl * 31 + 200) % 360;
+      ctx.save();
+      ctx.translate(0, (fac.bob || 0) * r * 2);
 
       const g = ctx.createRadialGradient(
         s.x - r * 0.33, s.y - r * 0.33, r * 0.2,
@@ -668,17 +874,24 @@
         x: s.x + ex * r * 0.38 + px * side * r * 0.36,
         y: s.y + ey * r * 0.38 + py * side * r * 0.36
       })).sort((a, b) => a.x - b.x);
+      /* pupils clipped to the head's rim — the yaw sends them round
+         one edge and back round the other, as on the lab's obverse */
+      ctx.save();
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7); ctx.clip();
       eyes.forEach((e, k) => {
         const fx = s.x + (k ? 1 : -1) * r * 0.34, fy = s.y - r * 0.06;
-        const x = e.x + (fx - e.x) * face, y = e.y + (fy - e.y) * face;
+        const x = e.x + (fx - e.x) * face + (fac.gx || 0) * r +
+            Math.sin(fac.yaw || 0) * r * .5,
+          y = e.y + (fy - e.y) * face + (fac.gy || 0) * r;
         const er = r * (0.16 + 0.03 * face);
-        const lid = k ? Math.min(sq, 1 - wink * 0.94)
-          : Math.min(sq, 1 - wink * 0.15);
+        const lid = Math.min(sq, k ? fac.r : fac.l);
         ctx.beginPath();
         ctx.ellipse(x, y, er, Math.max(er * lid, r * 0.03),
           look * (1 - face), 0, 7);
         ctx.fillStyle = '#101418'; ctx.fill();
       });
+      ctx.restore();
+      ctx.restore();
     }
 
     function draw(now) {
@@ -696,95 +909,138 @@
       // the celebration's clock: 0 while playing
       const el = state === 'celebrate' ? (now - cheerT) / 1000
         : state === 'done' ? Infinity : -1;
-      if (state === 'celebrate' && el >= ASK_AT) showDone();
+      /* the prompt waits for the action's end plus its hold, so the
+         long ones (yaw, tour) are never cut off mid-act */
+      const actEnd = WINK_AT + HouseSnake.FACES[winAct].dur + .8;
+      if (state === 'celebrate' && el >= Math.max(ASK_AT, actEnd))
+        showDone();
       const ease = k => { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); };
       const face = el < 0 ? 0 : ease((el - LOOK_AT) / LOOK_SECS);
-      const wk = (el - WINK_AT) / WINK_SECS;
-      const wink = wk > 0 && wk < 1 ? Math.min(1, Math.sin(wk * Math.PI) * 1.8) : 0;
+      const wk = (el - WINK_AT) / HouseSnake.FACES[winAct].dur;
+      const fac = wk >= 0 && wk <= 1
+        ? HouseSnake.FACES[winAct].f(wk) : { l: 1, r: 1 };
       ctx.fillStyle = '#101418';
       ctx.fillRect(0, 0, W, H);
 
       // a still patch earns a restless wriggle — a travelling sway,
       // draw-time only, so dealt positions (and drop targets) never move
+      const wobbleFor = (list, amp) => list.map((s, i) => {
+        const a = list[Math.max(0, i - 1)],
+          b = list[Math.min(list.length - 1, i + 1)];
+        const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+        const m = Math.sin(now / 1000 * 9 - i * 0.9) * amp;
+        return { x: -dy / d * m, y: dx / d * m };
+      });
       const idleAge = (now - lastAct) / 1000;
-      let wob = null;
+      let wob = null, wob2 = null;
       const ck = (el - CHEER_AT) / CHEER_SECS;
       if (ck > 0 && ck < 1) {
         // the satisfied wiggle — head to tail, swelling and dying away
         const k = Math.sin(ck * Math.PI);
-        wob = segs.map((s, i) => {
-          const a = segs[Math.max(0, i - 1)], b = segs[Math.min(N - 1, i + 1)];
-          const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
-          const m = Math.sin(now / 1000 * 9 - i * 0.9) * CHEER_AMP * segD * k;
-          return { x: -dy / d * m, y: dx / d * m };
-        });
+        wob = wobbleFor(segs, CHEER_AMP * segD * k);
+        if (duoOn) wob2 = wobbleFor(segs2, CHEER_AMP * segD * k);
       } else if (idleAge > IDLE_WRIG_S) {
         const c = (idleAge - IDLE_WRIG_S) % WRIG_CYCLE;
         if (c < WRIG_SECS) {
           const k = Math.sin(c / WRIG_SECS * Math.PI);
-          wob = segs.map((s, i) => {
-            const a = segs[Math.max(0, i - 1)], b = segs[Math.min(N - 1, i + 1)];
-            const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
-            const m = Math.sin(now / 1000 * 9 - i * 0.9) * WRIG_AMP * segD * k;
-            return { x: -dy / d * m, y: dx / d * m };
-          });
+          wob = wobbleFor(segs, WRIG_AMP * segD * k);
+          if (duoOn) wob2 = wobbleFor(segs2, WRIG_AMP * segD * k);
         }
       }
 
-      // spine: a faint thread through the segments so the pose reads as
-      // one animal even with gaps
-      ctx.beginPath();
-      segs.forEach((s, i) => {
-        const x = s.x + (wob ? wob[i].x : 0), y = s.y + (wob ? wob[i].y : 0);
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      // the snakes to draw — B first so the shared bead (drawn in A's
+      // pass, wearing both colours) sits on top
+      const snakes = duoOn
+        ? [{ list: segs2, tbl: table2, wob: wob2, sn: 1 },
+           { list: segs, tbl: table, wob, sn: 0 }]
+        : [{ list: segs, tbl: table, wob, sn: 0 }];
+      snakes.forEach(sn => {
+        const L = sn.list, w = sn.wob;
+        // spine: a faint thread through the segments so the pose reads
+        // as one animal even with gaps
+        ctx.beginPath();
+        L.forEach((s, i) => {
+          const x = s.x + (w ? w[i].x : 0), y = s.y + (w ? w[i].y : 0);
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.strokeStyle = 'rgba(90,110,130,.25)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        for (let i = L.length - 1; i >= 0; i--) {
+          // the crossover bead is drawn once, in A's pass
+          if (duoOn && sn.sn === 1 && i === xB) continue;
+          const s = L[i];
+          let ox = 0;
+          if (shakeTgt && shakeTgt.sn === sn.sn && shakeTgt.i === i) {
+            const t = (now - shakeT) / 1000;
+            if (t > SHAKE_SECS) shakeTgt = null;
+            else ox = Math.sin(t * 22) * 3.2 * (1 - t / SHAKE_SECS);
+          }
+          const cx = s.x + ox + (w ? w[i].x : 0),
+            cy = s.y + (w ? w[i].y : 0), r = segD / 2;
+          if (i === 0) {
+            drawHead({ x: cx, y: cy }, L[1], sn.tbl, now, face, fac);
+            continue;
+          }
+          if (s.blank) {
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
+            ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();
+            ctx.setLineDash([5, 4]);
+            ctx.lineWidth = 2;
+            if (duoOn && sn.sn === 0 && i === xA) {
+              // the shared blank rings in both tables' colours
+              ctx.beginPath();
+              ctx.arc(cx, cy, r, -Math.PI / 2, Math.PI / 2);
+              ctx.strokeStyle = tableColour(table); ctx.stroke();
+              ctx.beginPath();
+              ctx.arc(cx, cy, r, Math.PI / 2, Math.PI * 1.5);
+              ctx.strokeStyle = tableColour(table2); ctx.stroke();
+            } else {
+              ctx.strokeStyle = tableColour(sn.tbl);
+              ctx.stroke();
+            }
+            ctx.setLineDash([]);
+          } else {
+            // the reinforcement beat: each member swells and rings in
+            // turn — snake B's sweep follows snake A's
+            const ord = sn.sn ? N + i : i;
+            const bk = el - ord * BEAT_STAGGER;
+            const pop = bk > 0 && bk < BEAT_HOLD ?
+              Math.sin(bk / BEAT_HOLD * Math.PI) : 0;
+            const rr = r * (1 + pop * 0.12);
+            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7);
+            ctx.fillStyle = tableColour(sn.tbl); ctx.fill();
+            if (duoOn && sn.sn === 0 && i === xA) {
+              // the filled crossover wears both tables' colours
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(cx, cy - rr, rr, rr * 2);
+              ctx.clip();
+              ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7);
+              ctx.fillStyle = tableColour(table2); ctx.fill();
+              ctx.restore();
+            }
+            if (pop > 0) {
+              ctx.lineWidth = 2.5;
+              ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * pop) + ')';
+              ctx.stroke();
+            }
+            numeral(s.expected, cx, cy, segD * 0.34, '#fff');
+          }
+          if (flashTgt && flashTgt.sn === sn.sn && flashTgt.i === i) {
+            const t = (now - flashT) / 1000;
+            if (t > FLASH_SECS) flashTgt = null;
+            else {
+              ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, 7);
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = 'rgba(224,165,58,' +
+                (1 - t / FLASH_SECS) + ')';
+              ctx.stroke();
+            }
+          }
+        }
       });
-      ctx.strokeStyle = 'rgba(90,110,130,.25)';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      for (let i = N - 1; i >= 0; i--) {
-        const s = segs[i];
-        let ox = 0;
-        if (i === shakeIdx) {
-          const t = (now - shakeT) / 1000;
-          if (t > SHAKE_SECS) shakeIdx = -1;
-          else ox = Math.sin(t * 30) * 5 * (1 - t / SHAKE_SECS);
-        }
-        const cx = s.x + ox + (wob ? wob[i].x : 0),
-          cy = s.y + (wob ? wob[i].y : 0), r = segD / 2;
-        if (i === 0) { drawHead({ x: cx, y: cy }, now, face, wink); continue; }
-        if (s.blank) {
-          ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
-          ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();
-          ctx.setLineDash([5, 4]);
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = tableColour(table);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        } else {
-          // the reinforcement beat: each member swells and rings in turn
-          const bk = el - i * BEAT_STAGGER;
-          const pop = bk > 0 && bk < BEAT_HOLD ? Math.sin(bk / BEAT_HOLD * Math.PI) : 0;
-          ctx.beginPath(); ctx.arc(cx, cy, r * (1 + pop * 0.12), 0, 7);
-          ctx.fillStyle = tableColour(table); ctx.fill();
-          if (pop > 0) {
-            ctx.lineWidth = 2.5;
-            ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * pop) + ')';
-            ctx.stroke();
-          }
-          numeral(s.expected, cx, cy, segD * 0.34, '#fff');
-        }
-        if (i === flashIdx) {
-          const t = (now - flashT) / 1000;
-          if (t > FLASH_SECS) flashIdx = -1;
-          else {
-            ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, 7);
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(224,165,58,' + (1 - t / FLASH_SECS) + ')';
-            ctx.stroke();
-          }
-        }
-      }
 
       if (spawned) {
         const age = (now - spawned.born) / 1000;
@@ -846,7 +1102,34 @@
 
     function drawSpawn(age) {
       const r = segD / 2, hue = (table * 31 + 200) % 360;
+      /* two tables means no owner colour for the piece in hand — a
+         neutral slate, so destination is read from the number, not
+         matched by tint (Roger, spawn ambiguity, 2026-11-16) */
+      const duo = typeof duoOn !== 'undefined' && duoOn;
+      const sHue = duo ? 215 : hue;
+      const sFill = duo ? 'hsl(215,18%,45%)' : tableColour(table);
       const held = dragging || (demo && demo.phase === 'carry');
+      /* the doughnut: while a finger drags, a wide ring around the
+         bead reads as a coin the finger pushes from beneath — the
+         fingertip sits just under its rim (Roger, 2026-11-16) */
+      if (held && touchDrag) {
+        ctx.beginPath();
+        ctx.arc(spawned.x, spawned.y, segD * TOUCH_RING, 0, 7);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(255,255,255,.55)';
+        ctx.stroke();
+      }
+      /* a missed piece glides back rather than snapping — the journey
+         itself reads as "that wasn't it" */
+      if (spawned.retT) {
+        const u = Math.min(1,
+          (performance.now() - spawned.retT) / RETURN_MS);
+        const k = u * u * (3 - 2 * u);
+        const hp = spawnHome();
+        spawned.x = spawned.retFrom.x + (hp.x - spawned.retFrom.x) * k;
+        spawned.y = spawned.retFrom.y + (hp.y - spawned.retFrom.y) * k;
+        if (u >= 1) spawned.retT = 0;
+      }
       const a = held ? 1 : Math.min(1, age / FLOURISH_SECS);
       const u = a - 1;
       const lifted = demo && demo.phase === 'carry' ? demo.lift || 0 : 0;
@@ -866,14 +1149,14 @@
         if (ring >= 0) {
           ctx.beginPath(); ctx.arc(x, y, r * (1 + 1.3 * ring), 0, 7);
           ctx.lineWidth = 3 * (1 - ring) + 1;
-          ctx.strokeStyle = 'hsla(' + hue + ',75%,72%,' + ringA * (1 - ring) + ')';
+          ctx.strokeStyle = 'hsla(' + sHue + ',75%,72%,' + ringA * (1 - ring) + ')';
           ctx.stroke();
         }
       }
       ctx.globalAlpha = held ? 1 : Math.min(1, age / 0.15);
       ctx.beginPath();
       ctx.arc(x, y, r * sc, 0, 7);
-      ctx.fillStyle = tableColour(table); ctx.fill();
+      ctx.fillStyle = sFill; ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke();
       if (sc > 0.2) numeral(spawned.value, x, y, segD * 0.34 * sc, '#fff');
@@ -896,6 +1179,7 @@
       } catch (e) { return false; }
     }
     if (qs.get('demo') === 'reset') demoSeen(false);
+    if (qs.get('demo') === 'cameo') setTimeout(snakeCameo, 1000);
     let demo = null;                   // {phase, t0, keep, idx, from}
     let darkA = 0;                     // fade-to-dark level at the ending
 
@@ -978,7 +1262,8 @@
       deal();
     }
     if (qs.has('done')) {
-      segs.forEach(s => { s.filled = true; s.blank = false; });
+      [segs, segs2].forEach(L =>
+        L.forEach(s => { s.filled = true; s.blank = false; }));
       remaining = []; spawned = null;
       finish();
     }
@@ -987,7 +1272,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=15"></script>
+  <script src="nav.js?v=17"></script>
 </body>
 
 </html>

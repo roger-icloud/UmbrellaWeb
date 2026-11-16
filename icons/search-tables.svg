@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- spotty hexagon: a small flower of nineteen dots, like the
+       Search Tables board itself — white per Roger, 2026-11-16 -->
+  <path d="M32 4 55.4 17.5 55.4 46.5 32 60 8.6 46.5 8.6 17.5 Z"
+        fill="#f2f4f0" stroke="#c6cdc0" stroke-width="3"
+        stroke-linejoin="round"/>
+  <g fill="#101418">
+    <circle cx="25"   cy="14" r="2.6"/><circle cx="32"   cy="14" r="2.6"/><circle cx="39"   cy="14" r="2.6"/>
+    <circle cx="21.5" cy="24" r="2.6"/><circle cx="28.5" cy="24" r="2.6"/><circle cx="35.5" cy="24" r="2.6"/><circle cx="42.5" cy="24" r="2.6"/>
+    <circle cx="18"   cy="34" r="2.6"/><circle cx="25"   cy="34" r="2.6"/><circle cx="32"   cy="34" r="2.6"/><circle cx="39"   cy="34" r="2.6"/><circle cx="46"   cy="34" r="2.6"/>
+    <circle cx="21.5" cy="44" r="2.6"/><circle cx="28.5" cy="44" r="2.6"/><circle cx="35.5" cy="44" r="2.6"/><circle cx="42.5" cy="44" r="2.6"/>
+    <circle cx="25"   cy="53" r="2.6"/><circle cx="32"   cy="53" r="2.6"/><circle cx="39"   cy="53" r="2.6"/>
+  </g>
+</svg>

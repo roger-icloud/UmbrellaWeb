@@ -37,8 +37,12 @@
    **~/Developer/UnitsLab** (Swift: unit squares on a lattice, fuse into
    pieces, Cuisenaire palette, mould stamps copies) and/or
    **~/Developer/RotateBricks** (tromino/pentomino drags). The
-   "diagonal halves as fractions" feature wasn't found in either —
-   possibly planned, or in another folder. HTML searches came up empty.
+   "diagonal halves" = a parked idea in RotateBricks/NOTES.md (~line 98):
+   "right-angle triangles as half a unit, introduced diagonally" —
+   envisioned scope, never built. RotateBricks also holds two session
+   logs (NOTES.md 497 lines, DISCUSSION_SUMMARY.md 295) and is the
+   ancestor of the web games: TablesSearch, ShortSnakes, Multiples,
+   TimesTableCircle, ShapeSorting views all live there.
 4. **Fractions** — rich candidate for the anynumberoftimes treatment:
    discovery + nudging, not instruction. Diagonal halves connects here.
 5. **Biggest — the big red lorry & Aristotle's Poetics**: found in

@@ -173,6 +173,7 @@
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="Spot multiples in a honeycomb of numbers — a gentle times-table spotting game.">
 </head>
 
 <body>
@@ -1010,6 +1011,38 @@
         for (let k = 1; k <= steps; k++) draw(now + k * 16);
         timeOffset = adv * 1000;
       }
+    }
+    /* ?demo=1 — menu-card attract loop: a random table pair plays
+       itself, tapping each next path cell through the real tap path;
+       reloads for a fresh deal once the coils settle */
+    if (qs.get('demo') === '1') {
+      const a = 2 + Math.floor(Math.random() * 11);
+      let b = 2 + Math.floor(Math.random() * 11);
+      if (b === a) b = b === 12 ? 11 : b + 1;
+      reset([a, b]);
+      let doneAt = 0;
+      setInterval(() => {
+        if (state !== 'play' || paused) {
+          if (state === 'done') {
+            if (!doneAt) doneAt = performance.now();
+            else if (performance.now() - doneAt > 5000) location.reload();
+          }
+          return;
+        }
+        outer:
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS; c++) {
+            const cell = cells[r][c];
+            for (let ti = 0; ti < tables.length; ti++)
+              if (onPath[ti].get(key({ r, c })) === idx[ti] &&
+                  !cell.claims.has(ti)) {
+                const ctr = centreOf({ r, c });
+                cv.dispatchEvent(new PointerEvent('pointerdown',
+                  { clientX: ctr.x, clientY: ctr.y }));
+                break outer;
+              }
+          }
+      }, 1100);
     }
     requestAnimationFrame(frame);
   </script>

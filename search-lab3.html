@@ -113,6 +113,7 @@
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="Find the multiples hiding in a field of numbers — a times-table search game for young learners.">
 </head>
 
 <body>
@@ -1129,6 +1130,35 @@
     resize();
     draw(performance.now());            // synchronous first paint
     if (DEMO_FLIP) setTimeout(boardFlip, 1200);
+
+    /* ?play=1 — menu-card attract loop, staged (Roger, 2026-11-17):
+       the board arrives nearly complete — every cell outside the
+       finale run claims at once so two runs stand finished — then
+       the run richest in shared cells taps in letter by letter,
+       crossing the completed ones, and the glow lands as all meet */
+    if (qs.get('play') === '1') {
+      const sharedness = r => r.filter(c => c.ts.length > 1).length;
+      const finale = runs.slice()
+        .sort((a, b) => sharedness(b) - sharedness(a))[0] || [];
+      const finSet = new Set(finale);
+      for (const c of cells)
+        if (c.ts.length && !finSet.has(c)) {
+          const p = centre(geom(), c);
+          claimAt(p.x, p.y);
+        }
+      let fi = 0, doneAt = 0;
+      setInterval(() => {
+        if (state !== 'play') {
+          if (!doneAt) doneAt = performance.now();
+          else if (performance.now() - doneAt > 4500) location.reload();
+          return;
+        }
+        if (fi < finale.length) {
+          const p = centre(geom(), finale[fi++]);
+          claimAt(p.x, p.y);
+        }
+      }, 1100);
+    }
 
     function frame(now) {
       try { draw(now); } catch (e) { /* a bad frame must not kill the loop */ }

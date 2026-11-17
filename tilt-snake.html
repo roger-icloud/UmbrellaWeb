@@ -148,6 +148,7 @@
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="Steer a snake by tilting the screen and catch the multiples of your times table in order.">
 </head>
 
 <body>
@@ -179,6 +180,7 @@
   </div>
 
   <script src="anim.js?v=16"></script>
+  <script src="hint.js"></script>
 
   <script>
     'use strict';
@@ -201,11 +203,9 @@
     const NUM_SEP = NUM_R * 2 + 34;  // min separation between numerals
     const FLASH_SECS = 0.6;   // refusal ring duration
     const EAT_DIST = HEAD_R + NUM_R - 4;
-    const TARGET_GLOW = true; // soft pulse on the next numeral to collect
-    const HINT_AFTER = 10;     // s idle before the target pulses harder
-    // s without a catch before the next numeral is marked, by game of this
-    // visit; later games have no marking at all
-    const HINT_DELAYS = [0, 3, 6];
+    const TARGET_GLOW = true; // soft halo on the next numeral to collect
+    const HINT_MARK = 0.05;   // hint strength where the target is outlined
+    const HINT_HALO = 0.3;    // strength where the halo starts breathing
     const TAP_PAD = 10;     // extra tap tolerance around numerals, px
     const MANUAL_TILT = 1.5;    // tilt magnitude that cancels tap-autopilot
     // after a tapped catch the snake dithers — heads for one number, changes
@@ -259,7 +259,9 @@
     let tiltBase = null;         // lean held when the tap landed — a deliberate
     //   re-tilt cancels the autopilot; the resting angle must not
     let lastCollectT = 0;        // performance.now() of last collection / start
-    let gamesDone = 0;           // games finished this visit, for hint fading
+    const gamesDone = {};        // games finished per table this visit —
+                                 //   a new table rows the help back, like a
+                                 //   teacher meeting a new topic
     let holdPhase = 0;           // dither after a tapped catch: 0 off, 1-2 feints, 3 turning downhill
     let holdT0 = 0;              // when the current phase began
     let feintFrom = null;        // where the current feint began
@@ -468,7 +470,7 @@
       touch = null;
       autoTarget = null;
       logEvent('complete', { table, ms: doneMs, misses });
-      gamesDone++;
+      gamesDone[table] = (gamesDone[table] || 0) + 1;
       const fullSegs = [
         { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
         ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
@@ -840,7 +842,7 @@
       return 1 - Math.sin(k * Math.PI) * 0.88;
     }
 
-    function drawNum(n, isTarget, hot) {
+    function drawNum(n, isTarget, strength) {
       const flash = n.flashUntil > performance.now();
       ctx.beginPath();
       ctx.arc(n.x, n.y, NUM_R, 0, Math.PI * 2);
@@ -849,12 +851,12 @@
       ctx.strokeStyle = flash ? '#e0a53a' : (isTarget ? '#4da3ff' : '#2c3e50');
       ctx.lineWidth = isTarget ? 2.5 : 1.5;
       ctx.stroke();
-      if (isTarget && TARGET_GLOW && hot) {
+      if (isTarget && TARGET_GLOW && strength > HINT_HALO) {
         /* idle long enough to need prompting: a soft fuzzy halo that
            breathes once every ~3s — it nudges, then backs off
            (Roger 2026-11-16: static is too passive) */
-        const a = Math.sin((performance.now() % 3000) / 3000 * Math.PI * 2
-          - Math.PI / 2) * 0.5 + 0.5;   // 0…1…0, one breath
+        const a = (Math.sin((performance.now() % 3000) / 3000 * Math.PI * 2
+          - Math.PI / 2) * 0.5 + 0.5) * strength;   // breath × help owed
         if (a > 0.02) {
           ctx.save();
           ctx.shadowColor = 'rgba(190,220,255,0.85)';
@@ -883,11 +885,10 @@
 
       const idle = (state === 'play' && lastCollectT)
         ? (performance.now() - lastCollectT) / 1000 : 0;
-      const hintAt = HINT_DELAYS[gamesDone];
-      const marked = hintAt !== undefined && idle >= hintAt;
+      const strength = Hint.strength(idle, gamesDone[table] || 0);
       nums.forEach((n, i) => {
-        const t = i === nextIdx && marked;
-        if (!n.collected) drawNum(n, t, t && idle > HINT_AFTER);
+        const t = i === nextIdx && strength > HINT_MARK;
+        if (!n.collected) drawNum(n, t, t ? strength : 0);
       });
 
       // the snake takes its table's colour — same table-coding as the
@@ -972,6 +973,23 @@
       }
       startT = performance.now() - 18000;
       finish();
+    }
+    // ?demo=1 — the menu-card attract loop: the snake plays itself by
+    // "tapping" the next numeral through the autopilot, game after game
+    if (qs.get('demo') === '1') {
+      const demoStart = () => {
+        reset(2 + Math.floor(Math.random() * 11));
+        tableOverlay.classList.add('hidden');
+        overlay.classList.add('hidden');
+        doneBar.classList.remove('show');
+        startPlay();
+      };
+      demoStart();
+      setInterval(() => {
+        if (state === 'play' && !autoTarget && nextIdx < nums.length)
+          autoTarget = nums[nextIdx];
+        else if (state === 'done') demoStart();
+      }, 700);
     }
     requestAnimationFrame(frame);
   </script>

@@ -3,8 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <meta name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#101418">
@@ -23,7 +22,8 @@
     #frame {
       position: fixed;
       inset: 0;
-      z-index: 0;                 /* behind the prose: a snake may
+      z-index: 0;
+      /* behind the prose: a snake may
         pass under words but never over them (Roger, 2026-11-11) */
       pointer-events: none;
     }
@@ -73,6 +73,7 @@
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="Meet the family — gentle introductions to each multiplication game.">
 </head>
 
 <body>
@@ -83,25 +84,27 @@
     <!-- ROGERS TEXT begins — the introduction lives between these
          markers; the snakes only frame it, they never touch it -->
     <h1>Intro</h1>
-    <p> Tablets and Phones are great for <em><b>learning</b></em> not just talking, texting, and playing games. 
-  <br>I'd like to use these pages to deliver learning and fun. 
-  <br>These pages are new and under development which is where you come in.....</p>
+    <p> Tablets and Phones are great for <em><b>learning</b></em> not just talking, texting, and playing games.
+      <br>I'd like to use these pages to deliver learning and fun.
+      <br>These pages are new and under development which is where you come in.....
+    </p>
 
     <details>
       <summary>I need your HELP</summary>
-      <p>My ideas are just that.  You and I can work together to make them better.</p>
+      <p>My ideas are just that. You and I can work together to make them better.</p>
       <p>Feedback is the only way that I am able to tighten up this site and make it really useful.</p>
-    </details> 
-    <details>      
-    <summary>Why this app?</summary>
+    </details>
+    <details>
+      <summary>Why this app?</summary>
       <p>Using fingers brings the learning closer than a mouse or keyboard.</p>
-      <p>Using a hand held device brings the learning closer to you.</p>
-    </details>    
-    <details>      
-    <summary>...and not to forget the 'how'</summary>
+      <p>Using a hand held device makes the learning even more immediate.</p>
+    </details>
+    <details>
+      <summary>...and not to forget the 'how'</summary>
       <p>Adopting common interface gestures makes the app more accessible and intuitive.</p>
-    <p>Rote learning is important and best delivered with personal encouragement. 
-      I think a broader understanding of the concepts is a natural pairing.</p></details>    
+      <p>Rote learning is important and best delivered with personal encouragement.
+        I think a broader understanding of the concepts is a natural pairing.</p>
+    </details>
     <details>
       <summary>Not included</summary>
       <p>No ticks or crosses, red or green — learning is through guidance not negativity.</p>
@@ -113,7 +116,7 @@
       <p>No data collection</p>
       <p>No social media integration</p>
       <p>No external links</p>
-      <p>There will be the opportunity to share progress with family and friends. 
+      <p>There will be the opportunity to share progress with family and friends.
         So that the app remembers where you're at. Always optional and plenty of advance notice before it arrives.</p>
     </details>
 
@@ -279,21 +282,31 @@
       const R = B.rc, w = B.x1 - B.x0 - 2 * R, h = B.y1 - B.y0 - 2 * R;
       const A = Math.PI / 2 * R;
       if (s < w) return { x: B.x0 + R + s, y: B.y0, tx: 1, ty: 0 }; s -= w;
-      if (s < A) { const a = s / R; return {
-        x: B.x1 - R + Math.sin(a) * R, y: B.y0 + R - Math.cos(a) * R,
-        tx: Math.cos(a), ty: Math.sin(a) }; } s -= A;
+      if (s < A) {
+        const a = s / R; return {
+          x: B.x1 - R + Math.sin(a) * R, y: B.y0 + R - Math.cos(a) * R,
+          tx: Math.cos(a), ty: Math.sin(a)
+        };
+      } s -= A;
       if (s < h) return { x: B.x1, y: B.y0 + R + s, tx: 0, ty: 1 }; s -= h;
-      if (s < A) { const a = s / R; return {
-        x: B.x1 - R + Math.cos(a) * R, y: B.y1 - R + Math.sin(a) * R,
-        tx: -Math.sin(a), ty: Math.cos(a) }; } s -= A;
+      if (s < A) {
+        const a = s / R; return {
+          x: B.x1 - R + Math.cos(a) * R, y: B.y1 - R + Math.sin(a) * R,
+          tx: -Math.sin(a), ty: Math.cos(a)
+        };
+      } s -= A;
       if (s < w) return { x: B.x1 - R - s, y: B.y1, tx: -1, ty: 0 }; s -= w;
-      if (s < A) { const a = s / R; return {
-        x: B.x0 + R - Math.sin(a) * R, y: B.y1 - R + Math.cos(a) * R,
-        tx: -Math.cos(a), ty: -Math.sin(a) }; } s -= A;
+      if (s < A) {
+        const a = s / R; return {
+          x: B.x0 + R - Math.sin(a) * R, y: B.y1 - R + Math.cos(a) * R,
+          tx: -Math.cos(a), ty: -Math.sin(a)
+        };
+      } s -= A;
       if (s < h) return { x: B.x0, y: B.y1 - R - s, tx: 0, ty: -1 }; s -= h;
       const a = s / R; return {
         x: B.x0 + R - Math.cos(a) * R, y: B.y0 + R - Math.sin(a) * R,
-        tx: Math.sin(a), ty: -Math.cos(a) };
+        tx: Math.sin(a), ty: -Math.cos(a)
+      };
     }
 
     /* (seg,k) coordinates: the border is eight segments —
@@ -444,8 +457,10 @@
       const dv = rng() < 0.5 ? 1 : -1;
       const span = Math.min(420, L[best * 2] * 0.7);
       const s0 = segStart(B, best * 2) + (L[best * 2] - span) * rng();
-      duet = { kind: 'braid', s0, dv, span, stage: 'approach',
-        freq: 2 * Math.PI / 110, lamp: 16 };
+      duet = {
+        kind: 'braid', s0, dv, span, stage: 'approach',
+        freq: 2 * Math.PI / 110, lamp: 16
+      };
       snakes.forEach((sn, i) => {
         sn.du = { ph: i * Math.PI, u0: i ? 26 : 0 };
         sn.arrived = false;
@@ -455,9 +470,11 @@
 
     function startChase(now) {
       const li = rng() < 0.5 ? 0 : 1;
-      duet = { kind: 'chase', lead: li, gone: 0,
+      duet = {
+        kind: 'chase', lead: li, gone: 0,
         len: B.per * (0.5 + rng() * 0.3),
-        dv: rng() < 0.5 ? 1 : -1 };
+        dv: rng() < 0.5 ? 1 : -1
+      };
       snakes.forEach((sn, i) => {
         sn.du = { role: i === li ? 'lead' : 'follow' };
         sn.moved = 0; sn.wph = rng() * 6.28;
@@ -567,7 +584,7 @@
           }
         }
       } else if (sn.state === 'duet' && duet && duet.kind === 'braid'
-          && duet.stage === 'braid') {
+        && duet.stage === 'braid') {
         /* the caduceus climb: both advance along the edge's line,
            each on a sine antiphase of the other; the taper envelope
            merges them out of the rail and back into it */
@@ -582,7 +599,8 @@
           const lat = Math.sin(sn.du.u * duet.freq + sn.du.ph)
             * duet.lamp * env;
           sn.hist.unshift({
-            x: ap.x - ap.ty * lat, y: ap.y + ap.tx * lat });
+            x: ap.x - ap.ty * lat, y: ap.y + ap.tx * lat
+          });
         }
         if (sn.hist.length > N_SEG * SPACING + 40)
           sn.hist.length = N_SEG * SPACING + 40;

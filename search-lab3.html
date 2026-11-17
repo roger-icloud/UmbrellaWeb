@@ -271,13 +271,14 @@
     const TRI_P = Math.max(0, Math.min(1, num('tri', 0.5)));
     const TALL_Q = qs.has('tall')
       ? Math.max(0, Math.min(TALL_MAX, num('tall', 1))) : null;
-    /* completion turn (Roger, 2026-11-15): one full 360° circuit when
-       the last word lands — once, never a loop, so it stays a quiet
-       signal. spin turns in the page's own plane; tumble flips the
-       board over like a coin and needs the perspective() in the
-       transform to read as depth. ?flip=off silences it. */
+    /* completion turn (Roger, 2026-11-15): once, never a loop, so it
+       stays a quiet signal. tumble flips the board over like a coin —
+       the house celebration (Roger, 2026-11-17) — and needs the
+       perspective() in the transform to read as depth. spin turns in
+       the page's own plane. ?flip=spin restores it; ?flip=off
+       silences it. */
     const FLIP = qs.get('flip') === 'off' ? null
-      : qs.get('flip') === 'tumble' ? 'tumble' : 'spin';
+      : qs.get('flip') === 'spin' ? 'spin' : 'tumble';
     const DEMO_FLIP = qs.get('demo') === '1';
     /* ?expr=wink|blink|spin|flip|swivel forces the house snake's
        expression; unset it picks at random — anticipation by design.

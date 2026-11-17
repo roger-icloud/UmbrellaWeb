@@ -108,6 +108,8 @@
       font: 12px Andika, sans-serif;
       white-space: pre;
       pointer-events: none;
+      display: none;    /* diagnostics retained, off the stage
+                           (Roger, 2026-11-17); ?params brings it back */
     }
   </style>
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
@@ -1115,6 +1117,8 @@
     function label() {
       const x2 = cells.filter(c => c.ts.length === 2).length;
       const x3 = cells.filter(c => c.ts.length >= 3).length;
+      if (qs.has('params'))
+        document.getElementById('params').style.display = 'block';
       document.getElementById('params').textContent =
         't=' + tables.join(',') + ' side' + SIDE + ' ×' + MEMBERS +
         ' seed=' + seed + ' — ' + foundCount() + '/' + totalMembers() +

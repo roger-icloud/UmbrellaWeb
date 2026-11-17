@@ -283,6 +283,9 @@
     const DEMO_CARRY = 2.4;     // s to carry it home
     const DEMO_NEXT = 1.2;      // s after a placement before the next number
     const DEMO_PAUSE = 2.6;     // s the finished snake stands
+    const DEMO_WRIG = 2.2;      // s of completion wriggle in the pause
+                                // — the only wiggle the opening plays
+                                // (Roger, 2026-11-17)
     const DEMO_DARK = 1.1;      // s fade out
     const DEMO_UP = 1.1;        // s fade up to the fresh puzzle
     /* the opening's number floats; a child's drag stays plain */
@@ -935,12 +938,20 @@
       const idleAge = (now - lastAct) / 1000;
       let wob = null, wob2 = null;
       const ck = (el - CHEER_AT) / CHEER_SECS;
+      const dw = demo && demo.phase === 'pause'
+        ? (now - demo.t0) / 1000 : -1;
       if (ck > 0 && ck < 1) {
         // the satisfied wiggle — head to tail, swelling and dying away
         const k = Math.sin(ck * Math.PI);
         wob = wobbleFor(segs, CHEER_AMP * segD * k);
         if (duoOn) wob2 = wobbleFor(segs2, CHEER_AMP * segD * k);
-      } else if (idleAge > IDLE_WRIG_S) {
+      } else if (dw >= 0 && dw < DEMO_WRIG) {
+        // the completed demo snake gets the satisfied wiggle, slightly
+        // longer than the idle one; mid-play the opening never shakes
+        const k = Math.sin(dw / DEMO_WRIG * Math.PI);
+        wob = wobbleFor(segs, CHEER_AMP * segD * k);
+        if (duoOn) wob2 = wobbleFor(segs2, CHEER_AMP * segD * k);
+      } else if (idleAge > IDLE_WRIG_S && !demo) {
         const c = (idleAge - IDLE_WRIG_S) % WRIG_CYCLE;
         if (c < WRIG_SECS) {
           const k = Math.sin(c / WRIG_SECS * Math.PI);

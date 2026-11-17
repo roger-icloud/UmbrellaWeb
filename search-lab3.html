@@ -1132,13 +1132,22 @@
     if (DEMO_FLIP) setTimeout(boardFlip, 1200);
 
     /* ?play=1 — menu-card attract loop, staged (Roger, 2026-11-17):
-       the board arrives nearly complete — every cell outside the
-       finale run claims at once so two runs stand finished — then
-       the run richest in shared cells taps in letter by letter,
-       crossing the completed ones, and the glow lands as all meet */
+       three tables that share multiples, re-dealt until the runs
+       genuinely cross — crossing IS the page's spirit. Two stand
+       finished at the start; the run richest in shared cells taps
+       in letter by letter, meeting them; the tumble flip and a
+       winking snake close the show (?flip=tumble&expr=wink). */
     if (qs.get('play') === '1') {
+      const triples = [[2, 3, 6], [3, 6, 9], [2, 4, 6], [4, 6, 9]];
+      const triple = pick(triples);
+      let guard = 0;
+      do {
+        deal(triple);
+      } while (cells.filter(c => c.ts.length > 1).length < 2
+               && ++guard < 30);
+      syncChips();
       const sharedness = r => r.filter(c => c.ts.length > 1).length;
-      const finale = runs.slice()
+      const finale = runs.flat().slice()
         .sort((a, b) => sharedness(b) - sharedness(a))[0] || [];
       const finSet = new Set(finale);
       for (const c of cells)
@@ -1150,7 +1159,7 @@
       setInterval(() => {
         if (state !== 'play') {
           if (!doneAt) doneAt = performance.now();
-          else if (performance.now() - doneAt > 4500) location.reload();
+          else if (performance.now() - doneAt > 6500) location.reload();
           return;
         }
         if (fi < finale.length) {

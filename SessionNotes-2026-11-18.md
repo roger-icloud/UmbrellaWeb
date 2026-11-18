@@ -76,3 +76,11 @@ economy. Design cautions noted: reward *accuracy/care* not speed (else a
 child grinds the tables badly for parts); the workshop itself must be fun or
 the currency is worthless; localStorage can carry the inventory between
 games — no server needed.
+
+## Staircase, not courtroom (Roger's plagiarism inversion, ~03:45)
+Imitation is the engine of learning — instead of fighting it, exploit it:
+let players copy and remix each other's contraptions with credit built in
+("based on Tom's machine"). The community becomes a staircase rather than a
+courtroom. Newton's 1675 letter to Hooke ("standing on the shoulders of
+giants") — itself borrowed from Bernard of Chartres. Partner-artist may
+draw original parts art → solves plagiarism AND becomes the signature look.

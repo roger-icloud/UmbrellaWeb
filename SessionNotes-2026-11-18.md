@@ -102,3 +102,11 @@ Built and committed to mix-demo — NOT yet published; test locally:
 - **Menu-card theatre**: a card could temporarily vanish (circular wipe) and return — parked idea, his.
 - **Snake-puzzle theatrical opening**: the 'choose' state currently shows text "pick a table"; Roger wants a blank board with the first tap fading the snake up in colour — polish pending.
 - **Churn + dents + rack-order difficulty** in tilt-ball: spec'd in discussion only; churn/dents off for this trial.
+
+## Roger's post-test notes (11:18-11:32)
+- Touch-drag in snake-puzzle on phone: "PERFECT".
+- Encore feels two-phase ("whistle blows, everybody goes away") — wants natural Brownian drift with balls sinking at their own pace, visible POP on the last, then the head appears and enlarges with eye movement into a smile/wink.
+- Three racks feels overlong — try 2.
+- mix-patterns too crowded on phone: numerals on smaller tiles; touch → fade into enlarged draggable pattern tile; same touch ring as puzzle.
+- Touch ring: formalise as a shared house gesture (his question, my yes — cheap-to-change early decision).
+- His dilemma note: "good early decisions save much fiddling... but early cut and dried inhibits creativity" — resolution we agreed: decide early only what's cheap to change, stay loose on what's expensive to feel.

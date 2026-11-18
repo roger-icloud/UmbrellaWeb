@@ -60,3 +60,19 @@ squares), the 1000-cube pptx storyboard, RotateBricks' parked diagonal-halves.
   account, ~5 guided minutes).
 - The lost penmanship/join-the-dots page may live on the Mint PC (server was
   off) or an old iPad — look there if it ever matters.
+
+## Contraptions — earned construction (Roger's idea, ~03:25)
+
+The Incredible Machine lineage (Dynamix/Sierra): TIM 1992-95, *Return of the
+Incredible Machine: Contraptions* 2000 (the one with lasers), *Even More
+Contraptions* 2001 — Dynamix's last game before Sierra/Vivendi closed them.
+Died of corporate death, not bad design; never marketed to schools.
+
+**The idea:** machine-*parts* as cumulative rewards — earn contraption parts
+through successful play in the maths games; a workshop/sandbox page where the
+earned parts assemble into machines that actually run. Play earns play:
+effort → exploration. Turns the site from six pages into one place with an
+economy. Design cautions noted: reward *accuracy/care* not speed (else a
+child grinds the tables badly for parts); the workshop itself must be fun or
+the currency is worthless; localStorage can carry the inventory between
+games — no server needed.

@@ -209,6 +209,7 @@
 
   <script src="snake.js?v=2"></script>
   <script src="anim.js?v=16"></script>
+  <script src="progress.js"></script>
 
   <script>
     'use strict';
@@ -348,7 +349,9 @@
     let flashTgt = null, flashT = 0;
     let gaze = 0, nextBlinkAt = 0, blinkT0 = -1;
     let hasInteracted = false;
-    let state = 'play';          // play | choose | celebrate | done
+    let state = 'choose';        // choose | play | celebrate | done —
+    // Roger 2026-11-18: the board opens uncommitted; the first chip
+    // tap deals (the old default ×3 choice is the visitor's now)
     let startT = 0, doneMs = 0;
     let lastAct = 0;             // last touch — a still patch wriggles
     let misses = 0;
@@ -653,6 +656,7 @@
       });
       chipRow.classList.toggle('locked',
         hasInteracted && (state === 'play' || state === 'celebrate'));
+      UW.paint(chipRow, 'puzzle');
     }
 
     /* ---------- input ---------- */
@@ -732,6 +736,7 @@
       setRung(rung + 1);
       addMade(table);
       if (duoOn) addMade(table2);
+      UW.completed('puzzle', duoOn ? [table, table2] : [table]);
       doneMs = Math.round(performance.now() - startT);
       cheerT = performance.now();
       /* the close of the celebration varies: one action from the
@@ -1265,7 +1270,7 @@
     resize();
     checkOrientation();
     syncChips();
-    deal();
+    UW.boot('puzzle');
     // lab aids: ?t=N picks the table, ?pose=fam pins the pose, ?done jumps
     // to a completed round (watch the celebration)
     if (qs.has('t')) {

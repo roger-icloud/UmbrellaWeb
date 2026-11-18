@@ -84,3 +84,21 @@ let players copy and remix each other's contraptions with credit built in
 courtroom. Newton's 1675 letter to Hooke ("standing on the shoulders of
 giants") — itself borrowed from Bernard of Chartres. Partner-artist may
 draw original parts art → solves plagiarism AND becomes the signature look.
+
+## Selection mods + tilt-ball trial (evening session)
+Built and committed to mix-demo — NOT yet published; test locally:
+- **progress.js** (new): shared visit record — one localStorage key, written only when the visitor says "keep this for next time?" at a completion; returning visitors get "carry on — or start fresh?". Shared chip vocabulary: .uw-made (faint ring), .uw-suggest (warm edge = next school-order table), .uw-far (cool dim = open but ahead), .uw-cap (dimmed past the multi-select cap).
+- **search-lab3**: opens uncommitted — lit chips over an empty board, first tap deals.
+- **honeycomb**: already opened uncommitted; gained the shared vocabulary + cap-dim.
+- **snake-puzzle**: now opens in the existing 'choose' state — no default ×3.
+- **tilt-snake**: covering picker overlay retired; bottom chips instead, permission overlay still follows the pick.
+- **tilt-ball**: a game is now 3 clean racks (GAME_RACKS); encore = every earned ball loose on the cushions ~4.8s, drains one by one, HouseSnake wink, then "Another game?". Wrong-home bounce keeps ×0.7 speed (chains die naturally); 3 refusals in a row = 0.6s coasting stillness. Churn/dents NOT built — parked.
+- **intro.html**: I drafted the honest qualifier on "No data collection" — *"your device may remember your progress if you ask it to; nothing is ever sent anywhere."* Roger's text to reword — mine is a placeholder.
+
+## Open items (decided later, don't lose)
+- **Tap-to-steer assist**: left as-is in both tilt games for now — unresolved whether it should gate behind ?assist. Roger: "leave but note so it returns and is not forgotten".
+- **Recital earned a menu tile** — the menu's missing "demonstration" page; the index is full at 6 cards, so a 7th card deals a third row (Roger mused about theatrical card-disappearing too — circular wipe).
+- **F1-straw-bale refusal**: wrong recital sequence should spin off comically into the straw, not fail — "not too exciting to aim for".
+- **Menu-card theatre**: a card could temporarily vanish (circular wipe) and return — parked idea, his.
+- **Snake-puzzle theatrical opening**: the 'choose' state currently shows text "pick a table"; Roger wants a blank board with the first tap fading the snake up in colour — polish pending.
+- **Churn + dents + rack-order difficulty** in tilt-ball: spec'd in discussion only; churn/dents off for this trial.

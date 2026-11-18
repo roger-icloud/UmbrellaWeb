@@ -130,6 +130,8 @@
   <button id="again">Again ▸</button>
   <div id="params"></div>
 
+  <script src="progress.js"></script>
+
   <script>
     'use strict';
 
@@ -629,6 +631,7 @@
         lastT = disp;
         if (foundCount() === totalMembers()) {
           state = 'beat'; beatT0 = performance.now();
+          UW.completed('search', tables);
         }
         label();
       } else {
@@ -1092,8 +1095,14 @@
       .filter(Boolean);
 
     function syncChips() {
+      /* Roger 2026-11-18: once the cap is reached the rest dim a touch —
+         "that's enough for this board" said by light, not locks */
+      [...chipRow.children].forEach((b, i) =>
+        b.classList.toggle('uw-cap',
+          tables.length >= MAX_TABLES && !tables.includes(i + 2)));
       [...chipRow.children].forEach((b, i) =>
         b.classList.toggle('on', tables.includes(i + 2)));
+      UW.paint(chipRow, 'search');
     }
 
     for (let t = 2; t <= T_MAX; t++) {
@@ -1130,8 +1139,11 @@
     const wanted = (qs.get('tables') || qs.get('t') || '')
       .split(',').map(Number).filter(t => t >= 2 && t <= T_MAX)
       .slice(0, MAX_TABLES);
-    deal(wanted.length ? wanted : [2 + ((rng() * (T_MAX - 1)) | 0)]);
+    /* Roger 2026-11-18: open uncommitted — lit chips over an empty
+       board; the first tap deals. ?tables= still jumps straight in. */
+    if (wanted.length) deal(wanted);
     syncChips();
+    UW.boot('search');
     resize();
     draw(performance.now());            // synchronous first paint
     if (DEMO_FLIP) setTimeout(boardFlip, 1200);

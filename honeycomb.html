@@ -194,6 +194,7 @@
   </div>
 
   <script src="anim.js?v=16"></script>
+  <script src="progress.js"></script>
 
   <script>
     'use strict';
@@ -662,7 +663,12 @@
           // more shared multiples than the bare product
           ch.classList.toggle('kin', !selected.includes(tt) &&
             selected.some(s => sharedCount(s, tt) >= 2));
+          /* Roger 2026-11-18: past the cap the rest dim a touch —
+             "that's enough for this board" said by light */
+          ch.classList.toggle('uw-cap',
+            selected.length >= MAX_TABLES && !selected.includes(tt));
         });
+        UW.paint(chips, 'comb');
         if (selected.length) reset(selected);
       });
       chips.appendChild(b);
@@ -730,6 +736,7 @@
           const rippleDurMs = (11 * RIPPLE_STAGGER + RIPPLE_HOLD) * 1000;
           allRippledAt = Math.max(...rippleAt) + rippleDurMs;
           logEvent('complete', { tables, ms: Math.round(doneMs) });
+          UW.completed('comb', tables);
         }
       } else if (now > cell.flashUntil) {
         // decoy, out-of-order path cell, or right value on the other
@@ -748,6 +755,7 @@
       finishedCoils = [];
       coilIdx = -1;
       [...chips.children].forEach(ch => ch.classList.remove('on', 'kin'));
+      UW.paint(chips, 'comb');
     });
     document.getElementById('againNo').addEventListener('click', () => {
       location.href = 'index.html';
@@ -1015,6 +1023,9 @@
     /* ?demo=1 — menu-card attract loop: a random table pair plays
        itself, tapping each next path cell through the real tap path;
        reloads for a fresh deal once the coils settle */
+    UW.boot('comb');
+    UW.paint(chips, 'comb');
+
     if (qs.get('demo') === '1') {
       const a = 2 + Math.floor(Math.random() * 11);
       let b = 2 + Math.floor(Math.random() * 11);

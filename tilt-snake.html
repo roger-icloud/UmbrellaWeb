@@ -122,23 +122,41 @@
       border: 1px solid #3a4a58;
     }
 
-    #tableRow {
+    /* Roger 2026-11-18: the table picker joins the shared vocabulary —
+       bottom chips over the board instead of a covering overlay */
+    #chipRow {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
       justify-content: center;
-      max-width: 340px;
-      margin-top: 20px;
+      padding: 0 12px;
+      z-index: 5;
     }
 
-    #tableRow button {
-      width: 52px;
-      height: 52px;
-      font-size: 18px;
-      border-radius: 12px;
+    #chipRow button {
+      min-width: 44px;
+      height: 44px;
+      font-size: 15px;
+      font-family: inherit;
+      border-radius: 10px;
       border: 1px solid #3a4a58;
       background: rgba(30, 42, 54, .9);
       color: #cfd8e0;
+    }
+
+    #chipRow button.on {
+      border-color: #4da3ff;
+      color: #fff;
+      background: rgba(40, 64, 88, .95);
+    }
+
+    #chipRow.locked button {
+      opacity: .35;
+      pointer-events: none;
     }
 
     .hidden {
@@ -160,11 +178,12 @@
     <div class="sub">The game waits for you.</div>
   </div>
 
-  <div id="tableOverlay" class="overlay">
+  <div id="tableOverlay" class="overlay hidden">
     <div class="title">Tilt Snake</div>
     <div class="sub">Pick a table, then collect <b>in order</b>.</div>
-    <div id="tableRow"></div>
   </div>
+
+  <div id="chipRow"></div>
 
   <div id="overlay" class="overlay hidden">
     <div class="title" id="tableLabel"></div>
@@ -181,6 +200,7 @@
 
   <script src="anim.js?v=16"></script>
   <script src="hint.js"></script>
+  <script src="progress.js"></script>
 
   <script>
     'use strict';
@@ -403,7 +423,7 @@
     const overlay = document.getElementById('overlay');
     const doneBar = document.getElementById('doneBar');
     const whyEl = document.getElementById('why');
-    const row = document.getElementById('tableRow');
+    const row = document.getElementById('chipRow');
     for (let t = 2; t <= 12; t++) {
       const b = document.createElement('button');
       b.textContent = '×' + t;
@@ -412,10 +432,14 @@
         document.getElementById('tableLabel').textContent = '×' + t + ' table';
         tableOverlay.classList.add('hidden');
         overlay.classList.remove('hidden');
+        row.classList.add('locked');
+        [...row.children].forEach(ch => ch.classList.toggle('on', ch === b));
         state = 'ready';
       });
       row.appendChild(b);
     }
+    UW.boot('tilt');
+    UW.paint(row, 'tilt');
 
     function motionNeedsPermission() {
       return typeof DeviceMotionEvent !== 'undefined'
@@ -471,6 +495,7 @@
       autoTarget = null;
       logEvent('complete', { table, ms: doneMs, misses });
       gamesDone[table] = (gamesDone[table] || 0) + 1;
+      UW.completed('tilt', [table]);
       const fullSegs = [
         { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
         ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
@@ -495,7 +520,8 @@
     document.getElementById('againYes').addEventListener('click', () => {
       doneBar.classList.remove('show');
       segs = []; nums = []; trail = [];
-      tableOverlay.classList.remove('hidden');
+      row.classList.remove('locked');
+      UW.paint(row, 'tilt');
       state = 'menu';
     });
     document.getElementById('againNo').addEventListener('click', () => {

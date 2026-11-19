@@ -72,7 +72,9 @@
     const EDGE_GAP = 8;        // css px between board edge and its strip
     const MAX_OVERLAY = 3;     // patterns may mix three deep, no deeper
     const FLY_MS = 320;        // satellite fly-home duration
-    const DRAG_SCALE = 1.25;   // satellite grows a touch while held
+    const REVEAL_IN = 350;     // ms: numeral fades to the pattern, tile grows
+    const REVEAL_OUT = 600;    // ms: slow crossfade home after release
+    const REVEAL_SCALE = 0.5;  // revealed tile reaches 1.5× (Roger 2026-11-19)
     const PREVIEW_MS = 400;    // hover colour grows into its share of the split
     const BLEND_FRAC = 0.3;    // sector fraction spent blending onward
     const PASTEL_LIFT = 0.7;   // how far toward white a chosen tile goes
@@ -125,8 +127,11 @@
         flanks: { W: 1, H: 0 },  // L+R strips: height is free
         poles: { W: 0, H: 1 },   // T+B strips: width is free
       };
-      const mode = Math.min(availW, availH) < EDGES_MIN
-        ? (availW >= availH ? 'flanks' : 'poles') : 'edges';
+      /* portrait is always poles — six top, six bottom, the simplest
+         arrangement (Roger 2026-11-19); landscape keeps the four-edge
+         ring while it's roomy, flanks when it isn't */
+      const mode = availH >= availW ? 'poles'
+        : (Math.min(availW, availH) < EDGES_MIN ? 'flanks' : 'edges');
       sat = Math.max(SAT_MIN, Math.min(SAT_MAX,
         Math.min(availW, availH) * SAT_FRAC));
       bS = Math.min(availW - (strips[mode].W ? 2 * (sat + EDGE_GAP) : 0),
@@ -158,6 +163,10 @@
 
     /* ---------- state ---------- */
     function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    /* cuisinaire rod colours for the resting numerals were tried and
+       retired same-day (Roger 2026-11-19): a second palette told two
+       stories — the numeral must speak the table's own colour, the
+       one its pattern, blends and split-cells already wear */
 
     /* Satellites park on the edge strips, numbers reading unbroken
        clockwise — but which edges depends on the room (2026-11-12).
@@ -187,7 +196,7 @@
     };
     const sats = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(t => ({
       t, edge: 'T', slot: 0, count: 3, x: 0, y: 0, home: { x: 0, y: 0 },
-      state: 'parked', flyFrom: null, flyT0: 0, press: 0,
+      state: 'parked', flyFrom: null, flyT0: 0, press: 0, reveal: 0, hovered: false,
       grabDX: 0, grabDY: 0, moved: 0, refuseUntil: 0,
     }));
     const active = new Set();   // tables whose pattern is on the board
@@ -332,6 +341,7 @@
         demo = null; demoOver = false;           // the board is yours
       }
       if (drag) return;
+      sats.forEach(s => s.hovered = false);
       for (let i = sats.length - 1; i >= 0; i--) {
         const s = sats[i];
         if (s.state !== 'parked') continue;
@@ -345,7 +355,14 @@
       }
     });
     cv.addEventListener('pointermove', (e) => {
-      if (!drag) return;
+      if (!drag) {
+        if (e.pointerType === 'mouse') {          // desktop hover reveals
+          for (const s of sats)
+            s.hovered = s.state === 'parked' && s.t !== 0 &&
+              Math.hypot(e.clientX - s.x, e.clientY - s.y) <= sat * 0.62;
+        }
+        return;
+      }
       drag.x = e.clientX - drag.grabDX;
       drag.y = e.clientY - drag.grabDY;
       drag.moved = Math.max(drag.moved,
@@ -357,6 +374,9 @@
       const s = drag;
       drag = null;
       overBoard = false;
+      if (e.pointerType === 'mouse')              // pointer still resting? stay revealed
+        sats.forEach(x => x.hovered = x.state === 'parked' && x.t !== 0 &&
+          Math.hypot(e.clientX - x.x, e.clientY - x.y) <= sat * 0.62);
       if (s.moved < TAP_DIST) {
         toggleSat(s);          // a tap toggles, no flight needed
         s.state = 'parked';
@@ -370,6 +390,7 @@
     }
     cv.addEventListener('pointerup', release);
     cv.addEventListener('pointercancel', release);
+    cv.addEventListener('pointerleave', () => sats.forEach(s => s.hovered = false));
     cv.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
     /* ---------- draw ---------- */
@@ -389,7 +410,8 @@
       const now = performance.now();
       const on = s.t !== 0 && active.has(s.t);
       const held = s.state === 'drag' || s.state === 'demo';
-      const k = held ? DRAG_SCALE : 1 - (s.press || 0) * 0.15;
+      const rv = easeIO(s.reveal || 0);            // 0 numeral … 1 pattern
+      const k = 1 + REVEAL_SCALE * rv - (s.press || 0) * 0.15;
       const sz = sat * k;
       const refusing = now < s.refuseUntil;
       const shx = refusing
@@ -400,7 +422,7 @@
         : s.t === 0 ? '#7f9bb0' : tableColour(s.t);
 
       ctx.save();
-      if (held) { ctx.shadowColor = col; ctx.shadowBlur = 14; }
+      if (held || rv > 0.05) { ctx.shadowColor = col; ctx.shadowBlur = 14; }
       ctx.fillStyle = 'rgba(24,34,44,.94)';
       roundRect(x, y, sz, sz, sz * 0.14);
       ctx.fill();
@@ -465,33 +487,53 @@
         return;
       }
 
-      /* miniature grid: members as cells in the table's colour, the
-         rest a whisper of a lattice so the pattern has something to
-         sit against */
-      const g = sz * 0.68, gx = sx - g / 2, gy = y + sz * 0.12;
-      const c = g / 10;
-      for (let r = 0; r < 10; r++) {
-        for (let q = 0; q < 10; q++) {
-          const v = r * 10 + q + 1;
-          const px = gx + q * c, py = gy + r * c;
-          if (member(s.t, v)) {
-            ctx.globalAlpha = on ? 1 : 0.75;
-            ctx.fillStyle = col;
-            ctx.fillRect(px + c * 0.12, py + c * 0.12, c * 0.76, c * 0.76);
-            ctx.globalAlpha = 1;
-          } else {
-            ctx.fillStyle = on ? 'rgba(10,14,18,.16)' : 'rgba(120,140,155,.1)';
-            ctx.fillRect(px + c * 0.32, py + c * 0.32, c * 0.36, c * 0.36);
+      /* the pattern face, revealed while held or hovered — fades in
+         over the numeral as the tile grows (Roger 2026-11-19) */
+      if (rv > 0.02) {
+        const g = sz * 0.68, gx = sx - g / 2, gy = y + sz * 0.12;
+        const c = g / 10;
+        for (let r = 0; r < 10; r++) {
+          for (let q = 0; q < 10; q++) {
+            const v = r * 10 + q + 1;
+            const px = gx + q * c, py = gy + r * c;
+            if (member(s.t, v)) {
+              ctx.globalAlpha = rv * (on ? 1 : 0.75);
+              ctx.fillStyle = col;
+              ctx.fillRect(px + c * 0.12, py + c * 0.12, c * 0.76, c * 0.76);
+              ctx.globalAlpha = 1;
+            } else {
+              ctx.globalAlpha = rv;
+              ctx.fillStyle = on ? 'rgba(10,14,18,.16)' : 'rgba(120,140,155,.1)';
+              ctx.fillRect(px + c * 0.32, py + c * 0.32, c * 0.36, c * 0.36);
+              ctx.globalAlpha = 1;
+            }
           }
         }
+        ctx.globalAlpha = rv;
+        ctx.fillStyle = on ? '#101418' : col;
+        ctx.font = (on ? 'bold ' : '') + Math.round(sz * 0.15) +
+          'px Andika, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('×' + s.t, sx, y + sz * 0.9);
+        ctx.globalAlpha = 1;
       }
 
-      ctx.fillStyle = on ? '#101418' : col;
-      ctx.font = (on ? 'bold ' : '') + Math.round(sz * 0.15) +
-        'px Andika, -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('×' + s.t, sx, y + sz * 0.9);
+      /* the resting face: a straight numeral in the table's own
+         colour — the busy miniature retired (Roger 2026-11-19) */
+      if (rv < 0.98) {
+        ctx.font = 'bold ' + Math.round(sz * 0.52) +
+          'px Andika, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = (1 - rv) * (on ? 1 : 0.85);
+        ctx.strokeStyle = 'rgba(12,17,22,.9)';
+        ctx.lineWidth = sz * 0.07;
+        ctx.strokeText(s.t, sx, s.y);
+        ctx.fillStyle = col;
+        ctx.fillText(s.t, sx, s.y);
+        ctx.globalAlpha = 1;
+      }
     }
 
     function tableRGB(t) {
@@ -626,6 +668,14 @@
       const dt = Math.min(50, now - lastDraw); lastDraw = now;
       grow = Math.max(0, Math.min(1, grow + (growOn ? 1 : -1) * dt / PREVIEW_MS));
 
+      /* numeral ⇄ pattern reveal: grows in while held or hovered,
+         slow-fades home on release (Roger 2026-11-19) */
+      for (const s of sats) {
+        const want = s.state === 'drag' || s.state === 'demo' || s.hovered;
+        const step = dt / (want ? REVEAL_IN : REVEAL_OUT);
+        s.reveal = Math.max(0, Math.min(1, s.reveal + (want ? step : -step)));
+      }
+
       /* drop-zone glow while a satellite hovers over the board —
          amber when this one would be refused (three deep already) */
       if (held && overB) {
@@ -707,7 +757,9 @@
         }
       }
 
-      /* parked satellites, then the held one last so it rides on top */
+      /* parked satellites, then the most-revealed one, then the held
+         one last — a growing tile rides on top of its neighbours */
+      let topSat = null;
       for (const s of sats) {
         if (s.state === 'fly') {
           const k = Math.min(1, (now - s.flyT0) / FLY_MS);
@@ -716,8 +768,13 @@
           s.y = s.flyFrom.y + (s.home.y - s.flyFrom.y) * e;
           if (k >= 1) { s.state = 'parked'; s.x = s.home.x; s.y = s.home.y; }
         }
-        if (s !== drag && !(demo && s === demo.s)) drawSatellite(s);
+        if (s === drag || (demo && s === demo.s)) continue;
+        if (s.reveal > 0.4 && s.reveal > (topSat ? topSat.reveal : 0)) {
+          if (topSat) drawSatellite(topSat);
+          topSat = s;
+        } else drawSatellite(s);
       }
+      if (topSat) drawSatellite(topSat);
       /* the stage convention: while the demo plays, everyone but the
          performer falls back — "an animation is in progress" without
          a word of it; when the show ends the house lights come up

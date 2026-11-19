@@ -437,15 +437,6 @@
       roundRect(x, y, sz, sz, sz * 0.14);
       ctx.fill();
       ctx.shadowBlur = 0;
-      if (on) {           // a chosen tile wears a pastel lift of its
-        ctx.save();       // colour — light enough to stand off the
-        ctx.clip();       // dark, still unmistakably its table
-        ctx.globalAlpha = 0.55;  // (Roger 2026-11-12)
-        ctx.fillStyle = 'rgb(' +
-          tableRGB(s.t).map(v => Math.round(v + (255 - v) * PASTEL_LIFT)) + ')';
-        ctx.fillRect(x, y, sz, sz);
-        ctx.restore();
-      }
       ctx.strokeStyle = col;
       ctx.globalAlpha = on || s.t === 0 ? 1 : DIM_ALPHA;
       ctx.lineWidth = on ? 2.6 : 1.2;
@@ -520,7 +511,7 @@
           }
         }
         ctx.globalAlpha = rv;
-        ctx.fillStyle = on ? '#101418' : col;
+        ctx.fillStyle = col;
         ctx.font = (on ? 'bold ' : '') + Math.round(sz * 0.15) +
           'px Andika, -apple-system, sans-serif';
         ctx.textAlign = 'center';
@@ -716,17 +707,15 @@
             cell - CELL_GAP, cell - CELL_GAP);
 
           const x0 = x + CELL_GAP / 2, y0 = y + CELL_GAP / 2, sz = cell - CELL_GAP;
+          /* the settle ends at a half-shaded cell (Roger 2026-11-19):
+             colour keeps half, the dark keeps half — quieter on the
+             board and a second arrival claims the dark half loudly */
           const lt = landed && ts.includes(landed.t) ? landed.t : 0;
           const el = lt ? now - landed.at : 0;
           const w = lt && ts.length === 1
-            ? settleW(landed.mixing ? 0 : landed.g0, 2, el) : 2;
-          if (ts.length === 1 && w < 1) {          // shading in, up to half
-            blendFill(x0, y0, sz, [0, lt], { i: 1, g: w });
-          } else if (ts.length === 1 && w < 2) {   // half on to whole
-            blendFill(x0, y0, sz, [0, lt], { i: 0, g: 2 - w });
-          } else if (ts.length === 1) {
-            ctx.fillStyle = tableColour(ts[0]);
-            ctx.fillRect(x0, y0, sz, sz);
+            ? settleW(landed.mixing ? 0 : landed.g0, 1, el) : 1;
+          if (ts.length === 1) {                   // half dark, half colour
+            blendFill(x0, y0, sz, [0, lt], w < 1 ? { i: 1, g: w } : undefined);
           } else if (ts.length > 1) {
             const g = lt ? settleW(landed.g0, 1, el) : 1;
             blendFill(x0, y0, sz, ts, g < 1 ? { i: ts.indexOf(lt), g } : undefined);

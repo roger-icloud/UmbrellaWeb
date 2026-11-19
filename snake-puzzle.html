@@ -453,7 +453,28 @@
     }
 
     function spawnHome() {
-      return { x: bX + SPAWN_POS.x * bW, y: bY + SPAWN_POS.y * bH };
+      /* the number appears clear of the snake: try the usual spot first,
+         then corners and edge midpoints; first with room wins, else the
+         roomiest (Roger 2026-11-19 — a pose sometimes sat on the spawn) */
+      const mx = Math.max(0.10, segD / bW * 1.1),
+            my = Math.max(0.10, segD / bH * 1.1);
+      const cands = [
+        SPAWN_POS,
+        { x: mx, y: my }, { x: 1 - mx, y: 1 - my }, { x: mx, y: 1 - my },
+        { x: 0.5, y: my }, { x: 0.5, y: 1 - my },
+        { x: mx, y: 0.5 }, { x: 1 - mx, y: 0.5 },
+      ];
+      const CLEAR = segD * 2.0;   // centre distance that counts as room
+      let best = null, bestD = -1;
+      for (const c of cands) {
+        const x = bX + c.x * bW, y = bY + c.y * bH;
+        let d = Infinity;
+        for (const s of segs) d = Math.min(d, Math.hypot(x - s.x, y - s.y));
+        for (const s of segs2) d = Math.min(d, Math.hypot(x - s.x, y - s.y));
+        if (d >= CLEAR) return { x, y };
+        if (d > bestD) { bestD = d; best = { x, y }; }
+      }
+      return best;
     }
     function homeSpawn(animate) {
       const p = spawnHome();

@@ -68,6 +68,11 @@
 
     /* table choice happens between games only — once a child starts
        dragging, the chips dim so the puzzle owns the screen */
+    #chipRow button:disabled {
+      opacity: .22;
+      pointer-events: none;
+    }
+
     #chipRow.locked button {
       opacity: .35;
       pointer-events: none;
@@ -382,6 +387,7 @@
     let rail2 = [], segs2 = [];     // its pose and beads
     let xA = -1, xB = -1, xVal = 0; // crossover: index in each, value
     let duoNext = false;            // set once the bald rung is finished
+    let duoPick = 0;                // partner the child chose (0 = auto-pair)
     let duoOn = false;              // this deal plays two snakes
     // the ladder rung, for this visit only; ?rung=N starts on rung N (from 1)
     const RUNG_KEY = 'snakePuzzleRung';
@@ -482,7 +488,10 @@
     }
 
     function dealCrossover() {
-      const pair = duoPair();
+      /* a chosen partner keeps the played table on snake 1 — pair order
+         is by who was picked, not by size (Roger 2026-11-19) */
+      const pair = duoPick ? [table, duoPick] : duoPair();
+      duoPick = 0;
       table = pair[0]; table2 = pair[1];
       xVal = lcm(table, table2);
       xA = xVal / table; xB = xVal / table2;
@@ -643,6 +652,11 @@
       b.textContent = '×' + t;
       b.addEventListener('click', () => {
         lastAct = performance.now();
+        /* partner mode: once the second snake is unlocked, 'choose' picks
+           only the stranger — snake 1 keeps the table just played */
+        if (state === 'choose' && partnerMode()) {
+          duoPick = t; deal(); return;
+        }
         if (state === 'choose') { table = t; syncChips(); deal(); return; }
         if (state !== 'play' || hasInteracted) return;
         if (t === table) return;
@@ -653,9 +667,16 @@
       chipBtns.push(b);
       chipRow.appendChild(b);
     }
+    function partnerMode() {
+      return state === 'choose' && (duoNext || duoOn);
+    }
     function syncChips() {
+      const pm = partnerMode();
       chipBtns.forEach((b, i) => {
         const t = i + 2, m = MADE_RING > 0 && made.includes(t);
+        /* only tables that genuinely cross with the played one are
+           offered — e.g. ×7 has partners, ×11 has few (Roger 2026-11-19) */
+        b.disabled = pm && !(t !== table && duoOk([table, t]));
         b.classList.toggle('on', t === table);
         b.classList.toggle('made', m);
         b.style.setProperty('--made', m ?
@@ -790,9 +811,8 @@
        until a table is chosen */
     document.getElementById('againYes').addEventListener('click', () => {
       clearCameo();
-      /* duo keeps its pair — a fresh deal of the same two tables
-         rather than the single-table chooser */
-      if (duoOn) { doneBar.classList.remove('show'); deal(); return; }
+      /* once two snakes play, each 'again' asks the child to pick the
+         partner — the pair is never imposed (Roger 2026-11-19) */
       doneBar.classList.remove('show');
       chipRow.classList.remove('hidden');
       segs = []; rail = []; spawned = null; remaining = [];
@@ -919,7 +939,8 @@
         ctx.fillStyle = 'rgba(120,140,160,.45)';
         ctx.font = '15px Andika, -apple-system, system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('pick a table', bX + bW / 2, bY + bH / 2);
+        ctx.fillText(partnerMode() ? 'pick a partner'
+          : 'pick a table', bX + bW / 2, bY + bH / 2);
         return;
       }
       // the celebration's clock: 0 while playing

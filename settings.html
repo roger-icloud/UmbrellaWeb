@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Settings — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background: #101418;
+      color: #cfd8e0;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    main {
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 72px 24px 48px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin: 0 0 10px;
+    }
+
+    .note {
+      font-size: 13px;
+      color: #8a97a3;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 0;
+      border-top: 1px solid #1c2732;
+    }
+
+    .row:last-of-type {
+      border-bottom: 1px solid #1c2732;
+    }
+
+    .row .what {
+      flex: 1;
+    }
+
+    .row strong {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .row small {
+      display: block;
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+
+    .tog {
+      flex: none;
+      width: 52px;
+      height: 30px;
+      border-radius: 15px;
+      border: 1px solid #2c3e50;
+      background: #1a2430;
+      cursor: pointer;
+      position: relative;
+      padding: 0;
+      transition: background .18s, border-color .18s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .tog::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #8a97a3;
+      transition: transform .18s, background .18s;
+    }
+
+    .tog.on {
+      background: #123a2c;
+      border-color: #35c795;
+    }
+
+    .tog.on::after {
+      transform: translateX(22px);
+      background: #35c795;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="NumberFun settings — kept on this device only.">
+</head>
+
+<body>
+  <main>
+    <h1>Settings</h1>
+    <p class="note">Kept on this device only — nothing is sent anywhere.</p>
+
+    <div class="row" data-key="rods">
+      <div class="what">
+        <strong>Cuisinaire colours</strong>
+        <small>the patterns page wears rod colours — 2 red, 3 green, 5 yellow …</small>
+      </div>
+      <button class="tog" role="switch" aria-label="Cuisinaire colours"></button>
+    </div>
+
+    <div class="row" data-key="max2">
+      <div class="what">
+        <strong>Two colours at most</strong>
+        <small>the hundred square mixes no more than two tables — gentler for a first visit</small>
+      </div>
+      <button class="tog" role="switch" aria-label="Two colours at most"></button>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+    /* per-device settings, 'uw-settings' in localStorage — the same
+       mechanism as the visit record: choosing here IS the consent,
+       nothing is sent anywhere (Roger 2026-11-19) */
+    const KEY = 'uw-settings';
+    const get = () => {
+      try { return JSON.parse(localStorage.getItem(KEY) || '{}'); }
+      catch (e) { return {}; }
+    };
+    const put = s => {
+      try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+    };
+    const read = {                       // option key → stored value
+      rods: s => !!s.rods,
+      max2: s => s.maxOverlay === 2,
+    };
+    const write = {
+      rods: v => ({ rods: v }),
+      max2: v => ({ maxOverlay: v ? 2 : 3 }),
+    };
+    document.querySelectorAll('.row').forEach(row => {
+      const key = row.dataset.key;
+      const tog = row.querySelector('.tog');
+      const paint = () => {
+        const on = read[key](get());
+        tog.classList.toggle('on', on);
+        tog.setAttribute('aria-checked', on);
+      };
+      tog.addEventListener('click', () => {
+        const s = get();
+        Object.assign(s, write[key](!read[key](s)));
+        put(s);
+        paint();
+      });
+      paint();
+    });
+  </script>
+
+  <script src="nav.js?v=19"></script>
+</body>
+
+</html>

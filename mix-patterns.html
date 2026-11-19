@@ -69,7 +69,12 @@
     const SAT_FRAC = 0.14;     // satellite tile size, fraction of comp
     const SAT_MIN = 36, SAT_MAX = 92;
     const EDGE_GAP = 8;        // css px between board edge and its strip
-    const MAX_OVERLAY = 3;     // patterns may mix three deep, no deeper
+    /* per-device settings, written by settings.html — localStorage,
+       nothing travels (Roger 2026-11-19) */
+    const UW_SET = (() => { try {
+      return JSON.parse(localStorage.getItem('uw-settings') || '{}');
+    } catch (e) { return {}; } })();
+    const MAX_OVERLAY = UW_SET.maxOverlay === 2 ? 2 : 3;  // mix depth
     const FLY_MS = 320;        // satellite fly-home duration
     const REVEAL_IN = 350;     // ms: numeral fades to the pattern, tile grows
     const REVEAL_OUT = 600;    // ms: slow crossfade home after release
@@ -173,7 +178,8 @@
     const CUISIN = { 2:[224,58,52], 3:[142,200,67], 4:[176,120,200],
                      5:[242,207,46], 6:[47,125,70], 7:[64,72,84],
                      8:[156,107,67], 9:[58,104,184], 10:[239,139,44] };
-    const RODS = new URLSearchParams(location.search).has('rods');
+    const RODS = (p => p.has('rods') ? p.get('rods') !== '0' : !!UW_SET.rods)
+      (new URLSearchParams(location.search));
     function tableColour(t) {
       return RODS && CUISIN[t] ? 'rgb(' + CUISIN[t] + ')'
                        : 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
@@ -802,7 +808,7 @@
     requestAnimationFrame(frame);
   </script>
 
-  <script src="nav.js?v=18"></script>
+  <script src="nav.js?v=19"></script>
 </body>
 
 </html>

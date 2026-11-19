@@ -23,6 +23,7 @@
     { label: 'Feedback', href: 'feedback.html' },
     { label: 'Help', href: 'help.html' },
     { label: 'Rationale', href: 'rationale.html' },
+    { label: 'Settings', href: 'settings.html' },
   ];
 
   const css = `

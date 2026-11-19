@@ -162,11 +162,18 @@
     }
 
     /* ---------- state ---------- */
-    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
-    /* cuisinaire rod colours for the resting numerals were tried and
-       retired same-day (Roger 2026-11-19): a second palette told two
-       stories — the numeral must speak the table's own colour, the
-       one its pattern, blends and split-cells already wear */
+    /* cuisinaire rods as THE page's palette (Roger 2026-11-19 — one
+       language, so numeral and pattern tell the same story): 2 red ·
+       3 lime · 4 purple · 5 yellow · 6 dark green · 7 black · 8 brown ·
+       9 blue · 10 orange; 11/12 have no rod — the old table colour.
+       Rod 7 is black but must lift on this dark paper to read */
+    const CUISIN = { 2:[224,58,52], 3:[142,200,67], 4:[176,120,200],
+                     5:[242,207,46], 6:[47,125,70], 7:[64,72,84],
+                     8:[156,107,67], 9:[58,104,184], 10:[239,139,44] };
+    function tableColour(t) {
+      return CUISIN[t] ? 'rgb(' + CUISIN[t] + ')'
+                       : 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
+    }
 
     /* Satellites park on the edge strips, numbers reading unbroken
        clockwise — but which edges depends on the room (2026-11-12).
@@ -537,6 +544,7 @@
     }
 
     function tableRGB(t) {
+      if (CUISIN[t]) return CUISIN[t];
       const h = ((t * 31 + 200) % 360) / 60, s = 0.6, l = 0.45;
       const c = (1 - Math.abs(2 * l - 1)) * s;
       const x = c * (1 - Math.abs(h % 2 - 1));

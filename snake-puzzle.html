@@ -738,17 +738,13 @@
         const d = Math.hypot(p.x - s.x, ey - s.y);
         if (d < bestD) { bestD = d; hit = s; hitSn = sn; hitI = i; }
       }));
-      if (duoOn && spawned.sn >= 0 && hit && hit.blank &&
-          hit.expected === spawned.value && hitSn !== spawned.sn) {
-        /* a tinted shared disk offered to the other snake — the tint
-           says where it belongs, refusal is information */
-        shakeTgt = { sn: hitSn, i: hitI }; shakeT = performance.now();
-        flashTgt = { sn: hitSn, i: hitI }; flashT = performance.now();
-        misses++;
-        homeSpawn(true);
-      } else if (hit && hit.blank && hit.expected === spawned.value) {
+      if (hit && hit.blank && hit.expected === spawned.value) {
         if (duoOn && spawned.sn >= 0) {
-          hit.filled = true; hit.blank = false;   // this snake's half only
+          /* the crossover is ONE bead claimed by both snakes — the drop
+             fills only the disk's own snake's half (Roger 2026-11-19) */
+          const bead = lists[spawned.sn]
+            .find(s => s.blank && s.expected === spawned.value);
+          bead.filled = true; bead.blank = false;
         } else {
           // a plain value fills every snake that expects it
           lists.forEach(L => L.forEach(s => {

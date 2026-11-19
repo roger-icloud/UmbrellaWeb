@@ -111,10 +111,17 @@
     let bX = 0, bY = 0, bS = 0, cell = 0;
 
     function layout() {
-      const availW = W - 2 * MARGIN;
-      const availH = H - TOP_RESERVE - BOT_RESERVE - 2 * MARGIN;
+      /* short screens (phones in landscape) can't spare the full
+         headroom — compact reserves give it to the board
+         (Roger 2026-11-19) */
+      const short = H < 500;
+      const topR = short ? 42 : TOP_RESERVE;
+      const botR = short ? 14 : BOT_RESERVE;
+      const margin = short ? 8 : MARGIN;
+      const availW = W - 2 * margin;
+      const availH = H - topR - botR - 2 * margin;
       cx = W / 2;
-      cy = TOP_RESERVE + (H - TOP_RESERVE - BOT_RESERVE) / 2;
+      cy = topR + (H - topR - botR) / 2;
 
       /* four-edge parking while the screen is roomy (the ring is the
          page's character on iPad/desktop); below the roomy threshold,

@@ -113,7 +113,7 @@
        satellites shaded the board). Slots are thirds of each edge;
        the composition is square, so landscape and portrait both work. */
     let cx = 0, cy = 0, sat = 0;
-    let bX = 0, bY = 0, bS = 0, cell = 0;
+    let bX = 0, bY = 0, bS = 0, cell = 0, headY = 0;
 
     function layout() {
       /* short screens (phones in landscape) can't spare the full
@@ -127,6 +127,7 @@
       const availH = H - topR - botR - 2 * margin;
       cx = W / 2;
       cy = topR + (H - topR - botR) / 2;
+      headY = topR / 2 + 4;
 
       /* four-edge parking while the screen is roomy (the ring is the
          page's character on iPad/desktop); below the roomy threshold,
@@ -605,6 +606,14 @@
     function draw() {
       const now = performance.now();
       ctx.clearRect(0, 0, W, H);
+
+      /* one quiet line of wayfinding in the reserved headroom — never
+         competes with the tiles (Roger 2026-11-19) */
+      ctx.fillStyle = 'rgba(138,151,163,.8)';
+      ctx.font = '600 13px Andika, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Mix and Match Table Patterns', cx, headY);
 
       /* the self-demo, only when invited — a silent lesson in both
          halves of the gesture (Roger 2026-11-12) */

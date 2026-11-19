@@ -14,13 +14,10 @@
 
   /* mirrors the main menu's tile order; housekeeping rows at the bottom */
   const ITEMS = [
+    /* game links retired 2026-11-19 (Roger): the menu was too long for
+       landscape phones — the tiles home is the real crossroads, so the
+       menu keeps only home + housekeeping, in their existing order */
     { label: 'Home', href: 'index.html' },
-    { label: 'Tilt Snake', href: 'tilt-snake.html' },
-    { label: 'Snake Puzzle', href: 'snake-puzzle.html' },
-    { label: 'Search Tables', href: 'search-lab3.html' },
-    { label: 'Find Tables', href: 'honeycomb.html' },
-    { label: 'Tilt Ball', href: 'tilt-ball.html' },
-    { label: 'Patterns', href: 'mix-patterns.html' },
     { type: 'sep' },
     ...(standalone ? [] : [{ label: 'Fullscreen', action: 'fullscreen' }]),
     { label: 'Feedback', href: 'feedback.html' },

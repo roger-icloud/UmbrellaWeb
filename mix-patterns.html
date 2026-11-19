@@ -68,7 +68,6 @@
     const NUM_FONT = 0.38;     // main-grid numeral, fraction of cell
     const SAT_FRAC = 0.14;     // satellite tile size, fraction of comp
     const SAT_MIN = 36, SAT_MAX = 92;
-    const EDGES_MIN = 640;     // min dim (css px) that affords 4-edge parking
     const EDGE_GAP = 8;        // css px between board edge and its strip
     const MAX_OVERLAY = 3;     // patterns may mix three deep, no deeper
     const FLY_MS = 320;        // satellite fly-home duration
@@ -123,15 +122,10 @@
          portrait puts all twelve top and bottom, short landscape
          flanks them left and right */
       const strips = {
-        edges: { W: 1, H: 1 },   // strips cost both dimensions
         flanks: { W: 1, H: 0 },  // L+R strips: height is free
         poles: { W: 0, H: 1 },   // T+B strips: width is free
       };
-      /* portrait is always poles — six top, six bottom, the simplest
-         arrangement (Roger 2026-11-19); landscape keeps the four-edge
-         ring while it's roomy, flanks when it isn't */
-      const mode = availH >= availW ? 'poles'
-        : (Math.min(availW, availH) < EDGES_MIN ? 'flanks' : 'edges');
+      const mode = availH >= availW ? 'poles' : 'flanks';
       sat = Math.max(SAT_MIN, Math.min(SAT_MAX,
         Math.min(availW, availH) * SAT_FRAC));
       bS = Math.min(availW - (strips[mode].W ? 2 * (sat + EDGE_GAP) : 0),
@@ -180,29 +174,20 @@
 
     /* Satellites park on the edge strips, numbers reading unbroken
        clockwise — but which edges depends on the room (2026-11-12).
-       The board is square; the strips make the footprint square too,
-       so four-edge parking wastes the long axis on phones. Three
-       arrangements, whichever yields the largest board:
-       'edges' — 2,3,4 top; 5,6,7 right; 8 bottom-right, clear, 9
-                 bottom-left; 10,11,12 up the left (Roger's order)
-       'flanks' — landscape: 2..7 down the right; 8..12 up the left,
-                 clear top-left — board takes the full height
-       'poles' — portrait: 2..7 across the top; 8..12 across the
-                 bottom (right-to-left), clear bottom-left — board
-                 takes the full width. t=0 is the clear tile */
+       Reading order, European (Roger 2026-11-19): landscape flanks
+       the board — evens 2,4,6…12 down the left, odds 3,5,7…11 and the
+       eraser down the right; portrait poles it — 2…7 across the top,
+       8…12 and the eraser across the bottom. t=0 is the clear tile.
+       (The four-edge ring retired: it read clockwise, not in rows.) */
     const EDGE_SPOTS = {
-      edges: { 2: ['T', 0], 3: ['T', 1], 4: ['T', 2],
-               5: ['R', 0], 6: ['R', 1], 7: ['R', 2],
-               9: ['B', 0], 0: ['B', 1], 8: ['B', 2],
-               12: ['L', 0], 11: ['L', 1], 10: ['L', 2] },
-      flanks: { 2: ['R', 0], 3: ['R', 1], 4: ['R', 2],
-                5: ['R', 3], 6: ['R', 4], 7: ['R', 5],
-                0: ['L', 0], 12: ['L', 1], 11: ['L', 2],
-                10: ['L', 3], 9: ['L', 4], 8: ['L', 5] },
+      flanks: { 2: ['L', 0], 4: ['L', 1], 6: ['L', 2],
+                8: ['L', 3], 10: ['L', 4], 12: ['L', 5],
+                3: ['R', 0], 5: ['R', 1], 7: ['R', 2],
+                9: ['R', 3], 11: ['R', 4], 0: ['R', 5] },
       poles: { 2: ['T', 0], 3: ['T', 1], 4: ['T', 2],
                5: ['T', 3], 6: ['T', 4], 7: ['T', 5],
-               0: ['B', 0], 12: ['B', 1], 11: ['B', 2],
-               10: ['B', 3], 9: ['B', 4], 8: ['B', 5] },
+               8: ['B', 0], 9: ['B', 1], 10: ['B', 2],
+               11: ['B', 3], 12: ['B', 4], 0: ['B', 5] },
     };
     const sats = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(t => ({
       t, edge: 'T', slot: 0, count: 3, x: 0, y: 0, home: { x: 0, y: 0 },
@@ -438,7 +423,10 @@
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.strokeStyle = col;
-      ctx.globalAlpha = on || s.t === 0 ? 1 : DIM_ALPHA;
+      /* three deep is the cap — the unused tiles dim until a colour
+         lifts (Roger 2026-11-19) */
+      const capped = !on && s.t !== 0 && active.size >= MAX_OVERLAY;
+      ctx.globalAlpha = on || s.t === 0 ? 1 : capped ? DIM_ALPHA * 0.4 : DIM_ALPHA;
       ctx.lineWidth = on ? 2.6 : 1.2;
       ctx.stroke();
       ctx.globalAlpha = 1;
@@ -527,7 +515,7 @@
           'px Andika, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.globalAlpha = (1 - rv) * (on ? 1 : 0.85);
+        ctx.globalAlpha = (1 - rv) * (on ? 1 : capped ? 0.3 : 0.85);
         ctx.strokeStyle = 'rgba(12,17,22,.9)';
         ctx.lineWidth = sz * 0.07;
         ctx.strokeText(s.t, sx, s.y);

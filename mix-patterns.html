@@ -260,7 +260,7 @@
     let darkA = 0;              // fade-to-black level at the ending
     function beginDemo() {
       const free = sats.filter(x => x.t && !active.has(x.t)).map(x => x.t);
-      const pref = [2, 4].filter(t => free.includes(t));
+      const pref = [2, 3].filter(t => free.includes(t));
       const ts = pref.concat(free.filter(t => !pref.includes(t))).slice(0, 2);
       if (!ts.length) return;
       demo = {

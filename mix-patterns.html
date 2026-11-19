@@ -162,16 +162,19 @@
     }
 
     /* ---------- state ---------- */
-    /* cuisinaire rods as THE page's palette (Roger 2026-11-19 — one
-       language, so numeral and pattern tell the same story): 2 red ·
+    /* ?rods=1 swaps the whole palette to cuisinaire rods — an option
+       buried until a settings page exists (Roger 2026-11-19): 2 red ·
        3 lime · 4 purple · 5 yellow · 6 dark green · 7 black · 8 brown ·
-       9 blue · 10 orange; 11/12 have no rod — the old table colour.
-       Rod 7 is black but must lift on this dark paper to read */
+       9 blue · 10 orange; 11/12 have no rod — the table colour.
+       Rod 7 is black but must lift on this dark paper to read.
+       The default palette is the site's own: every table coloured,
+       neighbours 31° apart so shared cells read as two voices */
     const CUISIN = { 2:[224,58,52], 3:[142,200,67], 4:[176,120,200],
                      5:[242,207,46], 6:[47,125,70], 7:[64,72,84],
                      8:[156,107,67], 9:[58,104,184], 10:[239,139,44] };
+    const RODS = new URLSearchParams(location.search).has('rods');
     function tableColour(t) {
-      return CUISIN[t] ? 'rgb(' + CUISIN[t] + ')'
+      return RODS && CUISIN[t] ? 'rgb(' + CUISIN[t] + ')'
                        : 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
     }
 
@@ -544,7 +547,7 @@
     }
 
     function tableRGB(t) {
-      if (CUISIN[t]) return CUISIN[t];
+      if (RODS && CUISIN[t]) return CUISIN[t];
       const h = ((t * 31 + 200) % 360) / 60, s = 0.6, l = 0.45;
       const c = (1 - Math.abs(2 * l - 1)) * s;
       const x = c * (1 - Math.abs(h % 2 - 1));

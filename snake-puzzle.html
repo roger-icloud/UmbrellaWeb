@@ -305,7 +305,7 @@
     const ctx = cv.getContext('2d');
     let W = 0, H = 0, DPR = 1;
     let bX = 0, bY = 0, bW = 0, bH = 0;   // board rect (css px)
-    let segD = 48;
+    let segD = 48, segDBase = 48;
 
     function resize() {
       const vv = window.visualViewport;
@@ -318,7 +318,8 @@
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       bX = BOARD_PAD; bY = TOP_RESERVE;
       bW = W - 2 * BOARD_PAD; bH = H - TOP_RESERVE - BOT_RESERVE;
-      segD = Math.max(34, Math.min(72, Math.min(bW, bH) * 0.14));
+      segDBase = Math.max(34, Math.min(72, Math.min(bW, bH) * 0.14));
+      segD = duoOn ? Math.round(segDBase * 0.85) : segDBase;
       layout();
     }
     window.addEventListener('resize', resize);
@@ -588,7 +589,7 @@
       duoOn = DUO || duoNext;
       /* two bodies need more room — smaller beads on duo deals so
          poses can still breathe on narrow screens */
-      if (duoOn) segD = Math.round(segD * 0.85);
+      segD = duoOn ? Math.round(segDBase * 0.85) : segDBase;
       rail = Anim.pose({
         board: { x: bX, y: bY, w: bW, h: bH },
         segD, count: N,

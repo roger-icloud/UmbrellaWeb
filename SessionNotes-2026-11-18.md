@@ -110,3 +110,10 @@ Built and committed to mix-demo — NOT yet published; test locally:
 - mix-patterns too crowded on phone: numerals on smaller tiles; touch → fade into enlarged draggable pattern tile; same touch ring as puzzle.
 - Touch ring: formalise as a shared house gesture (his question, my yes — cheap-to-change early decision).
 - His dilemma note: "good early decisions save much fiddling... but early cut and dried inhibits creativity" — resolution we agreed: decide early only what's cheap to change, stay loose on what's expensive to feel.
+
+## The collection layer (Roger, 19 Nov ~01:16)
+A meta-progress framework — the strongest candidate yet for "what links the games":
+- **Tile-flip home**: screen of tiles; a game (snake-puzzle, tilt-ball) sits ON a tile, tapping launches it, finishing flips the tile and reveals a piece underneath. Home that grows rooms instead of crowding menu cards.
+- **Reveals are materials, not trophies**: parts (frame/wheels/chain/pedals; kindling/paper/wood/match; blocks+windows+roof) that must be ASSEMBLED — reward = more work; second-order discovery (right configuration, areas matching). Ages upward: pictures that assemble → TIM-style machines.
+- **Two-colour circles**: the same grammar at in-game scale — correct drops grow your colour, mistakes quietly shrink, a full balloon floats off. Circles = within-game tally; tiles = between-game ledger.
+- Cautions filed: reward CLEAN completion only (perversion risk); never let the meta-layer outshine the games; substrate = progress.js already built.

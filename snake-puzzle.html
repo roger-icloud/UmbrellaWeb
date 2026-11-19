@@ -386,6 +386,7 @@
     let table2 = 0;                 // the second snake's table (duo)
     let rail2 = [], segs2 = [];     // its pose and beads
     let xA = -1, xB = -1, xVal = 0; // crossover: index in each, value
+    let xQueue = [];               // which snake each shared disk is for
     let duoNext = false;            // set once the bald rung is finished
     let duoPick = 0;                // partner the child chose (0 = auto-pair)
     let duoOn = false;              // this deal plays two snakes
@@ -483,6 +484,7 @@
       const k = Math.floor(Math.random() * remaining.length);
       const value = remaining.splice(k, 1)[0];
       spawned = { value, x: 0, y: 0,
+        sn: duoOn && value === xVal ? xQueue.pop() : -1,
         born: performance.now() + (delay || 0) * 1000 };
       homeSpawn();
     }
@@ -605,7 +607,10 @@
         /* five blanks in all — the crossover plus two more on each
            snake, so there's real choosing to do (Roger: only one
            destination is no puzzle at all) */
-        remaining = [xVal];
+        /* the shared value spawns twice — once per snake — so the
+           share is enacted, not just rendered (Roger 2026-11-19) */
+        remaining = [xVal, xVal];
+        xQueue = [0, 1].sort(() => Math.random() - 0.5);
         const extra = (L, excl) => {
           const pool = [];
           for (let i = 2; i < N; i++) if (i !== excl) pool.push(i);
@@ -733,13 +738,25 @@
         const d = Math.hypot(p.x - s.x, ey - s.y);
         if (d < bestD) { bestD = d; hit = s; hitSn = sn; hitI = i; }
       }));
-      if (hit && hit.blank && hit.expected === spawned.value) {
-        // the shared bead fills both snakes at once
-        lists.forEach(L => L.forEach(s => {
-          if (s.blank && s.expected === spawned.value) {
-            s.filled = true; s.blank = false;
-          }
-        }));
+      if (duoOn && spawned.sn >= 0 && hit && hit.blank &&
+          hit.expected === spawned.value && hitSn !== spawned.sn) {
+        /* a tinted shared disk offered to the other snake — the tint
+           says where it belongs, refusal is information */
+        shakeTgt = { sn: hitSn, i: hitI }; shakeT = performance.now();
+        flashTgt = { sn: hitSn, i: hitI }; flashT = performance.now();
+        misses++;
+        homeSpawn(true);
+      } else if (hit && hit.blank && hit.expected === spawned.value) {
+        if (duoOn && spawned.sn >= 0) {
+          hit.filled = true; hit.blank = false;   // this snake's half only
+        } else {
+          // a plain value fills every snake that expects it
+          lists.forEach(L => L.forEach(s => {
+            if (s.blank && s.expected === spawned.value) {
+              s.filled = true; s.blank = false;
+            }
+          }));
+        }
         spawnNext(SPAWN_NEXT);
         if (!spawned) finish();
       } else if (hit) {
@@ -1028,7 +1045,53 @@
             drawHead({ x: cx, y: cy }, L[1], sn.tbl, now, face, fac);
             continue;
           }
-          if (s.blank) {
+          if (duoOn && sn.sn === 0 && i === xA &&
+              (segs[xA].filled || segs2[xB].filled)) {
+            /* the crossover colours side by side as each snake's own
+               disk lands — the split is built, not rendered (Roger
+               2026-11-19). Both-blank still falls through to the
+               dashed dual ring below */
+            const af = segs[xA].filled, bf = segs2[xB].filled;
+            const ord = sn.sn ? N + i : i;
+            const bk = el - ord * BEAT_STAGGER;
+            const pop = bk > 0 && bk < BEAT_HOLD ?
+              Math.sin(bk / BEAT_HOLD * Math.PI) : 0;
+            const rr = r * (1 + pop * 0.12);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(cx - rr, cy - rr, rr, rr * 2); ctx.clip();
+            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7);
+            ctx.fillStyle = af ? tableColour(table)
+              : 'rgba(20,28,36,.9)'; ctx.fill();
+            ctx.restore();
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(cx, cy - rr, rr, rr * 2); ctx.clip();
+            ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7);
+            ctx.fillStyle = bf ? tableColour(table2)
+              : 'rgba(20,28,36,.9)'; ctx.fill();
+            ctx.restore();
+            if (!af || !bf) {
+              ctx.setLineDash([5, 4]); ctx.lineWidth = 2;
+              if (!af) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, -Math.PI / 2, Math.PI / 2);
+                ctx.strokeStyle = tableColour(table); ctx.stroke();
+              }
+              if (!bf) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, Math.PI / 2, Math.PI * 1.5);
+                ctx.strokeStyle = tableColour(table2); ctx.stroke();
+              }
+              ctx.setLineDash([]);
+            }
+            if (pop > 0) {
+              ctx.lineWidth = 2.5;
+              ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * pop) + ')';
+              ctx.stroke();
+            }
+            numeral(s.expected, cx, cy, segD * 0.34, '#fff');
+          } else if (s.blank) {
             ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
             ctx.fillStyle = 'rgba(20,28,36,.9)'; ctx.fill();
             ctx.setLineDash([5, 4]);
@@ -1056,16 +1119,6 @@
             const rr = r * (1 + pop * 0.12);
             ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7);
             ctx.fillStyle = tableColour(sn.tbl); ctx.fill();
-            if (duoOn && sn.sn === 0 && i === xA) {
-              // the filled crossover wears both tables' colours
-              ctx.save();
-              ctx.beginPath();
-              ctx.rect(cx, cy - rr, rr, rr * 2);
-              ctx.clip();
-              ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7);
-              ctx.fillStyle = tableColour(table2); ctx.fill();
-              ctx.restore();
-            }
             if (pop > 0) {
               ctx.lineWidth = 2.5;
               ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * pop) + ')';
@@ -1151,8 +1204,14 @@
          neutral slate, so destination is read from the number, not
          matched by tint (Roger, spawn ambiguity, 2026-11-16) */
       const duo = typeof duoOn !== 'undefined' && duoOn;
-      const sHue = duo ? 215 : hue;
-      const sFill = duo ? 'hsl(215,18%,45%)' : tableColour(table);
+      /* a shared disk keeps its snake's tint — the colour says which
+         bead it belongs to (Roger 2026-11-19); other duo pieces stay
+         neutral so destination is read from the number */
+      const own = duo && spawned.sn >= 0;
+      const sHue = own ? ((spawned.sn ? table2 : table) * 31 + 200) % 360
+        : duo ? 215 : hue;
+      const sFill = own ? tableColour(spawned.sn ? table2 : table)
+        : duo ? 'hsl(215,18%,45%)' : tableColour(table);
       const held = dragging || (demo && demo.phase === 'carry');
       /* the doughnut: while a finger drags, a wide ring around the
          bead reads as a coin the finger pushes from beneath — the

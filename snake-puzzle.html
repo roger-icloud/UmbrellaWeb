@@ -235,6 +235,8 @@
     const RETURN_MS = 700;      // a missed piece glides home, not snaps
     const HESITATE_SECS = 5;    // a piece left waiting this long counts
                                 // as hesitation for the fluency jump
+    const HINT_IDLE = 10;       // s of stillness before the quiet hint
+    const ROW_BACK = 3;         // refusals in a round that row you back
     const TOUCH_LIFT = 1.0;     // bead-widths the piece rides above a finger
     const TOUCH_RING = 0.95;    // the doughnut: a coin the finger pushes,
                                 // not a stick it balances
@@ -780,9 +782,10 @@
          snakes — the rung the whole ladder was climbing toward */
       if (!duoOn && rung >= LADDER.length - 1) duoNext = true;
       /* fluent play shortens the ramp: a clean round jumps two rungs,
-         a clean AND unhesitating one jumps three — strugglers take
-         every step (Roger 2026-11-19) */
-      setRung(rung + (misses === 0 ? (hesits === 0 ? 3 : 2) : 1));
+         a clean AND unhesitating one jumps three; a refusal-heavy round
+         quietly rows back one (Roger 2026-11-19) */
+      setRung(rung + (misses === 0 ? (hesits === 0 ? 3 : 2)
+        : misses >= ROW_BACK ? -1 : 1));
       addMade(table);
       if (duoOn) addMade(table2);
       UW.completed('puzzle', duoOn ? [table, table2] : [table]);
@@ -1143,6 +1146,29 @@
           }
         }
       });
+
+      /* quiet hint: after a long still patch the piece's true home
+         beads breathe softly in their colour — discovery, not
+         instruction (Roger 2026-11-19) */
+      if (state === 'play' && spawned && now >= spawned.born &&
+          !dragging && idleAge > HINT_IDLE) {
+        const pulse = 0.5 + 0.5 * Math.sin(now / 1000 * 3);
+        ctx.lineWidth = 2.5;
+        const hunt = (L, wb, snI) => L.forEach((s, i) => {
+          if (i === 0 || !s.blank || s.expected !== spawned.value) return;
+          if (spawned.sn >= 0 && snI !== spawned.sn) return;
+          const x = s.x + (wb ? wb[i].x : 0),
+            y = s.y + (wb ? wb[i].y : 0);
+          ctx.beginPath();
+          ctx.arc(x, y, segD * (0.62 + 0.10 * pulse), 0, 7);
+          ctx.strokeStyle = 'hsla(' +
+            ((snI ? table2 : table) * 31 + 200) % 360 +
+            ',70%,60%,' + (0.15 + 0.35 * pulse) + ')';
+          ctx.stroke();
+        });
+        hunt(segs, wob, 0);
+        if (duoOn) hunt(segs2, wob2, 1);
+      }
 
       if (spawned) {
         const age = (now - spawned.born) / 1000;

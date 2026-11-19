@@ -703,7 +703,7 @@
           const w = lt && ts.length === 1
             ? settleW(landed.mixing ? 0 : landed.g0, 1, el) : 1;
           if (ts.length === 1) {                   // half dark, half colour
-            blendFill(x0, y0, sz, [0, lt], w < 1 ? { i: 1, g: w } : undefined);
+            blendFill(x0, y0, sz, [0, ts[0]], w < 1 ? { i: 1, g: w } : undefined);
           } else if (ts.length > 1) {
             const g = lt ? settleW(landed.g0, 1, el) : 1;
             blendFill(x0, y0, sz, ts, g < 1 ? { i: ts.indexOf(lt), g } : undefined);

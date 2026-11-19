@@ -233,6 +233,8 @@
     const READY_EVERY = 2.6;    // s between softer rings while it waits; 0 = none
     const SHAKE_SECS = 0.45;    // refusal shake on the mistaken segment
     const RETURN_MS = 700;      // a missed piece glides home, not snaps
+    const HESITATE_SECS = 5;    // a piece left waiting this long counts
+                                // as hesitation for the fluency jump
     const TOUCH_LIFT = 1.0;     // bead-widths the piece rides above a finger
     const TOUCH_RING = 0.95;    // the doughnut: a coin the finger pushes,
                                 // not a stick it balances
@@ -346,6 +348,7 @@
     let startT = 0, doneMs = 0;
     let lastAct = 0;             // last touch — a still patch wriggles
     let misses = 0;
+    let hesits = 0;            // pieces left waiting past HESITATE_SECS
     let poseSeed = 0;            // seed of the dealt pose — shareable
     let cheerT = 0;              // when the celebration began
     let winAct = 'wink';         // this completion's closing expression
@@ -638,7 +641,7 @@
       layout();
       spawnNext(SPAWN_DELAY);
       hasInteracted = false;
-      misses = 0;
+      misses = 0; hesits = 0;
       state = 'play';
       startT = performance.now();
       lastAct = startT;
@@ -753,6 +756,8 @@
             }
           }));
         }
+        if (performance.now() - spawned.born > HESITATE_SECS * 1000)
+          hesits++;
         spawnNext(SPAWN_NEXT);
         if (!spawned) finish();
       } else if (hit) {
@@ -774,7 +779,10 @@
       /* finishing the bald rung promotes the next deal to two
          snakes — the rung the whole ladder was climbing toward */
       if (!duoOn && rung >= LADDER.length - 1) duoNext = true;
-      setRung(rung + 1);
+      /* fluent play shortens the ramp: a clean round jumps two rungs,
+         a clean AND unhesitating one jumps three — strugglers take
+         every step (Roger 2026-11-19) */
+      setRung(rung + (misses === 0 ? (hesits === 0 ? 3 : 2) : 1));
       addMade(table);
       if (duoOn) addMade(table2);
       UW.completed('puzzle', duoOn ? [table, table2] : [table]);

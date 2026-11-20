@@ -291,7 +291,7 @@
           }
         }
       } else if (c.state === 'back') {
-        c.s -= ROLL_V * dt;
+        c.s -= RAIL_V * dt;
         c.roll -= RAIL_V * dt / c.r;
         const q = pathAt(av, Math.max(0, c.s));
         c.x = q.x; c.y = q.y;

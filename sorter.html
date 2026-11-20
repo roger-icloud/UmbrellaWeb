@@ -33,41 +33,47 @@
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="fonts/andika.css">
-  <meta name="description" content="Five avenues, five gates — send each coin down the path its value opens.">
+  <meta name="description" content="One sloping rail, five apertures — drop each coin upstream of the door its value opens.">
 </head>
 
 <body>
   <canvas id="c"></canvas>
   <script>
     'use strict';
-    /* sorter — a contraption prototype (Roger 2026-11-20): five avenues
-       descend from mouths to gates. Each gate carries an expression —
-       only a coin of matching value fits. Drag a coin to a mouth; it
-       rolls to its gate. Fits → seats. Doesn't → bumps, tumbles to the
-       return rail, trundles home. All five seated → the shelf descends
-       like a lift carrying its coins, and a fresh one arrives. */
+    /* sorter — a contraption prototype (Roger 2026-11-20, v2): a single
+       rail slopes down left→right with five apertures cut in it. Each
+       aperture is a door carrying an expression — only a coin of the
+       matching value drops through. The child chooses WHERE on the rail
+       to release each coin: upstream of its door. A coin that matches
+       nothing rides the whole rail and lands in the reject cup, bottom
+       right. All five seats filled → the structure descends like a
+       lift and a fresh one arrives. */
 
     /* ---------- tunables ---------- */
-    const MOUTH_Y = 0.13;        // mouths row (fraction of H)
-    const GATE_Y0 = 0.46;        // highest gate row
-    const GATE_STEP = 0.055;     // stagger between gate rows
-    const RAIL_Y = 0.74;         // return rail (fraction of H)
+    const RAIL_Y0 = 0.26;        // rail surface at left (fraction of H)
+    const RAIL_Y1 = 0.40;        // rail surface at right — the slope
+    const RAIL_X0 = 0.05;        // rail extent (fractions of W)
+    const RAIL_X1 = 0.86;
+    const AP_X0 = 0.17;          // aperture band along the rail
+    const AP_X1 = 0.72;
+    const AP_W = 52;             // aperture width (px)
+    const SHELF_Y = 0.63;        // plank the pockets hang on
+    const CUP_L = 0.845, CUP_T = 0.71, CUP_B = 0.815;  // reject bin
     const TRAY_H = 96;           // coin stock at the bottom
     const AVENUES = 5;
     const STOCK_EXTRA = 3;       // decoy coins beyond the targets
-    const SNAP_R = 54;           // mouth acceptance radius
-    const ROLL_A = 620;          // coin acceleration down the path (px/s^2)
-    const ROLL_MAX = 520;        // top speed
-    const DOOR_MS = 260;         // gate opening animation
-    const DROP_MS = 240;         // coin falling from gate into its slot
-    const BACK_PX = 46;          // bounce-back distance on a refusal
-    const RAIL_V = 340;          // roll speed along the return rail
-    const RETURN_MS = 600;       // rejected coin glides home
+    const GRAV = 2400;           // falling accel (px/s^2)
+    const ROLL_A = 660;          // rolling accel down the slope
+    const ROLL_MAX = 430;        // top roll speed
+    const DOOR_MS = 240;         // flap opens under a matching coin
+    const FALL_TOL = 12;         // drop-trigger tolerance around ap centre
+    const CUP_MS = 1150;         // a rejected coin rests before hopping home
+    const RETURN_MS = 650;       // glide home
     const HOLD_MS = 750;         // beat after the last seat before the lift
-    const DESCEND_MS = 1900;     // shelf departs downward
-    const ARRIVE_MS = 1400;      // fresh shelf slides in
+    const DESCEND_MS = 1900;     // structure departs downward
+    const ARRIVE_MS = 1400;      // fresh structure slides in
     const MUL_A = [2, 9], MUL_B = [2, 9];   // expression factor ranges
-    const SHARE_P = 0.3;         // chance two gates share a product
+    const SHARE_P = 0.3;         // chance two doors share a product
 
     const cv = document.getElementById('c');
     const ctx = cv.getContext('2d');
@@ -89,65 +95,26 @@
       window.visualViewport.addEventListener('resize', resize);
 
     /* ---------- the machine ---------- */
-    /* avenues[i]: mouth -> a staggered slide -> gate -> slot.
-       The gate's expression is the criterion; the slot below holds
-       the seated coin. */
-    let avenues = [];
+    let aps = [];                // five apertures along the rail
     let coins = [];
     let phase = 'play';          // play | hold | descend | arrive
-    let phaseT = 0;              // ms timestamp the phase began
-    let descendK = 0;            // 0..1 shelf departure
-    let arriveK = 0;             // 0..1 fresh shelf arrival
-    let structH = 0;             // height the lift travels
+    let phaseT = 0;
+    let descendK = 0, arriveK = 0;
+    let cupN = 0;                // rejects resting in the cup
 
-    function pathOf(av) {
-      /* a shallow zig-zag from mouth to gate, alternating kink */
-      const kink = (av.i % 2 ? 1 : -1) * Math.min(38, W * 0.045);
-      return [
-        { x: av.mx, y: av.my },
-        { x: av.mx + kink, y: av.my + (av.gy - av.my) * 0.38 },
-        { x: av.gx, y: av.gy - 18 },
-        { x: av.gx, y: av.gy },
-      ];
+    const rx0 = () => W * RAIL_X0, rx1 = () => W * RAIL_X1;
+    function railYat(x) {
+      const k = Math.min(1, Math.max(0, (x - rx0()) / (rx1() - rx0())));
+      return H * (RAIL_Y0 + (RAIL_Y1 - RAIL_Y0) * k);
     }
-    function pathLen(pts) {
-      let L = 0;
-      for (let i = 1; i < pts.length; i++)
-        L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-      return L;
-    }
-    function pathAt(av, s) {
-      /* point at distance s along the avenue path */
-      const p = av.path;
-      let rem = s;
-      for (let i = 1; i < p.length; i++) {
-        const dx = p[i].x - p[i - 1].x, dy = p[i].y - p[i - 1].y;
-        const L = Math.hypot(dx, dy);
-        if (rem <= L) {
-          const k = rem / L;
-          return { x: p[i - 1].x + dx * k, y: p[i - 1].y + dy * k };
-        }
-        rem -= L;
-      }
-      return p[p.length - 1];
-    }
+    const cupFloor = () => H * CUP_B - 8;
 
     function layout() {
-      const mouthL = W * 0.10, mouthR = W * 0.90;
-      const gateL = W * 0.16, gateR = W * 0.84;
-      const my = H * MOUTH_Y, railY = H * RAIL_Y;
-      structH = railY - my + 40;
-      avenues.forEach((av, i) => {
-        const f = i / (AVENUES - 1);
-        av.mx = mouthL + (mouthR - mouthL) * f;
-        av.my = my;
-        av.gx = gateL + (gateR - gateL) * f;
-        av.gy = H * (GATE_Y0 + GATE_STEP * (i % 3));
-        av.slot = { x: av.gx, y: av.gy + 30 };
-        av.path = pathOf(av);
-        av.plen = pathLen(av.path);
+      aps.forEach((a, i) => {
+        a.x = W * AP_X0 + (W * (AP_X1 - AP_X0)) * (i / (AVENUES - 1));
+        a.y = railYat(a.x);
+        a.slot = { x: a.x, y: H * SHELF_Y - 20 };
       });
-      /* tray homes */
       const n = coins.length, gap = Math.min(74, (W - 56) / Math.max(1, n));
       coins.forEach((c, i) => {
         c.home = { x: W / 2 + (i - (n - 1) / 2) * gap, y: H - TRAY_H / 2 };
@@ -157,16 +124,17 @@
 
     /* ---------- the deal ---------- */
     function deal() {
-      /* five gates, each a product to match */
       const targets = [];
       const exprs = [];
       const wantShare = Math.random() < SHARE_P;
+      let shareAt = -1;
       while (exprs.length < AVENUES) {
         let a = MUL_A[0] + Math.floor(Math.random() * (MUL_A[1] - MUL_A[0] + 1));
         let b = MUL_B[0] + Math.floor(Math.random() * (MUL_B[1] - MUL_B[0] + 1));
         const v = a * b;
-        if (wantShare && exprs.length === AVENUES - 1 && targets.length) {
-          /* make this gate share an earlier product via different
+        if (wantShare && exprs.length === AVENUES - 1 && targets.length
+          && shareAt < 0) {
+          /* the last door shares an earlier product via different
              factors — a correct path, not the correct path */
           const v0 = targets[Math.floor(Math.random() * targets.length)];
           const pairs = [];
@@ -176,6 +144,7 @@
             const pick = pairs[Math.floor(Math.random() * pairs.length)];
             exprs.push(pick[0] + '×' + pick[1]);
             targets.push(v0);
+            shareAt = exprs.length - 1;
             continue;
           }
         }
@@ -183,24 +152,35 @@
         targets.push(v);
         exprs.push(a + '×' + b);
       }
-      avenues = [];
-      for (let i = 0; i < AVENUES; i++) avenues.push({
-        i, mx: 0, my: 0, gx: 0, gy: 0,
-        expr: exprs[i], val: targets[i], seated: null, door: 0, flash: 0,
+      aps = [];
+      for (let i = 0; i < AVENUES; i++) aps.push({
+        i, x: 0, y: 0, w: AP_W,
+        expr: exprs[i], val: targets[i],
+        slot: { x: 0, y: 0 },
+        seated: null, door: 0, flash: 0,
       });
-      /* stock: the five targets + three decoys */
-      const vals = targets.slice();
-      while (vals.length < AVENUES + STOCK_EXTRA) {
+      /* stock: one coin per target (two where doors share) + decoys */
+      const counts = {};
+      targets.forEach(v => counts[v] = (counts[v] || 0) + 1);
+      const vals = [];
+      Object.keys(counts).forEach(v => {
+        for (let k = 0; k < counts[v]; k++) vals.push(+v);
+      });
+      while (vals.length < AVENUES + STOCK_EXTRA + (shareAt >= 0 ? 1 : 0)) {
         const near = targets[Math.floor(Math.random() * targets.length)];
-        const d = near + (Math.random() < 0.5 ? -1 : 1) * (1 + Math.floor(Math.random() * 3));
+        const d = near + (Math.random() < 0.5 ? -1 : 1)
+          * (1 + Math.floor(Math.random() * 3));
         if (d > 0 && !vals.includes(d)) vals.push(d);
       }
       vals.sort(() => Math.random() - 0.5);
       coins = vals.map(v => ({
         v, x: 0, y: 0, r: 13 + Math.min(9, v * 0.10),
-        state: 'tray', s: 0, av: -1, roll: 0,
+        state: 'tray', roll: 0, vx: 0, vy: 0,
+        ap: -1, t: 0, falling: false,
         retT: 0, retFrom: null, home: { x: 0, y: 0 },
+        cupX: 0, cupY: 0,
       }));
+      cupN = 0;
       layout();
     }
 
@@ -210,13 +190,18 @@
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     }
+    function overRail(x, y) {
+      return x > rx0() - 10 && x < rx1() + 10 && y < railYat(x) - 6;
+    }
     cv.addEventListener('pointerdown', e => {
       if (phase !== 'play' && phase !== 'hold') return;
       const p = pt(e);
       for (let i = coins.length - 1; i >= 0; i--) {
         const c = coins[i];
-        if (c.state !== 'tray' || Math.hypot(p.x - c.x, p.y - c.y) > c.r + 12)
+        if ((c.state !== 'tray' && c.state !== 'cup')
+          || Math.hypot(p.x - c.x, p.y - c.y) > c.r + 12)
           continue;
+        if (c.state === 'cup') cupN--;
         drag = i; c.state = 'drag'; c.retT = 0;
         touch = e.pointerType === 'touch';
         cv.setPointerCapture(e.pointerId);
@@ -227,26 +212,26 @@
     cv.addEventListener('pointermove', e => {
       if (drag < 0) return;
       const p = pt(e), c = coins[drag];
-      c.x = p.x;
+      c.x = Math.max(8, Math.min(W - 8, p.x));
       c.y = p.y - (touch ? 44 : 0);
     });
+    function release(p, dy) {
+      const c = coins[drag];
+      touch = false; drag = -1;
+      if (overRail(p.x, dy)) {
+        c.x = Math.max(rx0() + 8, Math.min(rx1() - 8, p.x));
+        c.y = dy;
+        c.vy = 0;
+        c.state = 'plop';
+      } else {
+        c.state = 'home'; c.retT = performance.now();
+        c.retFrom = { x: c.x, y: c.y };
+      }
+    }
     cv.addEventListener('pointerup', e => {
       if (drag < 0) return;
-      const c = coins[drag], p = pt(e);
-      const dy = p.y - (touch ? 44 : 0);
-      touch = false; drag = -1;
-      /* nearest mouth within reach takes the coin */
-      let best = -1, bd = SNAP_R;
-      avenues.forEach((av, i) => {
-        const d = Math.hypot(p.x - av.mx, dy - av.my);
-        if (d < bd) { bd = d; best = i; }
-      });
-      if (best >= 0) {
-        c.state = 'roll'; c.av = best; c.s = 0; c.v_ = 0;
-        return;
-      }
-      c.state = 'home'; c.retT = performance.now();
-      c.retFrom = { x: c.x, y: c.y };
+      const p = pt(e);
+      release(p, p.y - (touch ? 44 : 0));
     });
     cv.addEventListener('pointercancel', () => {
       if (drag < 0) return;
@@ -256,55 +241,74 @@
     });
 
     /* ---------- physics-lite ---------- */
-    const railY = () => H * RAIL_Y;
-    const cupX = () => W * 0.94;
     function step(c, dt, now) {
-      const av = avenues[c.av];
-      if (c.state === 'roll') {
-        c.v_ = Math.min(ROLL_MAX, (c.v_ || 0) + ROLL_A * dt);
-        c.s += c.v_ * dt;
-        c.roll += c.v_ * dt / c.r;
-        if (c.s >= av.plen) {
-          /* at the gate: fits or refuses */
-          if (c.v === av.val && !av.seated) {
-            c.state = 'gate'; c.t = now;
-          } else {
-            av.flash = now;
-            c.state = 'back'; c.s = av.plen;
+      if (c.state === 'plop') {
+        c.vy += GRAV * dt;
+        c.y += c.vy * dt;
+        const ry = railYat(c.x) - c.r;
+        if (c.y >= ry) {
+          c.y = ry;
+          c.vx = 80 + c.vy * 0.12;   // landing momentum becomes roll
+          c.state = 'roll';
+        }
+      } else if (c.state === 'roll') {
+        c.vx = Math.min(ROLL_MAX, c.vx + ROLL_A * dt);
+        c.x += c.vx * dt;
+        c.y = railYat(c.x) - c.r;
+        c.roll += c.vx * dt / c.r;
+        /* doors test the coin as it passes */
+        for (const a of aps) {
+          if (a.seated) continue;
+          if (Math.abs(c.x - a.x) <= FALL_TOL) {
+            if (c.v === a.val) {
+              c.state = 'through'; c.ap = a.i; c.t = now; c.falling = false;
+              return;
+            }
+            a.flash = now;
           }
         }
-        const q = pathAt(av, c.s);
-        c.x = q.x; c.y = q.y;
-      } else if (c.state === 'gate') {
-        /* the door lifts, then the coin drops into its slot */
-        const k = Math.min(1, (now - c.t) / DOOR_MS);
-        av.door = k;
-        if (k >= 1) { c.state = 'drop'; c.t = now; }
-      } else if (c.state === 'drop') {
-        const k = Math.min(1, (now - c.t) / DROP_MS);
-        c.y = av.gy + (av.slot.y - av.gy) * (k * k);
-        c.x = av.gx;
-        if (k >= 1) {
-          c.state = 'seat'; av.seated = c;
-          if (avenues.every(a => a.seated)) {
-            phase = 'hold'; phaseT = now;
+        if (c.x >= rx1() - 6) {        // ran off the end
+          c.state = 'spill'; c.vy = 0;
+        }
+      } else if (c.state === 'through') {
+        const a = aps[c.ap];
+        if (!c.falling) {
+          /* centre over the mouth while the flap swings open */
+          const k = Math.min(1, (now - c.t) / DOOR_MS);
+          c.x += (a.x - c.x) * Math.min(1, dt * 14);
+          c.y = railYat(c.x) - c.r;
+          a.door = k;
+          if (k >= 1) { c.falling = true; c.vy = 40; }
+        } else {
+          c.vy += GRAV * dt;
+          c.y += c.vy * dt;
+          c.x += (a.slot.x - c.x) * Math.min(1, dt * 10);
+          if (c.y >= a.slot.y) {
+            c.y = a.slot.y; c.x = a.slot.x;
+            c.state = 'seat'; a.seated = c; a.doorT = now;
+            if (aps.every(q => q.seated)) { phase = 'hold'; phaseT = now; }
           }
         }
-      } else if (c.state === 'back') {
-        c.s -= RAIL_V * dt;
-        c.roll -= RAIL_V * dt / c.r;
-        const q = pathAt(av, Math.max(0, c.s));
-        c.x = q.x; c.y = q.y;
-        if (c.s <= av.plen - BACK_PX) c.state = 'fall';
-      } else if (c.state === 'fall') {
-        c.y += 900 * dt;
-        c.roll += 9 * dt;
-        if (c.y >= railY() - c.r) { c.y = railY() - c.r; c.state = 'rail'; }
-      } else if (c.state === 'rail') {
-        const dir = Math.sign(cupX() - c.x) || 1;
-        c.x += dir * RAIL_V * dt;
-        c.roll += dir * RAIL_V * dt / c.r;
-        if (Math.abs(c.x - cupX()) < 8) {
+      } else if (c.state === 'spill') {
+        c.vy += GRAV * dt;
+        c.x += c.vx * dt;
+        c.y += c.vy * dt;
+        c.roll += c.vx * dt / c.r;
+        const wall = W * 0.965 - c.r;
+        if (c.x > wall) { c.x = wall; c.vx *= -0.25; }
+        if (c.y >= cupFloor() - c.r) {
+          c.y = cupFloor() - c.r;
+          c.state = 'cup'; c.t = now;
+          const slots = Math.max(1, Math.floor((W * 0.10 - 24) / 30));
+          c.cupX = W * 0.865 + 14 + (cupN % slots) * 30
+            + (Math.random() * 8 - 4);
+          c.cupY = cupFloor() - c.r - Math.floor(cupN / slots) * (c.r + 4);
+          cupN++;
+        }
+      } else if (c.state === 'cup') {
+        c.x += (c.cupX - c.x) * Math.min(1, dt * 8);
+        c.y += (c.cupY - c.y) * Math.min(1, dt * 8);
+        if (now - c.t > CUP_MS) {
           c.state = 'home'; c.retT = now; c.retFrom = { x: c.x, y: c.y };
         }
       } else if (c.state === 'home') {
@@ -312,7 +316,7 @@
         const e = 1 - (1 - k) * (1 - k);
         c.x = c.retFrom.x + (c.home.x - c.retFrom.x) * e;
         c.y = c.retFrom.y + (c.home.y - c.retFrom.y) * e;
-        if (k >= 1) { c.state = 'tray'; c.av = -1; }
+        if (k >= 1) { c.state = 'tray'; c.ap = -1; }
       }
     }
 
@@ -327,7 +331,6 @@
       ctx.fillStyle = g; ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = ghost ? '#45545f' : '#8a5f1d';
       ctx.stroke();
-      /* a rim mark shows the roll */
       if (!ghost) {
         ctx.save(); ctx.rotate(c.roll);
         ctx.beginPath(); ctx.arc(c.r * 0.62, 0, 2.2, 0, 7);
@@ -341,149 +344,206 @@
       ctx.restore();
     }
 
-    function drawChannel(av) {
-      const p = av.path;
+    function railSeg(x0, x1) {
+      /* one unbroken run of the rail beam between aperture edges */
       ctx.beginPath();
-      ctx.moveTo(p[0].x, p[0].y);
-      for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
-      ctx.lineWidth = 11;
-      ctx.strokeStyle = '#1a242e'; ctx.lineCap = 'round';
-      ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.moveTo(x0, railYat(x0));
+      ctx.lineTo(x1, railYat(x1));
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = '#1a242e'; ctx.lineCap = 'butt'; ctx.stroke();
       ctx.lineWidth = 2.5; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
     }
 
-    function drawMouth(av, now) {
-      /* funnel lips */
+    function drawStructure(now, dy) {
+      ctx.save(); ctx.translate(0, dy);
+
+      /* the rail, broken into runs around the apertures */
+      let edge = rx0();
+      aps.forEach(a => {
+        railSeg(edge, a.x - a.w / 2);
+        edge = a.x + a.w / 2;
+      });
+      railSeg(edge, rx1());
+      /* a downturned lip where coins leave */
       ctx.beginPath();
-      ctx.moveTo(av.mx - 14, av.my - 10); ctx.lineTo(av.mx - 5, av.my + 6);
-      ctx.moveTo(av.mx + 14, av.my - 10); ctx.lineTo(av.mx + 5, av.my + 6);
+      ctx.moveTo(rx1(), railYat(rx1()) - 6);
+      ctx.quadraticCurveTo(rx1() + 10, railYat(rx1()) - 2,
+        rx1() + 12, railYat(rx1()) + 10);
       ctx.lineWidth = 4; ctx.strokeStyle = '#4a5f70';
       ctx.lineCap = 'round'; ctx.stroke();
-      /* glow while a coin is carried — any mouth accepts */
-      if (drag >= 0) {
-        const pu = 0.5 + 0.5 * Math.sin(now / 700);
-        ctx.beginPath(); ctx.arc(av.mx, av.my, 16, 0, 7);
-        ctx.strokeStyle = 'rgba(53,199,149,' + (0.3 + 0.35 * pu) + ')';
-        ctx.lineWidth = 2; ctx.setLineDash([5, 6]); ctx.stroke();
-        ctx.setLineDash([]);
-      }
+
+      /* apertures: flap, criterion, pocket */
+      aps.forEach(a => {
+        const flapY = railYat(a.x);
+        /* the flap — hinged at its right edge, dips under a wrong coin,
+           swings open under the right one */
+        let dip = 0;
+        coins.forEach(c => {
+          if (c.state === 'roll' && c.v !== a.val
+            && Math.abs(c.x - a.x) < a.w / 2 + c.r)
+            dip = 3;
+        });
+        ctx.save();
+        ctx.translate(a.x + a.w / 2, flapY + dip);
+        const rot = a.door * 1.25;
+        ctx.rotate(rot);
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(-a.w, -railSlopeAt() * a.w);
+        ctx.lineWidth = 9; ctx.strokeStyle = '#22303c';
+        ctx.lineCap = 'round'; ctx.stroke();
+        ctx.lineWidth = 2; ctx.strokeStyle = '#5a7080'; ctx.stroke();
+        ctx.restore();
+        /* criterion, quiet, above the mouth */
+        ctx.font = '600 13px Andika, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = 'rgba(160,175,190,.85)';
+        ctx.fillText(a.expr, a.x, flapY - 26);
+        /* a refused test flickers the mouth amber */
+        if (a.flash && now - a.flash < 450) {
+          ctx.beginPath();
+          ctx.arc(a.x, flapY - 4, 20, 0, 7);
+          ctx.strokeStyle = 'rgba(224,165,58,'
+            + (0.5 * (1 - (now - a.flash) / 450)) + ')';
+          ctx.lineWidth = 2.5; ctx.stroke();
+        } else a.flash = 0;
+        /* hangers from rail to the pocket */
+        ctx.beginPath();
+        ctx.moveTo(a.x - a.w / 2 - 7, flapY + 5);
+        ctx.lineTo(a.x - a.w / 2 - 7, a.slot.y + 14);
+        ctx.moveTo(a.x + a.w / 2 + 7, flapY + 5);
+        ctx.lineTo(a.x + a.w / 2 + 7, a.slot.y + 14);
+        ctx.lineWidth = 3; ctx.strokeStyle = '#2c3c49'; ctx.stroke();
+        /* the pocket alcove */
+        ctx.beginPath();
+        ctx.moveTo(a.x - 17, a.slot.y + 10);
+        ctx.lineTo(a.x - 17, a.slot.y - 12);
+        ctx.moveTo(a.x + 17, a.slot.y + 10);
+        ctx.lineTo(a.x + 17, a.slot.y - 12);
+        ctx.lineWidth = 3; ctx.strokeStyle = '#33424e'; ctx.stroke();
+      });
+
+      /* the plank uniting the pockets — the shelf that descends */
+      const pL = W * (AP_X0 - 0.05), pR = W * (AP_X1 + 0.05);
+      ctx.beginPath();
+      ctx.moveTo(pL, H * SHELF_Y); ctx.lineTo(pR, H * SHELF_Y);
+      ctx.lineWidth = 8; ctx.strokeStyle = '#22303c'; ctx.stroke();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
+      /* legs make it read as a lift car */
+      ctx.beginPath();
+      ctx.moveTo(pL + 10, H * SHELF_Y + 4); ctx.lineTo(pL + 10, H * SHELF_Y + 46);
+      ctx.moveTo(pR - 10, H * SHELF_Y + 4); ctx.lineTo(pR - 10, H * SHELF_Y + 46);
+      ctx.lineWidth = 5; ctx.strokeStyle = '#22303c'; ctx.stroke();
+
+      ctx.restore();
+    }
+    function railSlopeAt() {
+      return (RAIL_Y1 - RAIL_Y0) * H / ((RAIL_X1 - RAIL_X0) * W);
     }
 
-    function drawGate(av, now) {
-      const gx = av.gx, gy = av.gy;
-      /* posts + lintel frame a door opening */
+    function drawCup() {
+      const x0 = W * CUP_L, x1 = W * 0.97;
+      const yt = H * CUP_T, yb = H * CUP_B;
       ctx.beginPath();
-      ctx.moveTo(gx - 20, gy + 26); ctx.lineTo(gx - 20, gy - 4);
-      ctx.quadraticCurveTo(gx - 20, gy - 14, gx - 12, gy - 14);
-      ctx.lineTo(gx + 12, gy - 14);
-      ctx.quadraticCurveTo(gx + 20, gy - 14, gx + 20, gy - 4);
-      ctx.lineTo(gx + 20, gy + 26);
-      ctx.lineWidth = 4; ctx.strokeStyle = '#4a5f70';
-      ctx.lineCap = 'round'; ctx.stroke();
-      /* the door panel, lifting when open */
-      if (!av.seated || av.door < 1) {
-        const lift = av.door * 22;
-        ctx.fillStyle = '#22303c';
-        ctx.fillRect(gx - 14, gy - 12 - lift, 28, 34);
-        ctx.strokeStyle = '#5a7080'; ctx.lineWidth = 1.5;
-        ctx.strokeRect(gx - 14, gy - 12 - lift, 28, 34);
-      }
-      /* criterion above the arch — quiet Andika */
-      ctx.font = '600 13px Andika, sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = 'rgba(160,175,190,.85)';
-      ctx.fillText(av.expr, gx, gy - 22);
-      /* the slot alcove beneath */
+      ctx.moveTo(x0, yt); ctx.lineTo(x0 + 8, yb);
+      ctx.lineTo(x1 - 8, yb); ctx.lineTo(x1, yt);
+      ctx.lineWidth = 5; ctx.strokeStyle = '#22303c'; ctx.stroke();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
+      /* a short chute from the rail lip to the cup mouth */
       ctx.beginPath();
-      ctx.moveTo(gx - 16, av.slot.y + 12);
-      ctx.lineTo(gx - 16, av.slot.y - 4);
-      ctx.moveTo(gx + 16, av.slot.y + 12);
-      ctx.lineTo(gx + 16, av.slot.y - 4);
-      ctx.lineWidth = 3; ctx.strokeStyle = '#33424e'; ctx.stroke();
-      /* a refused coin flashes the gate rim amber */
-      if (av.flash && now - av.flash < 500) {
-        ctx.beginPath(); ctx.arc(gx, gy + 4, 26, 0, 7);
-        ctx.strokeStyle = 'rgba(224,165,58,' +
-          (0.85 * (1 - (now - av.flash) / 500)) + ')';
-        ctx.lineWidth = 3; ctx.stroke();
-      } else av.flash = 0;
+      ctx.moveTo(rx1() + 12, railYat(rx1()) + 14);
+      ctx.quadraticCurveTo(rx1() + 26, yt - 40, x0 + 12, yt - 4);
+      ctx.lineWidth = 3; ctx.strokeStyle = '#2c3c49'; ctx.stroke();
     }
 
     /* ---------- frame ---------- */
     let last = 0;
-    function draw(now) {
-      const dt = Math.min(0.05, (now - last) / 1000 || 0); last = now;
-      ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = '#0d141a';
-      ctx.fillRect(0, 0, W, H);
+    function frame(now) {
+      try {
+        const dt = Math.min(0.05, (now - last) / 1000 || 0); last = now;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#0d141a';
+        ctx.fillRect(0, 0, W, H);
 
-      /* phase transitions */
-      if (phase === 'hold' && now - phaseT > HOLD_MS) {
-        phase = 'descend'; phaseT = now;
-      } else if (phase === 'descend') {
-        descendK = Math.min(1, (now - phaseT) / DESCEND_MS);
-        if (descendK >= 1) {
-          deal(); phase = 'arrive'; phaseT = now;
-          arriveK = 0; descendK = 0;
+        /* phase transitions */
+        if (phase === 'hold' && now - phaseT > HOLD_MS) {
+          phase = 'descend'; phaseT = now;
+        } else if (phase === 'descend') {
+          descendK = Math.min(1, (now - phaseT) / DESCEND_MS);
+          if (descendK >= 1) {
+            deal(); phase = 'arrive'; phaseT = now;
+            arriveK = 0; descendK = 0;
+          }
+        } else if (phase === 'arrive') {
+          arriveK = Math.min(1, (now - phaseT) / ARRIVE_MS);
+          if (arriveK >= 1) { phase = 'play'; arriveK = 0; }
         }
-      } else if (phase === 'arrive') {
-        arriveK = Math.min(1, (now - phaseT) / ARRIVE_MS);
-        if (arriveK >= 1) { phase = 'play'; arriveK = 0; }
-      }
 
-      /* the lift's travel: down and away, or sliding in */
-      const ease = k => 1 - (1 - k) * (1 - k) * (1 - k);
-      let dy = 0;
-      if (phase === 'descend') dy = ease(descendK) * (structH + 160);
-      if (phase === 'arrive') dy = -(1 - ease(arriveK)) * (structH + 160);
+        const ease = k => 1 - (1 - k) * (1 - k) * (1 - k);
+        let dy = 0;
+        if (phase === 'descend') dy = ease(descendK) * (H * SHELF_Y + 220);
+        if (phase === 'arrive') dy = -(1 - ease(arriveK)) * (H * SHELF_Y + 220);
 
-      /* advancing coins */
-      coins.forEach(c => {
-        if (c.state !== 'tray' && c.state !== 'drag' && c.state !== 'seat')
-          step(c, dt, now);
-      });
+        /* flap doors ease shut behind a seated coin */
+        aps.forEach(a => {
+          if (a.seated && a.doorT) {
+            const k = Math.min(1, (now - a.doorT) / 420);
+            a.door = Math.max(0, 1 - k * 0.55);  // settle ajar
+          }
+        });
 
-      /* ---- the shelf (descends as one body) ---- */
-      ctx.save(); ctx.translate(0, dy);
-      /* a beam uniting the mouths, posts to the rail — reads as a lift */
-      ctx.beginPath();
-      ctx.moveTo(W * 0.06, avenues[0].my - 22);
-      ctx.lineTo(W * 0.94, avenues[0].my - 22);
-      ctx.lineWidth = 6; ctx.strokeStyle = '#2a3945'; ctx.stroke();
-      avenues.forEach(av => {
-        drawChannel(av);
-        drawMouth(av, now);
-        drawGate(av, now);
-        if (av.seated) drawCoin(av.seated, false);
-      });
-      ctx.restore();
+        coins.forEach(c => {
+          if (c.state !== 'tray' && c.state !== 'drag' && c.state !== 'seat')
+            step(c, dt, now);
+        });
 
-      /* ---- the scene floor: return rail + cup ---- */
-      ctx.beginPath();
-      ctx.moveTo(W * 0.06, railY()); ctx.lineTo(W * 0.97, railY());
-      ctx.lineWidth = 5; ctx.strokeStyle = '#22303c'; ctx.stroke();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cupX(), railY() - 8, 7, Math.PI, 0);
-      ctx.lineWidth = 3; ctx.strokeStyle = '#4a5f70'; ctx.stroke();
+        drawStructure(now, dy);
 
-      /* moving coins above the structure */
-      coins.forEach(c => {
-        if (c.state !== 'tray' && c.state !== 'seat')
-          drawCoin(c, c.state === 'drag' ? false : false);
-      });
+        /* coins that ride the structure descend with it */
+        ctx.save(); ctx.translate(0, dy);
+        coins.forEach(c => {
+          if (c.state === 'plop' || c.state === 'roll'
+            || c.state === 'through' || c.state === 'seat')
+            drawCoin(c, false);
+        });
+        /* a ghost where a dragged coin would land */
+        if (drag >= 0) {
+          const c = coins[drag];
+          const dy2 = c.y;
+          if (overRail(c.x, dy2)) {
+            const ry = railYat(c.x) - c.r;
+            ctx.beginPath(); ctx.arc(c.x, ry, c.r, 0, 7);
+            ctx.strokeStyle = 'rgba(53,199,149,.5)';
+            ctx.lineWidth = 2; ctx.setLineDash([4, 5]); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath(); ctx.moveTo(c.x, c.y + c.r + 4);
+            ctx.lineTo(c.x, ry - c.r - 4);
+            ctx.strokeStyle = 'rgba(53,199,149,.25)';
+            ctx.lineWidth = 1.5; ctx.setLineDash([3, 6]); ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+        ctx.restore();
 
-      /* ---- tray ---- */
-      ctx.fillStyle = 'rgba(14,20,26,.88)';
-      ctx.fillRect(0, H - TRAY_H, W, TRAY_H);
-      ctx.strokeStyle = '#22303c'; ctx.beginPath();
-      ctx.moveTo(0, H - TRAY_H); ctx.lineTo(W, H - TRAY_H); ctx.stroke();
-      coins.forEach(c => { if (c.state === 'tray') drawCoin(c, false); });
+        /* the reject cup — floor furniture, stays put */
+        drawCup();
+        coins.forEach(c => {
+          if (c.state === 'spill' || c.state === 'cup'
+            || c.state === 'home' || c.state === 'drag')
+            drawCoin(c, false);
+        });
 
-      requestAnimationFrame(draw);
+        /* ---- tray ---- */
+        ctx.fillStyle = 'rgba(14,20,26,.88)';
+        ctx.fillRect(0, H - TRAY_H, W, TRAY_H);
+        ctx.strokeStyle = '#22303c'; ctx.beginPath();
+        ctx.moveTo(0, H - TRAY_H); ctx.lineTo(W, H - TRAY_H); ctx.stroke();
+        coins.forEach(c => { if (c.state === 'tray') drawCoin(c, false); });
+      } catch (err) { /* a bad frame must not kill the machine */ }
+      requestAnimationFrame(frame);
     }
     deal();
     resize();
-    requestAnimationFrame(draw);
+    requestAnimationFrame(frame);
   </script>
 
   <script src="nav.js?v=19"></script>

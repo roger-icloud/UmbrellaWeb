@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Sorter — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #101418;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      display: block;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="Five avenues, five gates — send each coin down the path its value opens.">
+</head>
+
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    'use strict';
+    /* sorter — a contraption prototype (Roger 2026-11-20): five avenues
+       descend from mouths to gates. Each gate carries an expression —
+       only a coin of matching value fits. Drag a coin to a mouth; it
+       rolls to its gate. Fits → seats. Doesn't → bumps, tumbles to the
+       return rail, trundles home. All five seated → the shelf descends
+       like a lift carrying its coins, and a fresh one arrives. */
+
+    /* ---------- tunables ---------- */
+    const MOUTH_Y = 0.13;        // mouths row (fraction of H)
+    const GATE_Y0 = 0.46;        // highest gate row
+    const GATE_STEP = 0.055;     // stagger between gate rows
+    const RAIL_Y = 0.74;         // return rail (fraction of H)
+    const TRAY_H = 96;           // coin stock at the bottom
+    const AVENUES = 5;
+    const STOCK_EXTRA = 3;       // decoy coins beyond the targets
+    const SNAP_R = 54;           // mouth acceptance radius
+    const ROLL_A = 620;          // coin acceleration down the path (px/s^2)
+    const ROLL_MAX = 520;        // top speed
+    const DOOR_MS = 260;         // gate opening animation
+    const DROP_MS = 240;         // coin falling from gate into its slot
+    const BACK_PX = 46;          // bounce-back distance on a refusal
+    const RAIL_V = 340;          // roll speed along the return rail
+    const RETURN_MS = 600;       // rejected coin glides home
+    const HOLD_MS = 750;         // beat after the last seat before the lift
+    const DESCEND_MS = 1900;     // shelf departs downward
+    const ARRIVE_MS = 1400;      // fresh shelf slides in
+    const MUL_A = [2, 9], MUL_B = [2, 9];   // expression factor ranges
+    const SHARE_P = 0.3;         // chance two gates share a product
+
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      layout();
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport)
+      window.visualViewport.addEventListener('resize', resize);
+
+    /* ---------- the machine ---------- */
+    /* avenues[i]: mouth -> a staggered slide -> gate -> slot.
+       The gate's expression is the criterion; the slot below holds
+       the seated coin. */
+    let avenues = [];
+    let coins = [];
+    let phase = 'play';          // play | hold | descend | arrive
+    let phaseT = 0;              // ms timestamp the phase began
+    let descendK = 0;            // 0..1 shelf departure
+    let arriveK = 0;             // 0..1 fresh shelf arrival
+    let structH = 0;             // height the lift travels
+
+    function pathOf(av) {
+      /* a shallow zig-zag from mouth to gate, alternating kink */
+      const kink = (av.i % 2 ? 1 : -1) * Math.min(38, W * 0.045);
+      return [
+        { x: av.mx, y: av.my },
+        { x: av.mx + kink, y: av.my + (av.gy - av.my) * 0.38 },
+        { x: av.gx, y: av.gy - 18 },
+        { x: av.gx, y: av.gy },
+      ];
+    }
+    function pathLen(pts) {
+      let L = 0;
+      for (let i = 1; i < pts.length; i++)
+        L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+      return L;
+    }
+    function pathAt(av, s) {
+      /* point at distance s along the avenue path */
+      const p = av.path;
+      let rem = s;
+      for (let i = 1; i < p.length; i++) {
+        const dx = p[i].x - p[i - 1].x, dy = p[i].y - p[i - 1].y;
+        const L = Math.hypot(dx, dy);
+        if (rem <= L) {
+          const k = rem / L;
+          return { x: p[i - 1].x + dx * k, y: p[i - 1].y + dy * k };
+        }
+        rem -= L;
+      }
+      return p[p.length - 1];
+    }
+
+    function layout() {
+      const mouthL = W * 0.10, mouthR = W * 0.90;
+      const gateL = W * 0.16, gateR = W * 0.84;
+      const my = H * MOUTH_Y, railY = H * RAIL_Y;
+      structH = railY - my + 40;
+      avenues.forEach((av, i) => {
+        const f = i / (AVENUES - 1);
+        av.mx = mouthL + (mouthR - mouthL) * f;
+        av.my = my;
+        av.gx = gateL + (gateR - gateL) * f;
+        av.gy = H * (GATE_Y0 + GATE_STEP * (i % 3));
+        av.slot = { x: av.gx, y: av.gy + 30 };
+        av.path = pathOf(av);
+        av.plen = pathLen(av.path);
+      });
+      /* tray homes */
+      const n = coins.length, gap = Math.min(74, (W - 56) / Math.max(1, n));
+      coins.forEach((c, i) => {
+        c.home = { x: W / 2 + (i - (n - 1) / 2) * gap, y: H - TRAY_H / 2 };
+        if (c.state === 'tray') { c.x = c.home.x; c.y = c.home.y; }
+      });
+    }
+
+    /* ---------- the deal ---------- */
+    function deal() {
+      /* five gates, each a product to match */
+      const targets = [];
+      const exprs = [];
+      const wantShare = Math.random() < SHARE_P;
+      while (exprs.length < AVENUES) {
+        let a = MUL_A[0] + Math.floor(Math.random() * (MUL_A[1] - MUL_A[0] + 1));
+        let b = MUL_B[0] + Math.floor(Math.random() * (MUL_B[1] - MUL_B[0] + 1));
+        const v = a * b;
+        if (wantShare && exprs.length === AVENUES - 1 && targets.length) {
+          /* make this gate share an earlier product via different
+             factors — a correct path, not the correct path */
+          const v0 = targets[Math.floor(Math.random() * targets.length)];
+          const pairs = [];
+          for (let x = 2; x <= 9; x++) for (let y = 2; y <= 9; y++)
+            if (x * y === v0) pairs.push([x, y]);
+          if (pairs.length) {
+            const pick = pairs[Math.floor(Math.random() * pairs.length)];
+            exprs.push(pick[0] + '×' + pick[1]);
+            targets.push(v0);
+            continue;
+          }
+        }
+        if (targets.includes(v)) continue;
+        targets.push(v);
+        exprs.push(a + '×' + b);
+      }
+      avenues = [];
+      for (let i = 0; i < AVENUES; i++) avenues.push({
+        i, mx: 0, my: 0, gx: 0, gy: 0,
+        expr: exprs[i], val: targets[i], seated: null, door: 0, flash: 0,
+      });
+      /* stock: the five targets + three decoys */
+      const vals = targets.slice();
+      while (vals.length < AVENUES + STOCK_EXTRA) {
+        const near = targets[Math.floor(Math.random() * targets.length)];
+        const d = near + (Math.random() < 0.5 ? -1 : 1) * (1 + Math.floor(Math.random() * 3));
+        if (d > 0 && !vals.includes(d)) vals.push(d);
+      }
+      vals.sort(() => Math.random() - 0.5);
+      coins = vals.map(v => ({
+        v, x: 0, y: 0, r: 13 + Math.min(9, v * 0.10),
+        state: 'tray', s: 0, av: -1, roll: 0,
+        retT: 0, retFrom: null, home: { x: 0, y: 0 },
+      }));
+      layout();
+    }
+
+    /* ---------- input ---------- */
+    let drag = -1, touch = false;
+    function pt(e) {
+      const r = cv.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+    cv.addEventListener('pointerdown', e => {
+      if (phase !== 'play' && phase !== 'hold') return;
+      const p = pt(e);
+      for (let i = coins.length - 1; i >= 0; i--) {
+        const c = coins[i];
+        if (c.state !== 'tray' || Math.hypot(p.x - c.x, p.y - c.y) > c.r + 12)
+          continue;
+        drag = i; c.state = 'drag'; c.retT = 0;
+        touch = e.pointerType === 'touch';
+        cv.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+    });
+    cv.addEventListener('pointermove', e => {
+      if (drag < 0) return;
+      const p = pt(e), c = coins[drag];
+      c.x = p.x;
+      c.y = p.y - (touch ? 44 : 0);
+    });
+    cv.addEventListener('pointerup', e => {
+      if (drag < 0) return;
+      const c = coins[drag], p = pt(e);
+      const dy = p.y - (touch ? 44 : 0);
+      touch = false; drag = -1;
+      /* nearest mouth within reach takes the coin */
+      let best = -1, bd = SNAP_R;
+      avenues.forEach((av, i) => {
+        const d = Math.hypot(p.x - av.mx, dy - av.my);
+        if (d < bd) { bd = d; best = i; }
+      });
+      if (best >= 0) {
+        c.state = 'roll'; c.av = best; c.s = 0; c.v_ = 0;
+        return;
+      }
+      c.state = 'home'; c.retT = performance.now();
+      c.retFrom = { x: c.x, y: c.y };
+    });
+    cv.addEventListener('pointercancel', () => {
+      if (drag < 0) return;
+      const c = coins[drag]; drag = -1; touch = false;
+      c.state = 'home'; c.retT = performance.now();
+      c.retFrom = { x: c.x, y: c.y };
+    });
+
+    /* ---------- physics-lite ---------- */
+    const railY = () => H * RAIL_Y;
+    const cupX = () => W * 0.94;
+    function step(c, dt, now) {
+      const av = avenues[c.av];
+      if (c.state === 'roll') {
+        c.v_ = Math.min(ROLL_MAX, (c.v_ || 0) + ROLL_A * dt);
+        c.s += c.v_ * dt;
+        c.roll += c.v_ * dt / c.r;
+        if (c.s >= av.plen) {
+          /* at the gate: fits or refuses */
+          if (c.v === av.val && !av.seated) {
+            c.state = 'gate'; c.t = now;
+          } else {
+            av.flash = now;
+            c.state = 'back'; c.s = av.plen;
+          }
+        }
+        const q = pathAt(av, c.s);
+        c.x = q.x; c.y = q.y;
+      } else if (c.state === 'gate') {
+        /* the door lifts, then the coin drops into its slot */
+        const k = Math.min(1, (now - c.t) / DOOR_MS);
+        av.door = k;
+        if (k >= 1) { c.state = 'drop'; c.t = now; }
+      } else if (c.state === 'drop') {
+        const k = Math.min(1, (now - c.t) / DROP_MS);
+        c.y = av.gy + (av.slot.y - av.gy) * (k * k);
+        c.x = av.gx;
+        if (k >= 1) {
+          c.state = 'seat'; av.seated = c;
+          if (avenues.every(a => a.seated)) {
+            phase = 'hold'; phaseT = now;
+          }
+        }
+      } else if (c.state === 'back') {
+        c.s -= ROLL_V * dt;
+        c.roll -= RAIL_V * dt / c.r;
+        const q = pathAt(av, Math.max(0, c.s));
+        c.x = q.x; c.y = q.y;
+        if (c.s <= av.plen - BACK_PX) c.state = 'fall';
+      } else if (c.state === 'fall') {
+        c.y += 900 * dt;
+        c.roll += 9 * dt;
+        if (c.y >= railY() - c.r) { c.y = railY() - c.r; c.state = 'rail'; }
+      } else if (c.state === 'rail') {
+        const dir = Math.sign(cupX() - c.x) || 1;
+        c.x += dir * RAIL_V * dt;
+        c.roll += dir * RAIL_V * dt / c.r;
+        if (Math.abs(c.x - cupX()) < 8) {
+          c.state = 'home'; c.retT = now; c.retFrom = { x: c.x, y: c.y };
+        }
+      } else if (c.state === 'home') {
+        const k = Math.min(1, (now - c.retT) / RETURN_MS);
+        const e = 1 - (1 - k) * (1 - k);
+        c.x = c.retFrom.x + (c.home.x - c.retFrom.x) * e;
+        c.y = c.retFrom.y + (c.home.y - c.retFrom.y) * e;
+        if (k >= 1) { c.state = 'tray'; c.av = -1; }
+      }
+    }
+
+    /* ---------- drawing ---------- */
+    function drawCoin(c, ghost) {
+      ctx.save(); ctx.translate(c.x, c.y);
+      ctx.beginPath(); ctx.arc(0, 0, c.r, 0, 7);
+      const g = ctx.createRadialGradient(-c.r * 0.3, -c.r * 0.3, c.r * 0.15,
+        0, 0, c.r);
+      g.addColorStop(0, ghost ? '#3a4750' : '#f0c76a');
+      g.addColorStop(1, ghost ? '#2a343c' : '#c08a2e');
+      ctx.fillStyle = g; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = ghost ? '#45545f' : '#8a5f1d';
+      ctx.stroke();
+      /* a rim mark shows the roll */
+      if (!ghost) {
+        ctx.save(); ctx.rotate(c.roll);
+        ctx.beginPath(); ctx.arc(c.r * 0.62, 0, 2.2, 0, 7);
+        ctx.fillStyle = '#8a5f1d'; ctx.fill();
+        ctx.restore();
+      }
+      ctx.font = '600 ' + Math.round(c.r * 0.95) + 'px Andika, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = ghost ? '#5a6b78' : '#5a3d10';
+      ctx.fillText(String(c.v), 0, 1);
+      ctx.restore();
+    }
+
+    function drawChannel(av) {
+      const p = av.path;
+      ctx.beginPath();
+      ctx.moveTo(p[0].x, p[0].y);
+      for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+      ctx.lineWidth = 11;
+      ctx.strokeStyle = '#1a242e'; ctx.lineCap = 'round';
+      ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
+    }
+
+    function drawMouth(av, now) {
+      /* funnel lips */
+      ctx.beginPath();
+      ctx.moveTo(av.mx - 14, av.my - 10); ctx.lineTo(av.mx - 5, av.my + 6);
+      ctx.moveTo(av.mx + 14, av.my - 10); ctx.lineTo(av.mx + 5, av.my + 6);
+      ctx.lineWidth = 4; ctx.strokeStyle = '#4a5f70';
+      ctx.lineCap = 'round'; ctx.stroke();
+      /* glow while a coin is carried — any mouth accepts */
+      if (drag >= 0) {
+        const pu = 0.5 + 0.5 * Math.sin(now / 700);
+        ctx.beginPath(); ctx.arc(av.mx, av.my, 16, 0, 7);
+        ctx.strokeStyle = 'rgba(53,199,149,' + (0.3 + 0.35 * pu) + ')';
+        ctx.lineWidth = 2; ctx.setLineDash([5, 6]); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    function drawGate(av, now) {
+      const gx = av.gx, gy = av.gy;
+      /* posts + lintel frame a door opening */
+      ctx.beginPath();
+      ctx.moveTo(gx - 20, gy + 26); ctx.lineTo(gx - 20, gy - 4);
+      ctx.quadraticCurveTo(gx - 20, gy - 14, gx - 12, gy - 14);
+      ctx.lineTo(gx + 12, gy - 14);
+      ctx.quadraticCurveTo(gx + 20, gy - 14, gx + 20, gy - 4);
+      ctx.lineTo(gx + 20, gy + 26);
+      ctx.lineWidth = 4; ctx.strokeStyle = '#4a5f70';
+      ctx.lineCap = 'round'; ctx.stroke();
+      /* the door panel, lifting when open */
+      if (!av.seated || av.door < 1) {
+        const lift = av.door * 22;
+        ctx.fillStyle = '#22303c';
+        ctx.fillRect(gx - 14, gy - 12 - lift, 28, 34);
+        ctx.strokeStyle = '#5a7080'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(gx - 14, gy - 12 - lift, 28, 34);
+      }
+      /* criterion above the arch — quiet Andika */
+      ctx.font = '600 13px Andika, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = 'rgba(160,175,190,.85)';
+      ctx.fillText(av.expr, gx, gy - 22);
+      /* the slot alcove beneath */
+      ctx.beginPath();
+      ctx.moveTo(gx - 16, av.slot.y + 12);
+      ctx.lineTo(gx - 16, av.slot.y - 4);
+      ctx.moveTo(gx + 16, av.slot.y + 12);
+      ctx.lineTo(gx + 16, av.slot.y - 4);
+      ctx.lineWidth = 3; ctx.strokeStyle = '#33424e'; ctx.stroke();
+      /* a refused coin flashes the gate rim amber */
+      if (av.flash && now - av.flash < 500) {
+        ctx.beginPath(); ctx.arc(gx, gy + 4, 26, 0, 7);
+        ctx.strokeStyle = 'rgba(224,165,58,' +
+          (0.85 * (1 - (now - av.flash) / 500)) + ')';
+        ctx.lineWidth = 3; ctx.stroke();
+      } else av.flash = 0;
+    }
+
+    /* ---------- frame ---------- */
+    let last = 0;
+    function draw(now) {
+      const dt = Math.min(0.05, (now - last) / 1000 || 0); last = now;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#0d141a';
+      ctx.fillRect(0, 0, W, H);
+
+      /* phase transitions */
+      if (phase === 'hold' && now - phaseT > HOLD_MS) {
+        phase = 'descend'; phaseT = now;
+      } else if (phase === 'descend') {
+        descendK = Math.min(1, (now - phaseT) / DESCEND_MS);
+        if (descendK >= 1) {
+          deal(); phase = 'arrive'; phaseT = now;
+          arriveK = 0; descendK = 0;
+        }
+      } else if (phase === 'arrive') {
+        arriveK = Math.min(1, (now - phaseT) / ARRIVE_MS);
+        if (arriveK >= 1) { phase = 'play'; arriveK = 0; }
+      }
+
+      /* the lift's travel: down and away, or sliding in */
+      const ease = k => 1 - (1 - k) * (1 - k) * (1 - k);
+      let dy = 0;
+      if (phase === 'descend') dy = ease(descendK) * (structH + 160);
+      if (phase === 'arrive') dy = -(1 - ease(arriveK)) * (structH + 160);
+
+      /* advancing coins */
+      coins.forEach(c => {
+        if (c.state !== 'tray' && c.state !== 'drag' && c.state !== 'seat')
+          step(c, dt, now);
+      });
+
+      /* ---- the shelf (descends as one body) ---- */
+      ctx.save(); ctx.translate(0, dy);
+      /* a beam uniting the mouths, posts to the rail — reads as a lift */
+      ctx.beginPath();
+      ctx.moveTo(W * 0.06, avenues[0].my - 22);
+      ctx.lineTo(W * 0.94, avenues[0].my - 22);
+      ctx.lineWidth = 6; ctx.strokeStyle = '#2a3945'; ctx.stroke();
+      avenues.forEach(av => {
+        drawChannel(av);
+        drawMouth(av, now);
+        drawGate(av, now);
+        if (av.seated) drawCoin(av.seated, false);
+      });
+      ctx.restore();
+
+      /* ---- the scene floor: return rail + cup ---- */
+      ctx.beginPath();
+      ctx.moveTo(W * 0.06, railY()); ctx.lineTo(W * 0.97, railY());
+      ctx.lineWidth = 5; ctx.strokeStyle = '#22303c'; ctx.stroke();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cupX(), railY() - 8, 7, Math.PI, 0);
+      ctx.lineWidth = 3; ctx.strokeStyle = '#4a5f70'; ctx.stroke();
+
+      /* moving coins above the structure */
+      coins.forEach(c => {
+        if (c.state !== 'tray' && c.state !== 'seat')
+          drawCoin(c, c.state === 'drag' ? false : false);
+      });
+
+      /* ---- tray ---- */
+      ctx.fillStyle = 'rgba(14,20,26,.88)';
+      ctx.fillRect(0, H - TRAY_H, W, TRAY_H);
+      ctx.strokeStyle = '#22303c'; ctx.beginPath();
+      ctx.moveTo(0, H - TRAY_H); ctx.lineTo(W, H - TRAY_H); ctx.stroke();
+      coins.forEach(c => { if (c.state === 'tray') drawCoin(c, false); });
+
+      requestAnimationFrame(draw);
+    }
+    deal();
+    resize();
+    requestAnimationFrame(draw);
+  </script>
+
+  <script src="nav.js?v=19"></script>
+</body>
+
+</html>

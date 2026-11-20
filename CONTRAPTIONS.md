@@ -101,6 +101,10 @@ not before.
 
 ## Open questions for the morning
 
+0. Fractions as a world of their own — circle completion/segments
+   logic is Roger's candidate: fractions are notoriously hard for the
+   young, and a mechanical world where wholeness is the visible goal
+   may be the friendliest on-ramp yet.
 1. Sorter first, or pump first?
 2. Gate criteria: how much should be physically encoded vs marked?
 3. What does the odometer/counter live *inside* — what object is it?

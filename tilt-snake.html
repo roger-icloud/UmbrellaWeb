@@ -137,21 +137,62 @@
       z-index: 5;
     }
 
+    /* snake heads as the table buttons (Roger, 2026-11-21) — the same
+       grammar as the puzzle's rail: numeral on the face while dormant,
+       a blink when tapped */
     #chipRow button {
-      min-width: 44px;
-      height: 44px;
-      font-size: 15px;
-      font-family: inherit;
-      border-radius: 10px;
-      border: 1px solid #3a4a58;
-      background: rgba(30, 42, 54, .9);
-      color: #cfd8e0;
+      position: relative;
+      width: 46px;
+      height: 46px;
+      min-width: 0;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: radial-gradient(circle at 33% 30%,
+        hsl(var(--hue), 62%, 64%), hsl(var(--hue), 56%, 28%));
+      box-shadow: inset 0 0 0 1.5px hsl(var(--hue), 58%, 40%);
+      color: transparent;
+    }
+
+    #chipRow button .eyes {
+      position: absolute;
+      top: 30%;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 22%;
+    }
+
+    #chipRow button .eyes i {
+      width: 15%;
+      aspect-ratio: 1;
+      background: #101418;
+      border-radius: 50%;
+      transform-origin: center;
+    }
+
+    #chipRow button b {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 57%;
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(235, 242, 248, .9);
+    }
+
+    #chipRow button.wake .eyes i {
+      animation: headBlink .26s ease-in-out;
+    }
+
+    @keyframes headBlink {
+      50% { transform: scaleY(.1); }
     }
 
     #chipRow button.on {
-      border-color: #4da3ff;
-      color: #fff;
-      background: rgba(40, 64, 88, .95);
+      box-shadow: inset 0 0 0 1.5px hsl(var(--hue), 58%, 40%),
+        0 0 0 2px hsla(var(--hue), 65%, 60%, .7);
     }
 
     #chipRow.locked button {
@@ -426,8 +467,14 @@
     const row = document.getElementById('chipRow');
     for (let t = 2; t <= 12; t++) {
       const b = document.createElement('button');
-      b.textContent = '×' + t;
+      b.className = 'headchip';
+      b.style.setProperty('--hue', (t * 31 + 200) % 360);
+      b.innerHTML = '<span class="eyes"><i></i><i></i></span><b>' + t + '</b>';
+      b.setAttribute('aria-label', '×' + t + ' table');
       b.addEventListener('click', () => {
+        /* a tap wakes it: blink first, then the table is dealt */
+        b.classList.add('wake');
+        setTimeout(() => b.classList.remove('wake'), 300);
         reset(t);
         document.getElementById('tableLabel').textContent = '×' + t + ' table';
         tableOverlay.classList.add('hidden');

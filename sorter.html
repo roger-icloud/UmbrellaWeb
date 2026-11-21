@@ -399,15 +399,15 @@
         ctx.moveTo(a.x + pw, a.slot.y + a.tr + 8);
         ctx.lineTo(a.x + pw, a.slot.y - a.tr - 4);
         ctx.lineWidth = 3; ctx.strokeStyle = '#33424e'; ctx.stroke();
-        /* a wrong coin draws a slow amber pulse on its pocket */
-        if (a.bad && a.glint) {
-          const k = (now - a.glint) / 900;
-          const alpha = k < 1 ? 0.55 * (1 - k)
-            : 0.25 + 0.2 * Math.sin(now / 420);
+        /* a wrong coin sits with a persistent amber halo — refusal
+           is information, not alarm */
+        if (a.bad && a.seated) {
+          const k = a.glint ? Math.min(1, (now - a.glint) / 700) : 1;
+          const alpha = 0.45 + 0.3 * Math.sin(now / 380);
           ctx.beginPath();
-          ctx.arc(a.x, a.slot.y, a.tr + 8, 0, 7);
-          ctx.strokeStyle = 'rgba(224,165,58,' + alpha.toFixed(3) + ')';
-          ctx.lineWidth = 2.5; ctx.stroke();
+          ctx.arc(a.x, a.seated.y, a.seated.r + 4, 0, 7);
+          ctx.strokeStyle = 'rgba(224,165,58,' + (alpha * k).toFixed(3) + ')';
+          ctx.lineWidth = 3; ctx.stroke();
         }
       });
 

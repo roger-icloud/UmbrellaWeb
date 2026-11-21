@@ -846,8 +846,11 @@
       ctx.save();
       st.forEach(h => {
         const valid = !pm || (h.t !== table && duoOk([table, h.t]));
+        /* partner mode shows only the heads genuinely on offer —
+           empty stations stay empty (Roger, 2026-11-21) */
+        if (pm && !valid) return;
         const out = h.t === outT || h.t === outT2;
-        const dim = quiet || (pm && !valid);
+        const dim = quiet;
         const a = out ? 0 : dim ? 0.3 : 1;
         if (out) {
           /* the ghost: a faint numeral keeps the out snake's place —
@@ -874,13 +877,13 @@
             ',60%,55%,' + MADE_RING + ')';
           ctx.lineWidth = 2; ctx.stroke();
         }
-        /* the numeral sits above the head — the button's costume,
-           never on the creature; fades when its snake departs */
-        let na = pm && !valid ? 0.25 : 0.85;
+        /* the numeral wears the face, below the eyes — the stamp is
+           the button; a tap wakes the animal underneath it */
+        let na = 0.85;
         if (headFade && (h.t === headFade.t || h.t === headFade.t2))
           na *= Math.max(0, 1 - (now - headFade.t0) / 400);
-        numeral('×' + h.t, h.x, h.y - h.r - 9, h.r * 0.62,
-          'rgba(190,205,215,' + na + ')');
+        numeral(h.t, h.x, h.y + h.r * 0.42, h.r * 0.55,
+          'rgba(235,242,248,' + na + ')');
         ctx.globalAlpha = 1;
       });
       ctx.restore();

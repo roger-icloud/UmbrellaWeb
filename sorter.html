@@ -33,47 +33,43 @@
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="fonts/andika.css">
-  <meta name="description" content="One sloping rail, five apertures — drop each coin upstream of the door its value opens.">
+  <meta name="description" content="A sloping rail with five holes, smallest to largest — each coin falls into the first one it fits.">
 </head>
 
 <body>
   <canvas id="c"></canvas>
   <script>
     'use strict';
-    /* sorter — a contraption prototype (Roger 2026-11-20, v2): a single
-       rail slopes down left→right with five apertures cut in it. Each
-       aperture is a door carrying an expression — only a coin of the
-       matching value drops through. The child chooses WHERE on the rail
-       to release each coin: upstream of its door. A coin that matches
-       nothing rides the whole rail and lands in the reject cup, bottom
-       right. All five seats filled → the structure descends like a
-       lift and a fresh one arrives. */
+    /* sorter v3 (Roger 2026-11-21): a rail slopes down left→right with
+       five holes graduated smallest→largest. No doors — geometry sorts:
+       a coin falls into the FIRST hole it fits, too big for the last
+       hole → it rides to the reject cup. Each hole is labelled with an
+       expression and the lift descends only when every pocket holds
+       that product's coin — a near-miss coin gets physically misfiled
+       and can be fished out of its pocket by hand. */
 
     /* ---------- tunables ---------- */
     const RAIL_Y0 = 0.26;        // rail surface at left (fraction of H)
     const RAIL_Y1 = 0.40;        // rail surface at right — the slope
     const RAIL_X0 = 0.05;        // rail extent (fractions of W)
     const RAIL_X1 = 0.86;
-    const AP_X0 = 0.17;          // aperture band along the rail
+    const AP_X0 = 0.17;          // hole band along the rail
     const AP_X1 = 0.72;
-    const AP_W = 52;             // aperture width (px)
+    const HOLE_GAP = 7;          // hole diameter = coin diameter + this
     const SHELF_Y = 0.63;        // plank the pockets hang on
     const CUP_L = 0.845, CUP_T = 0.71, CUP_B = 0.815;  // reject bin
-    const TRAY_H = 96;           // coin stock at the bottom
+    const TRAY_H = 96;
     const AVENUES = 5;
     const STOCK_EXTRA = 3;       // decoy coins beyond the targets
-    const GRAV = 2400;           // falling accel (px/s^2)
-    const ROLL_A = 660;          // rolling accel down the slope
-    const ROLL_MAX = 430;        // top roll speed
-    const DOOR_MS = 240;         // flap opens under a matching coin
-    const FALL_TOL = 12;         // drop-trigger tolerance around ap centre
-    const CUP_MS = 1150;         // a rejected coin rests before hopping home
-    const RETURN_MS = 650;       // glide home
-    const HOLD_MS = 750;         // beat after the last seat before the lift
-    const DESCEND_MS = 1900;     // structure departs downward
-    const ARRIVE_MS = 1400;      // fresh structure slides in
-    const MUL_A = [2, 9], MUL_B = [2, 9];   // expression factor ranges
-    const SHARE_P = 0.3;         // chance two doors share a product
+    const GRAV = 2400;
+    const ROLL_A = 660;
+    const ROLL_MAX = 430;
+    const CUP_MS = 1150;
+    const RETURN_MS = 650;
+    const HOLD_MS = 750;
+    const DESCEND_MS = 1900;
+    const ARRIVE_MS = 1400;
+    const BIG_P = 0.4;           // chance a decoy is too big for the last hole
 
     const cv = document.getElementById('c');
     const ctx = cv.getContext('2d');
@@ -95,12 +91,12 @@
       window.visualViewport.addEventListener('resize', resize);
 
     /* ---------- the machine ---------- */
-    let aps = [];                // five apertures along the rail
+    let holes = [];              // five holes, diameter ascending L→R
     let coins = [];
     let phase = 'play';          // play | hold | descend | arrive
     let phaseT = 0;
     let descendK = 0, arriveK = 0;
-    let cupN = 0;                // rejects resting in the cup
+    let cupN = 0;
 
     const rx0 = () => W * RAIL_X0, rx1 = () => W * RAIL_X1;
     function railYat(x) {
@@ -108,12 +104,13 @@
       return H * (RAIL_Y0 + (RAIL_Y1 - RAIL_Y0) * k);
     }
     const cupFloor = () => H * CUP_B - 8;
+    const coinR = v => 10 + v * 0.22;    // value → diameter
 
     function layout() {
-      aps.forEach((a, i) => {
+      holes.forEach((a, i) => {
         a.x = W * AP_X0 + (W * (AP_X1 - AP_X0)) * (i / (AVENUES - 1));
         a.y = railYat(a.x);
-        a.slot = { x: a.x, y: H * SHELF_Y - 20 };
+        a.slot = { x: a.x, y: H * SHELF_Y - 10 - a.tr };
       });
       const n = coins.length, gap = Math.min(74, (W - 56) / Math.max(1, n));
       coins.forEach((c, i) => {
@@ -123,60 +120,50 @@
     }
 
     /* ---------- the deal ---------- */
-    function deal() {
-      const targets = [];
-      const exprs = [];
-      const wantShare = Math.random() < SHARE_P;
-      let shareAt = -1;
-      while (exprs.length < AVENUES) {
-        let a = MUL_A[0] + Math.floor(Math.random() * (MUL_A[1] - MUL_A[0] + 1));
-        let b = MUL_B[0] + Math.floor(Math.random() * (MUL_B[1] - MUL_B[0] + 1));
+    /* five products, one per magnitude band, so hole sizes and target
+       coin sizes both ascend left→right with clear separation */
+    const BANDS = [[8, 14], [28, 34], [44, 50], [60, 66], [76, 81]];
+    function productsIn(lo, hi) {
+      const out = [];
+      for (let a = 2; a <= 9; a++) for (let b = 2; b <= 9; b++) {
         const v = a * b;
-        if (wantShare && exprs.length === AVENUES - 1 && targets.length
-          && shareAt < 0) {
-          /* the last door shares an earlier product via different
-             factors — a correct path, not the correct path */
-          const v0 = targets[Math.floor(Math.random() * targets.length)];
-          const pairs = [];
-          for (let x = 2; x <= 9; x++) for (let y = 2; y <= 9; y++)
-            if (x * y === v0) pairs.push([x, y]);
-          if (pairs.length) {
-            const pick = pairs[Math.floor(Math.random() * pairs.length)];
-            exprs.push(pick[0] + '×' + pick[1]);
-            targets.push(v0);
-            shareAt = exprs.length - 1;
-            continue;
-          }
-        }
-        if (targets.includes(v)) continue;
-        targets.push(v);
-        exprs.push(a + '×' + b);
+        if (v >= lo && v <= hi) out.push([a, b, v]);
       }
-      aps = [];
-      for (let i = 0; i < AVENUES; i++) aps.push({
-        i, x: 0, y: 0, w: AP_W,
-        expr: exprs[i], val: targets[i],
-        slot: { x: 0, y: 0 },
-        seated: null, door: 0, flash: 0,
+      return out;
+    }
+    function deal() {
+      const seen = new Set();
+      holes = BANDS.map((band, i) => {
+        const opts = productsIn(band[0], band[1])
+          .filter(o => !seen.has(o[2]));
+        const pick = opts[Math.floor(Math.random() * opts.length)];
+        seen.add(pick[2]);
+        return {
+          i, x: 0, y: 0, expr: pick[0] + '×' + pick[1], val: pick[2],
+          tr: coinR(pick[2]), d: 0,
+          slot: { x: 0, y: 0 }, seated: null, bad: false, glint: 0,
+        };
       });
-      /* stock: one coin per target (two where doors share) + decoys */
-      const counts = {};
-      targets.forEach(v => counts[v] = (counts[v] || 0) + 1);
-      const vals = [];
-      Object.keys(counts).forEach(v => {
-        for (let k = 0; k < counts[v]; k++) vals.push(+v);
-      });
-      while (vals.length < AVENUES + STOCK_EXTRA + (shareAt >= 0 ? 1 : 0)) {
-        const near = targets[Math.floor(Math.random() * targets.length)];
-        const d = near + (Math.random() < 0.5 ? -1 : 1)
-          * (1 + Math.floor(Math.random() * 3));
-        if (d > 0 && !vals.includes(d)) vals.push(d);
+      holes.forEach(a => a.d = 2 * a.tr + HOLE_GAP);
+
+      /* stock: the five targets + decoys that misfile nearby */
+      const vals = holes.map(a => a.val);
+      const tMax = holes[AVENUES - 1].val;
+      if (Math.random() < BIG_P) {
+        /* a monster: bigger than the last hole, cup-bound on sight */
+        vals.push(Math.min(99, tMax + 15 + Math.floor(Math.random() * 8)));
+      }
+      while (vals.length < AVENUES + STOCK_EXTRA + 1) {
+        const t = vals[Math.floor(Math.random() * AVENUES)];
+        const d = t + (Math.random() < 0.5 ? -1 : 1)
+          * (1 + Math.floor(Math.random() * 4));
+        if (d > 0 && !vals.includes(d) && d < tMax + 15) vals.push(d);
       }
       vals.sort(() => Math.random() - 0.5);
       coins = vals.map(v => ({
-        v, x: 0, y: 0, r: 13 + Math.min(9, v * 0.10),
+        v, x: 0, y: 0, r: coinR(v),
         state: 'tray', roll: 0, vx: 0, vy: 0,
-        ap: -1, t: 0, falling: false,
+        hole: -1, t: 0, falling: false,
         retT: 0, retFrom: null, home: { x: 0, y: 0 },
         cupX: 0, cupY: 0,
       }));
@@ -198,10 +185,16 @@
       const p = pt(e);
       for (let i = coins.length - 1; i >= 0; i--) {
         const c = coins[i];
-        if ((c.state !== 'tray' && c.state !== 'cup')
-          || Math.hypot(p.x - c.x, p.y - c.y) > c.r + 12)
+        const grabbable = c.state === 'tray' || c.state === 'cup'
+          || c.state === 'seat';
+        if (!grabbable || Math.hypot(p.x - c.x, p.y - c.y) > c.r + 12)
           continue;
         if (c.state === 'cup') cupN--;
+        if (c.state === 'seat') {
+          const a = holes[c.hole];
+          a.seated = null; a.bad = false;
+          c.hole = -1;
+        }
         drag = i; c.state = 'drag'; c.retT = 0;
         touch = e.pointerType === 'touch';
         cv.setPointerCapture(e.pointerId);
@@ -248,7 +241,7 @@
         const ry = railYat(c.x) - c.r;
         if (c.y >= ry) {
           c.y = ry;
-          c.vx = 80 + c.vy * 0.12;   // landing momentum becomes roll
+          c.vx = 80 + c.vy * 0.12;
           c.state = 'roll';
         }
       } else if (c.state === 'roll') {
@@ -256,37 +249,38 @@
         c.x += c.vx * dt;
         c.y = railYat(c.x) - c.r;
         c.roll += c.vx * dt / c.r;
-        /* doors test the coin as it passes */
-        for (const a of aps) {
+        /* a coin falls into the first hole it fits — geometry sorts */
+        for (const a of holes) {
           if (a.seated) continue;
-          if (Math.abs(c.x - a.x) <= FALL_TOL) {
-            if (c.v === a.val) {
-              c.state = 'through'; c.ap = a.i; c.t = now; c.falling = false;
-              return;
-            }
-            a.flash = now;
+          if (Math.abs(c.x - a.x) <= a.d / 2 - 4 && 2 * c.r <= a.d) {
+            c.state = 'through'; c.hole = a.i; c.t = now;
+            c.falling = false;
+            return;
           }
         }
-        if (c.x >= rx1() - 6) {        // ran off the end
-          c.state = 'spill'; c.vy = 0;
-        }
+        if (c.x >= rx1() - 6) { c.state = 'spill'; c.vy = 0; }
       } else if (c.state === 'through') {
-        const a = aps[c.ap];
+        const a = holes[c.hole];
         if (!c.falling) {
-          /* centre over the mouth while the flap swings open */
-          const k = Math.min(1, (now - c.t) / DOOR_MS);
-          c.x += (a.x - c.x) * Math.min(1, dt * 14);
-          c.y = railYat(c.x) - c.r;
-          a.door = k;
-          if (k >= 1) { c.falling = true; c.vy = 40; }
+          /* sink to the hole mouth, then fall */
+          c.x += (a.x - c.x) * Math.min(1, dt * 16);
+          c.y += (railYat(c.x) - c.r * 0.4 - c.y) * Math.min(1, dt * 16);
+          if (now - c.t > 90) { c.falling = true; c.vy = 60; }
         } else {
           c.vy += GRAV * dt;
           c.y += c.vy * dt;
           c.x += (a.slot.x - c.x) * Math.min(1, dt * 10);
-          if (c.y >= a.slot.y) {
-            c.y = a.slot.y; c.x = a.slot.x;
-            c.state = 'seat'; a.seated = c; a.doorT = now;
-            if (aps.every(q => q.seated)) { phase = 'hold'; phaseT = now; }
+          /* each coin finds the pocket floor by its own size —
+             a wrong small coin sits visibly loose in the alcove */
+          const floor = H * SHELF_Y - 8 - c.r;
+          if (c.y >= floor) {
+            c.y = floor; c.x = a.slot.x;
+            c.state = 'seat'; a.seated = c;
+            a.bad = c.v !== a.val;
+            if (a.bad) a.glint = now;
+            if (holes.every(q => q.seated && !q.bad)) {
+              phase = 'hold'; phaseT = now;
+            }
           }
         }
       } else if (c.state === 'spill') {
@@ -316,7 +310,7 @@
         const e = 1 - (1 - k) * (1 - k);
         c.x = c.retFrom.x + (c.home.x - c.retFrom.x) * e;
         c.y = c.retFrom.y + (c.home.y - c.retFrom.y) * e;
-        if (k >= 1) { c.state = 'tray'; c.ap = -1; }
+        if (k >= 1) { c.state = 'tray'; c.hole = -1; }
       }
     }
 
@@ -345,7 +339,6 @@
     }
 
     function railSeg(x0, x1) {
-      /* one unbroken run of the rail beam between aperture edges */
       ctx.beginPath();
       ctx.moveTo(x0, railYat(x0));
       ctx.lineTo(x1, railYat(x1));
@@ -357,14 +350,14 @@
     function drawStructure(now, dy) {
       ctx.save(); ctx.translate(0, dy);
 
-      /* the rail, broken into runs around the apertures */
+      /* the rail, broken into runs around the holes */
       let edge = rx0();
-      aps.forEach(a => {
-        railSeg(edge, a.x - a.w / 2);
-        edge = a.x + a.w / 2;
+      holes.forEach(a => {
+        railSeg(edge, a.x - a.d / 2);
+        edge = a.x + a.d / 2;
       });
       railSeg(edge, rx1());
-      /* a downturned lip where coins leave */
+      /* downturned lip where coins leave */
       ctx.beginPath();
       ctx.moveTo(rx1(), railYat(rx1()) - 6);
       ctx.quadraticCurveTo(rx1() + 10, railYat(rx1()) - 2,
@@ -372,54 +365,50 @@
       ctx.lineWidth = 4; ctx.strokeStyle = '#4a5f70';
       ctx.lineCap = 'round'; ctx.stroke();
 
-      /* apertures: flap, criterion, pocket */
-      aps.forEach(a => {
-        const flapY = railYat(a.x);
-        /* the flap — hinged at its right edge, dips under a wrong coin,
-           swings open under the right one */
-        let dip = 0;
-        coins.forEach(c => {
-          if (c.state === 'roll' && c.v !== a.val
-            && Math.abs(c.x - a.x) < a.w / 2 + c.r)
-            dip = 3;
-        });
-        ctx.save();
-        ctx.translate(a.x + a.w / 2, flapY + dip);
-        const rot = a.door * 1.25;
-        ctx.rotate(rot);
+      holes.forEach(a => {
+        const hy = railYat(a.x);
+        /* the hole itself: a shadowed gap with lipped edges */
         ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(-a.w, -railSlopeAt() * a.w);
-        ctx.lineWidth = 9; ctx.strokeStyle = '#22303c';
+        ctx.ellipse(a.x, hy + 2, a.d / 2, 5.5, 0, 0, 7);
+        ctx.fillStyle = '#070c10'; ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = '#2c3c49'; ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(a.x - a.d / 2, hy);
+        ctx.lineTo(a.x - a.d / 2 - 3, hy + 7);
+        ctx.moveTo(a.x + a.d / 2, hy);
+        ctx.lineTo(a.x + a.d / 2 + 3, hy + 7);
+        ctx.lineWidth = 2.5; ctx.strokeStyle = '#4a5f70';
         ctx.lineCap = 'round'; ctx.stroke();
-        ctx.lineWidth = 2; ctx.strokeStyle = '#5a7080'; ctx.stroke();
-        ctx.restore();
         /* criterion, quiet, above the mouth */
         ctx.font = '600 13px Andika, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = 'rgba(160,175,190,.85)';
-        ctx.fillText(a.expr, a.x, flapY - 26);
-        /* a refused test flickers the mouth amber */
-        if (a.flash && now - a.flash < 450) {
-          ctx.beginPath();
-          ctx.arc(a.x, flapY - 4, 20, 0, 7);
-          ctx.strokeStyle = 'rgba(224,165,58,'
-            + (0.5 * (1 - (now - a.flash) / 450)) + ')';
-          ctx.lineWidth = 2.5; ctx.stroke();
-        } else a.flash = 0;
-        /* hangers from rail to the pocket */
+        ctx.fillText(a.expr, a.x, hy - a.d / 2 - 14);
+        /* hangers to the pocket */
         ctx.beginPath();
-        ctx.moveTo(a.x - a.w / 2 - 7, flapY + 5);
-        ctx.lineTo(a.x - a.w / 2 - 7, a.slot.y + 14);
-        ctx.moveTo(a.x + a.w / 2 + 7, flapY + 5);
-        ctx.lineTo(a.x + a.w / 2 + 7, a.slot.y + 14);
+        ctx.moveTo(a.x - a.d / 2 - 7, hy + 6);
+        ctx.lineTo(a.x - a.d / 2 - 7, a.slot.y + a.tr + 10);
+        ctx.moveTo(a.x + a.d / 2 + 7, hy + 6);
+        ctx.lineTo(a.x + a.d / 2 + 7, a.slot.y + a.tr + 10);
         ctx.lineWidth = 3; ctx.strokeStyle = '#2c3c49'; ctx.stroke();
-        /* the pocket alcove */
+        /* the pocket alcove, sized to its target coin */
+        const pw = a.tr + 5;
         ctx.beginPath();
-        ctx.moveTo(a.x - 17, a.slot.y + 10);
-        ctx.lineTo(a.x - 17, a.slot.y - 12);
-        ctx.moveTo(a.x + 17, a.slot.y + 10);
-        ctx.lineTo(a.x + 17, a.slot.y - 12);
+        ctx.moveTo(a.x - pw, a.slot.y + a.tr + 8);
+        ctx.lineTo(a.x - pw, a.slot.y - a.tr - 4);
+        ctx.moveTo(a.x + pw, a.slot.y + a.tr + 8);
+        ctx.lineTo(a.x + pw, a.slot.y - a.tr - 4);
         ctx.lineWidth = 3; ctx.strokeStyle = '#33424e'; ctx.stroke();
+        /* a wrong coin draws a slow amber pulse on its pocket */
+        if (a.bad && a.glint) {
+          const k = (now - a.glint) / 900;
+          const alpha = k < 1 ? 0.55 * (1 - k)
+            : 0.25 + 0.2 * Math.sin(now / 420);
+          ctx.beginPath();
+          ctx.arc(a.x, a.slot.y, a.tr + 8, 0, 7);
+          ctx.strokeStyle = 'rgba(224,165,58,' + alpha.toFixed(3) + ')';
+          ctx.lineWidth = 2.5; ctx.stroke();
+        }
       });
 
       /* the plank uniting the pockets — the shelf that descends */
@@ -428,16 +417,12 @@
       ctx.moveTo(pL, H * SHELF_Y); ctx.lineTo(pR, H * SHELF_Y);
       ctx.lineWidth = 8; ctx.strokeStyle = '#22303c'; ctx.stroke();
       ctx.lineWidth = 2; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
-      /* legs make it read as a lift car */
       ctx.beginPath();
       ctx.moveTo(pL + 10, H * SHELF_Y + 4); ctx.lineTo(pL + 10, H * SHELF_Y + 46);
       ctx.moveTo(pR - 10, H * SHELF_Y + 4); ctx.lineTo(pR - 10, H * SHELF_Y + 46);
       ctx.lineWidth = 5; ctx.strokeStyle = '#22303c'; ctx.stroke();
 
       ctx.restore();
-    }
-    function railSlopeAt() {
-      return (RAIL_Y1 - RAIL_Y0) * H / ((RAIL_X1 - RAIL_X0) * W);
     }
 
     function drawCup() {
@@ -448,7 +433,6 @@
       ctx.lineTo(x1 - 8, yb); ctx.lineTo(x1, yt);
       ctx.lineWidth = 5; ctx.strokeStyle = '#22303c'; ctx.stroke();
       ctx.lineWidth = 1.5; ctx.strokeStyle = '#3d4f5f'; ctx.stroke();
-      /* a short chute from the rail lip to the cup mouth */
       ctx.beginPath();
       ctx.moveTo(rx1() + 12, railYat(rx1()) + 14);
       ctx.quadraticCurveTo(rx1() + 26, yt - 40, x0 + 12, yt - 4);
@@ -464,7 +448,6 @@
         ctx.fillStyle = '#0d141a';
         ctx.fillRect(0, 0, W, H);
 
-        /* phase transitions */
         if (phase === 'hold' && now - phaseT > HOLD_MS) {
           phase = 'descend'; phaseT = now;
         } else if (phase === 'descend') {
@@ -483,14 +466,6 @@
         if (phase === 'descend') dy = ease(descendK) * (H * SHELF_Y + 220);
         if (phase === 'arrive') dy = -(1 - ease(arriveK)) * (H * SHELF_Y + 220);
 
-        /* flap doors ease shut behind a seated coin */
-        aps.forEach(a => {
-          if (a.seated && a.doorT) {
-            const k = Math.min(1, (now - a.doorT) / 420);
-            a.door = Math.max(0, 1 - k * 0.55);  // settle ajar
-          }
-        });
-
         coins.forEach(c => {
           if (c.state !== 'tray' && c.state !== 'drag' && c.state !== 'seat')
             step(c, dt, now);
@@ -498,18 +473,15 @@
 
         drawStructure(now, dy);
 
-        /* coins that ride the structure descend with it */
         ctx.save(); ctx.translate(0, dy);
         coins.forEach(c => {
           if (c.state === 'plop' || c.state === 'roll'
             || c.state === 'through' || c.state === 'seat')
             drawCoin(c, false);
         });
-        /* a ghost where a dragged coin would land */
         if (drag >= 0) {
           const c = coins[drag];
-          const dy2 = c.y;
-          if (overRail(c.x, dy2)) {
+          if (overRail(c.x, c.y)) {
             const ry = railYat(c.x) - c.r;
             ctx.beginPath(); ctx.arc(c.x, ry, c.r, 0, 7);
             ctx.strokeStyle = 'rgba(53,199,149,.5)';
@@ -524,7 +496,6 @@
         }
         ctx.restore();
 
-        /* the reject cup — floor furniture, stays put */
         drawCup();
         coins.forEach(c => {
           if (c.state === 'spill' || c.state === 'cup'
@@ -532,7 +503,6 @@
             drawCoin(c, false);
         });
 
-        /* ---- tray ---- */
         ctx.fillStyle = 'rgba(14,20,26,.88)';
         ctx.fillRect(0, H - TRAY_H, W, TRAY_H);
         ctx.strokeStyle = '#22303c'; ctx.beginPath();

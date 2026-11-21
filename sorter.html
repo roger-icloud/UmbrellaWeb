@@ -55,7 +55,10 @@
     const RAIL_X1 = 0.86;
     const AP_X0 = 0.17;          // hole band along the rail
     const AP_X1 = 0.72;
-    const HOLE_GAP = 7;          // hole diameter = coin diameter + this
+    const HOLE_GAP = 3;          // hole diameter = coin diameter + this
+                                 // (band gaps are >=10 values; clearance must
+                                 // stay under 0.44*gap or an oversized coin
+                                 // squeezes through a smaller hole)
     const SHELF_Y = 0.63;        // plank the pockets hang on
     const CUP_L = 0.845, CUP_T = 0.71, CUP_B = 0.815;  // reject bin
     const TRAY_H = 96;

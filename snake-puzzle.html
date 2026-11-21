@@ -759,6 +759,9 @@
     let moves = null;         // [{path objects}, ...]
     let moveT0 = 0, moveMode = '';
     let headFade = null;      // {t, t0} — numeral fading at its station
+    let ghost = null;         /* {t0, dur} — the herald: a pale partner
+                                 dancing beside the homecoming snake,
+                                 announcing the duet rung (Roger) */
     function beginEnter() {
       const st = stations();
       moves = duoOn
@@ -796,6 +799,12 @@
            { list: segs2, path: buildPathHome(segs2, st[table2 - 2]) }]
         : [{ list: segs, path: buildPathHome(segs, st[table - 2]) }];
       moveMode = 'leave'; moveT0 = performance.now();
+      /* a solo finish that just promoted the ladder to two snakes is
+         heralded by the ghost's dance during the homecoming */
+      ghost = !duoOn && duoNext
+        ? { t0: moveT0,
+            dur: Math.max(...moves.map(m => m.path.D)) / LEAVE_SPEED }
+        : null;
       doneBar.classList.remove('show');
       state = 'leave';
     }
@@ -826,7 +835,7 @@
         moves = null; state = 'play'; layout();
       } else {
         /* home: the rail is the "again" */
-        moves = null; headFade = null;
+        moves = null; headFade = null; ghost = null;
         segs = []; rail = []; segs2 = []; rail2 = [];
         spawned = null; remaining = [];
         hasInteracted = false;
@@ -843,12 +852,22 @@
       const outT = isOut ? table : 0;
       const outT2 = duoOn && isOut ? table2 : 0;
       const pm = partnerMode();
+      /* the chosen snake stays at its station, awake — eyes toward the
+         partners on offer, ring pulsing — so its place in the row
+         explains itself (Roger: its absence was puzzling) */
+      let offerMid = W / 2;
+      if (pm) {
+        const xs = st.filter(o => o.t !== table && duoOk([table, o.t]))
+          .map(o => o.x);
+        if (xs.length) offerMid = (Math.min(...xs) + Math.max(...xs)) / 2;
+      }
       ctx.save();
       st.forEach(h => {
+        const chosen = pm && h.t === table;
         const valid = !pm || (h.t !== table && duoOk([table, h.t]));
         /* partner mode shows only the heads genuinely on offer —
            empty stations stay empty (Roger, 2026-11-21) */
-        if (pm && !valid) return;
+        if (pm && !valid && !chosen) return;
         const out = h.t === outT || h.t === outT2;
         const dim = quiet;
         const a = out ? 0 : dim ? 0.3 : 1;
@@ -863,13 +882,29 @@
           return;
         }
         ctx.globalAlpha = a;
-        /* the shared head drawn small for the rail */
+        /* the shared head drawn small for the rail — the chosen one
+           stays awake: a soft bob, eyes on the partners on offer */
         ctx.save();
         ctx.translate(h.x, h.y);
         ctx.scale(h.r / (segD / 2), h.r / (segD / 2));
         ctx.translate(-h.x, -h.y);
-        drawHead({ x: h.x, y: h.y }, null, h.t, now);
+        drawHead({ x: h.x, y: h.y }, null, h.t, now, 0,
+          chosen ? {
+            l: 1, r: 1,
+            bob: 0.05 * Math.sin(now / 350),
+            gx: Math.max(-0.35, Math.min(0.35, (offerMid - h.x) / W * 2)),
+            gy: -0.05
+          } : undefined);
         ctx.restore();
+        if (chosen) {
+          /* the waiting ring pulses gently: "picked; find me a
+             partner" — a pulse, not a badge */
+          const pk = 0.4 + 0.3 * Math.sin(now / 300);
+          ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 4, 0, 7);
+          ctx.strokeStyle = 'hsla(' + ((h.t * 31 + 200) % 360) +
+            ',65%,60%,' + pk.toFixed(3) + ')';
+          ctx.lineWidth = 2; ctx.stroke();
+        }
         const m = MADE_RING > 0 && made.includes(h.t);
         if (m) {
           ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 3, 0, 7);
@@ -946,10 +981,19 @@
       // nearest bead within tolerance, across however many snakes
       const lists = duoOn ? [segs, segs2] : [segs];
       let hit = null, hitSn = 0, hitI = -1, bestD = segD * DROP_TOL;
+      /* the crossover stacks two coincident beads: once one snake's
+         copy is filled the first-found wins the hit test and the
+         second shared disk gets refused (Roger 2026-11-21). A
+         droppable bead anywhere in tolerance must win the pick. */
+      let good = null, goodSn = 0, goodI = -1, goodD = bestD;
       lists.forEach((L, sn) => L.forEach((s, i) => {
         const d = Math.hypot(p.x - s.x, ey - s.y);
         if (d < bestD) { bestD = d; hit = s; hitSn = sn; hitI = i; }
+        if (s.blank && s.expected === spawned.value && d < goodD) {
+          goodD = d; good = s; goodSn = sn; goodI = i;
+        }
       }));
+      if (good) { hit = good; hitSn = goodSn; hitI = goodI; }
       if (hit && hit.blank && hit.expected === spawned.value) {
         if (duoOn && spawned.sn >= 0) {
           /* the crossover is ONE bead claimed by both snakes — the drop
@@ -1238,6 +1282,45 @@
 
       // the snakes to draw — B first so the shared bead (drawn in A's
       // pass, wearing both colours) sits on top
+      /* the herald: while the finished snake slinks home, a pale
+         partner dances its mirror across the board — the wordless
+         announcement that the next round wants two (Roger 2026-11-21).
+         It peaks mid-journey and is gone before the real snake parks */
+      if (ghost && segs.length) {
+        const gk = Math.min(1,
+          (now - ghost.t0) / 1000 / (ghost.dur * 0.75));
+        const ga = Math.sin(gk * Math.PI) * 0.34;
+        if (ga > 0.01) {
+          const mcx = bX + bW / 2;
+          const gl = segs.map(s => ({ x: 2 * mcx - s.x, y: s.y }));
+          ctx.globalAlpha = ga;
+          ctx.beginPath();
+          gl.forEach((s, i) => i ? ctx.lineTo(s.x, s.y)
+            : ctx.moveTo(s.x, s.y));
+          ctx.strokeStyle = 'rgba(150,170,190,.8)';
+          ctx.lineWidth = 3; ctx.stroke();
+          for (let i = gl.length - 1; i >= 0; i--) {
+            const s = gl[i], r = segD / 2;
+            ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
+            ctx.fillStyle = 'rgba(150,170,190,.9)'; ctx.fill();
+            if (i === 0) {
+              /* a face for the ghost — eyes on its mirrored heading */
+              const n = gl[1],
+                ha = Math.atan2(s.y - n.y, s.x - n.x);
+              const ex = Math.cos(ha), ey = Math.sin(ha),
+                px = -ey, py = ex;
+              [-1, 1].forEach(side => {
+                ctx.beginPath();
+                ctx.arc(s.x + ex * r * 0.38 + px * side * r * 0.36,
+                  s.y + ey * r * 0.38 + py * side * r * 0.36,
+                  r * 0.16, 0, 7);
+                ctx.fillStyle = '#101418'; ctx.fill();
+              });
+            }
+          }
+          ctx.globalAlpha = 1;
+        }
+      }
       const snakes = duoOn
         ? [{ list: segs2, tbl: table2, wob: wob2, sn: 1 },
            { list: segs, tbl: table, wob, sn: 0 }]

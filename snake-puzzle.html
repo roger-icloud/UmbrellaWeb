@@ -365,6 +365,8 @@
     const ENTER_DELAY = 0.38;   // s of blink before the stretch
     const ENTER_SPEED = 640;    // px/s the head travels along the path
     const LEAVE_SPEED = 760;    // home is a little quicker than away
+    const DANCE_SPEED = 560;    // the duet wanders, doesn't hurry
+    const DANCE_PTS = 3;        // waypoints the heralded snake visits
     const HEAD_R = 0.36;        // station head radius, × segD
 
     /* two snakes sharing one bead — rung 2 of the tables progression
@@ -792,6 +794,41 @@
       const sI = list.map((_, i) => cum[cum.length - 2 - i]);
       return { pts, cum, sI, D: cum[cum.length - 1] };
     }
+    /* the duet announcement (Roger, 2026-11-21): before going home the
+       finished snake tours a few random points while a pale ghost
+       dances its mirror — long enough for the thought "there can be
+       two" to land. Three waypoints, spread so the dance travels. */
+    function dancePoints(hx, hy) {
+      const M = segD * 1.2, pts = [];
+      let px = hx, py = hy, guard = 0;
+      while (pts.length < DANCE_PTS && guard++ < 200) {
+        const x = bX + M + Math.random() * (bW - 2 * M);
+        const y = bY + M + Math.random() * (bH - 2 * M);
+        if (Math.hypot(x - px, y - py) < Math.min(bW, bH) * 0.3)
+          continue;
+        pts.push({ x, y }); px = x; py = y;
+      }
+      return pts;
+    }
+    function beginDance() {
+      /* the path is the snake's own spine (each bead starts exactly
+         where it lies) extended by the three waypoints — the head
+         leads off the pose and the body pours after it, conga-style */
+      const pts = [];
+      for (let i = segs.length - 1; i >= 0; i--)
+        pts.push({ x: segs[i].x, y: segs[i].y });
+      dancePoints(segs[0].x, segs[0].y).forEach(p => pts.push(p));
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++)
+        cum.push(cum[i - 1] + Math.hypot(
+          pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      const sI = segs.map((_, i) => cum[cum.length - 4 - i]);
+      moves = [{ list: segs,
+        path: { pts, cum, sI, D: cum[cum.length - 1] } }];
+      moveMode = 'dance'; moveT0 = performance.now();
+      ghost = { t0: moveT0, t1: 0 };
+      state = 'dance';
+    }
     function beginLeave() {
       const st = stations();
       moves = duoOn
@@ -799,17 +836,13 @@
            { list: segs2, path: buildPathHome(segs2, st[table2 - 2]) }]
         : [{ list: segs, path: buildPathHome(segs, st[table - 2]) }];
       moveMode = 'leave'; moveT0 = performance.now();
-      /* a solo finish that just promoted the ladder to two snakes is
-         heralded by the ghost's dance during the homecoming */
-      ghost = !duoOn && duoNext
-        ? { t0: moveT0,
-            dur: Math.max(...moves.map(m => m.path.D)) / LEAVE_SPEED }
-        : null;
+      if (ghost) ghost.t1 = moveT0;   // ghost fades out of the way home
       doneBar.classList.remove('show');
       state = 'leave';
     }
     function stepMove(now) {
-      const speed = moveMode === 'enter' ? ENTER_SPEED : LEAVE_SPEED;
+      const speed = moveMode === 'enter' ? ENTER_SPEED
+        : moveMode === 'dance' ? DANCE_SPEED : LEAVE_SPEED;
       const t = moveMode === 'enter'
         ? Math.max(0, (now - moveT0) / 1000 - ENTER_DELAY)
         : (now - moveT0) / 1000;
@@ -831,6 +864,7 @@
         });
       });
       if (!allDone) return;
+      if (moveMode === 'dance') { beginLeave(); return; }
       if (moveMode === 'enter') {
         moves = null; state = 'play'; layout();
       } else {
@@ -1222,7 +1256,8 @@
       }
       /* entering or leaving: the snake rides its path; positions get
          written into segs so the usual body draw below does the rest */
-      if (state === 'enter' || state === 'leave') stepMove(now);
+      if (state === 'enter' || state === 'leave' || state === 'dance')
+        stepMove(now);
       // the celebration's clock: 0 while playing
       const el = state === 'celebrate' ? (now - cheerT) / 1000
         : state === 'done' ? Infinity : -1;
@@ -1232,7 +1267,11 @@
       if (state === 'celebrate' && el >= Math.max(ASK_AT, actEnd)) {
         /* heads mode: no prompt — the snake slinks home and the rail
            itself is the "again?" (Roger, 2026-11-21) */
-        if (HEADS) beginLeave(); else showDone();
+        /* a solo finish that just promoted the ladder to two snakes
+           gets the duet announcement first — the ghost's dance */
+        if (HEADS) {
+          if (!duoOn && duoNext) beginDance(); else beginLeave();
+        } else showDone();
       }
       const ease = k => { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); };
       const face = el < 0 ? 0 : ease((el - LOOK_AT) / LOOK_SECS);
@@ -1287,9 +1326,13 @@
          announcement that the next round wants two (Roger 2026-11-21).
          It peaks mid-journey and is gone before the real snake parks */
       if (ghost && segs.length) {
-        const gk = Math.min(1,
-          (now - ghost.t0) / 1000 / (ghost.dur * 0.75));
-        const ga = Math.sin(gk * Math.PI) * 0.34;
+        /* the ghost fades in over the dance's first steps, holds
+           through the tour, then dissolves on the way home */
+        let ga = 0;
+        if (state === 'dance')
+          ga = Math.min(1, (now - ghost.t0) / 500) * 0.34;
+        else if (state === 'leave')
+          ga = Math.max(0, 0.34 * (1 - (now - ghost.t1) / 900));
         if (ga > 0.01) {
           const mcx = bX + bW / 2;
           const gl = segs.map(s => ({ x: 2 * mcx - s.x, y: s.y }));

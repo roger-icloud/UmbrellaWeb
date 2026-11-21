@@ -417,6 +417,31 @@
     }
     try { rung = +sessionStorage.getItem(RUNG_KEY) || 0; } catch (e) {}
     if (qs.has('rung')) setRung((+qs.get('rung') || 1) - 1);
+    /* the rail shows only earned heads (Roger, 2026-11-21): a solitary
+       ×2 at first; every completion earns the next numeral into the
+       row, revealed as the snake arrives home. Unearned stations are
+       simply absent — never padlocked, never grey */
+    const UNLOCK_KEY = 'snakePuzzleUnlocked';
+    let unlocked = [];
+    try {
+      unlocked = JSON.parse(sessionStorage.getItem(UNLOCK_KEY)) || [];
+    } catch (e) {}
+    if (!unlocked.length) unlocked = [2];
+    if (qs.has('t') && !unlocked.includes(+qs.get('t')))
+      unlocked.push(+qs.get('t'));
+    function grantUnlock() {
+      const fr = Math.max(...unlocked);
+      if (fr < 12 && !unlocked.includes(fr + 1)) {
+        unlocked.push(fr + 1);
+        try {
+          sessionStorage.setItem(UNLOCK_KEY, JSON.stringify(unlocked));
+        } catch (e) {}
+        return fr + 1;
+      }
+      return 0;
+    }
+    let pendingReveal = 0;      // a table earned this round, awaiting
+    let revealT = null;         // {t, t0} — its arrival animation
     // the tables finished this visit — their chips keep a faint ring
     const MADE_KEY = 'snakePuzzleMade';
     let made = [];
@@ -874,6 +899,12 @@
         spawned = null; remaining = [];
         hasInteracted = false;
         duoOn = false;
+        if (pendingReveal) {
+          /* the earned head materialises at its station a breath
+             after the snake parks — arrival as spectacle */
+          revealT = { t: pendingReveal, t0: now + 350 };
+          pendingReveal = 0;
+        }
         state = 'choose';
       }
     }
@@ -885,26 +916,52 @@
         state === 'enter' || state === 'leave';
       const outT = isOut ? table : 0;
       const outT2 = duoOn && isOut ? table2 : 0;
-      const pm = partnerMode();
+      /* the partners genuinely on offer: earned heads that cross the
+         played table. None at all → partner mode stands down and the
+         child picks any earned snake as usual */
+      function partnerOffer() {
+        return partnerMode() ? st.filter(o =>
+          o.t !== table && unlocked.includes(o.t) &&
+          duoOk([table, o.t])) : [];
+      }
+      const offer = partnerOffer();
+      const pm = offer.length > 0;
       /* the chosen snake stays at its station, awake — eyes toward the
          partners on offer, ring pulsing — so its place in the row
          explains itself (Roger: its absence was puzzling) */
       let offerMid = W / 2;
-      if (pm) {
-        const xs = st.filter(o => o.t !== table && duoOk([table, o.t]))
-          .map(o => o.x);
-        if (xs.length) offerMid = (Math.min(...xs) + Math.max(...xs)) / 2;
-      }
+      if (pm)
+        offerMid = (Math.min(...offer.map(o => o.x)) +
+          Math.max(...offer.map(o => o.x))) / 2;
       ctx.save();
       st.forEach(h => {
+        /* unearned heads are simply absent — the row grows by
+           completion, never by padlock; a head still awaiting its
+           reveal hasn't landed yet either */
+        if (!unlocked.includes(h.t) || pendingReveal === h.t) return;
         const chosen = pm && h.t === table;
         const valid = !pm || (h.t !== table && duoOk([table, h.t]));
-        /* partner mode shows only the heads genuinely on offer —
-           empty stations stay empty (Roger, 2026-11-21) */
-        if (pm && !valid && !chosen) return;
+        /* in partner mode invalid heads dim rather than vanish —
+           "available" is shown by which heads stay awake */
+        const asleep = pm && !valid && !chosen;
         const out = h.t === outT || h.t === outT2;
         const dim = quiet;
-        const a = out ? 0 : dim ? 0.3 : 1;
+        let a = out ? 0 : (dim || asleep) ? 0.3 : 1;
+        /* the reveal: the newly earned head swells into its station —
+           a soft ring expanding ahead of it */
+        let rk = 1;
+        if (revealT && h.t === revealT.t) {
+          rk = Math.max(0, Math.min(1, (now - revealT.t0) / 900));
+          if (rk >= 1) revealT = null;
+          else {
+            a *= rk * rk * (3 - 2 * rk);
+            ctx.beginPath();
+            ctx.arc(h.x, h.y, h.r * (1 + 1.2 * (1 - rk)), 0, 7);
+            ctx.strokeStyle = 'hsla(' + ((h.t * 31 + 200) % 360) +
+              ',65%,60%,' + (0.5 * (1 - rk)).toFixed(3) + ')';
+            ctx.lineWidth = 2; ctx.stroke();
+          }
+        }
         if (out) {
           /* the ghost: a faint numeral keeps the out snake's place —
              settles down from the button's alpha as it departs */
@@ -969,11 +1026,18 @@
       /* a dormant head tapped on the rail: blink, and stretch out */
       if (HEADS && state === 'choose' && !demo) {
         const p = pt(e);
-        for (const h of stations()) {
+        const st = stations();
+        const offer = partnerMode() ? st.filter(o =>
+          o.t !== table && unlocked.includes(o.t) &&
+          duoOk([table, o.t])) : [];
+        for (const h of st) {
+          if (!unlocked.includes(h.t)) continue;   // unearned = absent
           if (Math.hypot(p.x - h.x, p.y - h.y) > h.r * 1.6) continue;
           blinkT0 = performance.now();
-          if (partnerMode()) {
-            if (h.t === table || !duoOk([table, h.t])) return;
+          /* a waiting chosen snake accepts only a genuine partner;
+             no partners on offer at all → any earned head plays solo */
+          if (offer.length) {
+            if (!offer.some(o => o.t === h.t)) return;
             duoPick = h.t;
           } else table = h.t;
           deal();
@@ -1073,6 +1137,9 @@
         : misses >= ROW_BACK ? -1 : 1));
       addMade(table);
       if (duoOn) addMade(table2);
+      /* every completion earns the next head into the row — the
+         reveal plays when the snake arrives home */
+      pendingReveal = grantUnlock();
       UW.completed('puzzle', duoOn ? [table, table2] : [table]);
       doneMs = Math.round(performance.now() - startT);
       cheerT = performance.now();

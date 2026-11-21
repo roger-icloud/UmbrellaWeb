@@ -774,12 +774,27 @@
         (ENTER_DELAY + dur) * 1000 + 350;
       state = 'enter';
     }
+    /* the way home runs nose-first (Roger: the completed snake must
+       not "lead with its arse"): path = tail … head → station, so the
+       head arrives first and the body feeds in behind it */
+    function buildPathHome(list, station) {
+      const pts = [];
+      for (let i = list.length - 1; i >= 0; i--)
+        pts.push({ x: list[i].x, y: list[i].y });
+      pts.push({ x: station.x, y: station.y });
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++)
+        cum.push(cum[i - 1] + Math.hypot(
+          pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      const sI = list.map((_, i) => cum[cum.length - 2 - i]);
+      return { pts, cum, sI, D: cum[cum.length - 1] };
+    }
     function beginLeave() {
       const st = stations();
       moves = duoOn
-        ? [{ list: segs,  path: buildPath(segs,  st[table - 2]) },
-           { list: segs2, path: buildPath(segs2, st[table2 - 2]) }]
-        : [{ list: segs, path: buildPath(segs, st[table - 2]) }];
+        ? [{ list: segs,  path: buildPathHome(segs,  st[table - 2]) },
+           { list: segs2, path: buildPathHome(segs2, st[table2 - 2]) }]
+        : [{ list: segs, path: buildPathHome(segs, st[table - 2]) }];
       moveMode = 'leave'; moveT0 = performance.now();
       doneBar.classList.remove('show');
       state = 'leave';
@@ -799,7 +814,10 @@
         const q = moveMode === 'enter' ? D * (1 - e) : D * e;
         if (k < 1) allDone = false;
         m.list.forEach((s, i) => {
-          const p = pathPoint(m.path, m.path.sI[i] - q);
+          const at = moveMode === 'enter'
+            ? Math.max(0, m.path.sI[i] - q)
+            : Math.min(D, m.path.sI[i] + q);
+          const p = pathPoint(m.path, at);
           s.x = p.x; s.y = p.y;
         });
       });

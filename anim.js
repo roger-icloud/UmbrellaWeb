@@ -921,6 +921,15 @@ window.Anim = (function () {
     tipArc = 0; hole = null; holeArc = null; script = [];
     spinning = false; whirlpool = false; spinProg = 0;
     ring = null; glowT0 = -1; stillK = 1;
+    /* every run starts clean (2026-11-22, the second-completion bug):
+       these used to reset only in startDepart — but 'beat' lasts
+       ~1.4s, and the roost block keys on denHome alone, so a stale
+       denHome+denDone+old roostT ended run 2 in a single frame with
+       the !denDone guard swallowing the second onDone — blank screen,
+       locked row. begin() is the invariant: no leftovers. */
+    denHome = false; denDone = false; gather = 0; denHomeT = 0;
+    roost = false; roostT = 0;
+    seats = null; pile = null; fidgets = null; twistSt = null;
     prevNow = t0;
     gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
     nextBlinkAt = t0 + 2000 + rng() * 2000;

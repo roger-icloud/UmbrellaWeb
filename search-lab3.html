@@ -53,37 +53,6 @@
       position: absolute;
     }
 
-    #chipRow {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: center;
-      padding: 0 12px;
-      z-index: 5;
-    }
-
-    #chipRow button {
-      min-width: 44px;
-      height: 44px;
-      font-size: 15px;
-      font-family: inherit;
-      border-radius: 10px;
-      border: 1px solid #3a4a58;
-      background: rgba(30, 42, 54, .9);
-      color: #cfd8e0;
-      cursor: pointer;
-    }
-
-    #chipRow button.on {
-      border-color: #4da3ff;
-      color: #fff;
-      background: rgba(40, 64, 88, .95);
-    }
-
     #again {
       position: fixed;
       right: 14px;
@@ -126,10 +95,10 @@
       <div id="boardBack"></div>
     </div>
   </div>
-  <div id="chipRow"></div>
   <button id="again">Again ▸</button>
   <div id="params"></div>
 
+  <script src="anim.js?v=23"></script>
   <script src="progress.js"></script>
 
   <script>
@@ -316,15 +285,56 @@
       cv.width = W * DPR; cv.height = H * DPR;
       cv.style.width = W + 'px'; cv.style.height = H + 'px';
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      layoutHeadSt();
     }
     window.addEventListener('resize', resize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
-
+    /* heads lay out in resize() — needs W/H, runs before the comb
+       geometry */
     const tableColour = t => 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)';
     /* a dash of the cuisenaire colour: the table's hue lifted to a
        pastel, for the lens's inverted possibles (Roger, 2026-11-10) */
     const tableTint = t => 'hsl(' + ((t * 31 + 200) % 360) + ',55%,80%)';
     const VP = Math.sqrt(3) / 2;       // vertical pitch of hex packing
+
+    /* the picker is canvas station heads (Roger 2026-11-22 — "heads
+       that promise"): up to three awake at once; the heads you wake
+       are the tables you play. Only ×2–×10 are offered — ×11/×12
+       wait, as before. */
+    let headSt = [];
+    function layoutHeadSt() {
+      const n = T_MAX - 1, edge = 10;
+      const spacing = (W - edge * 2) / n;
+      const r = Math.min(24, spacing / 2 - 1.5);
+      const y = H - r - 12;
+      headSt = [];
+      for (let i = 0; i < n; i++)
+        headSt.push({ t: i + 2, x: edge + spacing * (i + 0.5), y, r });
+    }
+    function headBlinkSq(h, now) {
+      if (h.bA === undefined) h.bA = now + Math.random() * 5000;
+      if (h.b0 === undefined || h.b0 < 0) {
+        if (now < h.bA) return 1;
+        h.b0 = now;
+      }
+      const k = (now - h.b0) / 280;
+      if (k >= 1) {
+        h.b0 = -1;
+        h.bA = now + 2400 + Math.random() * 3600;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+    function pickHead(t) {
+      let sel = tables.includes(t)
+        ? tables.filter(x => x !== t)
+        : (tables.length < MAX_TABLES ? [...tables, t] : tables);
+      if (!sel.length) sel = [t];          // one head stays lit, as before
+      const wh = headSt[t - 2];
+      if (wh) wh.b0 = performance.now();
+      document.getElementById('again').style.display = 'none';
+      deal(sel.sort((a, b2) => a - b2));
+    }
 
     /* ---------- the comb ----------
        axial coords: hexagon |q|,|r|,|q+r| <= SIDE-1. Straight lines
@@ -691,6 +701,10 @@
     }
 
     cv.addEventListener('pointerdown', e => {
+      /* a head tap toggles its table any time — heads never lock */
+      const ph = headSt.find(h =>
+        Math.hypot(e.clientX - h.x, e.clientY - h.y) <= h.r * 1.5);
+      if (ph) { pickHead(ph.t); press = { mode: 'head' }; return; }
       if (state !== 'play') return;
       press = { x: e.clientX, y: e.clientY, mode: null, type: e.pointerType };
       if (cv.setPointerCapture) cv.setPointerCapture(e.pointerId);
@@ -714,6 +728,7 @@
     function release(e, claim) {
       if (press && press.mode === null && claim && state === 'play')
         claimAt(e.clientX, e.clientY);
+      if (press && press.mode === 'head') { press = null; return; }
       if (halo && !halo.hover)
         halo.held = (press && press.mode === 'lens')
           ? performance.now()                // freeze for the linger
@@ -903,6 +918,32 @@
         if (FLIP !== 'tumble')
           document.getElementById('again').style.display = 'block';
       }
+
+      /* the head rail — chosen tables stand awake; capped-out tables
+         dim a touch ("that's enough for this board" said by light) */
+      for (const h of headSt) {
+        const on = tables.includes(h.t);
+        const cap = !on && tables.length >= MAX_TABLES;
+        ctx.save();
+        ctx.globalAlpha = cap ? 0.42 : 1;
+        Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
+          now, 0, on ? { l: 1, r: 1, bob: 1 } : undefined,
+          -Math.PI / 2, headBlinkSq(h, now));
+        const hue = (h.t * 31 + 200) % 360;
+        if (on) {
+          ctx.strokeStyle = `hsla(${hue},65%,60%,.7)`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(240,246,255,0.85)';
+        ctx.font = '600 ' + Math.round(h.r * 0.55) +
+          'px Andika, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('×' + h.t, h.x, h.y + h.r * 0.42);
+        ctx.restore();
+      }
     }
 
     /* tumble holds on its back — snake side up — until the next tap,
@@ -1088,37 +1129,7 @@
       }
     }
 
-    /* ---------- chips / again / label ---------- */
-    const chipRow = document.getElementById('chipRow');
-    const chipOn = () => [...chipRow.children]
-      .map((b, i) => b.classList.contains('on') ? i + 2 : 0)
-      .filter(Boolean);
-
-    function syncChips() {
-      /* Roger 2026-11-18: once the cap is reached the rest dim a touch —
-         "that's enough for this board" said by light, not locks */
-      [...chipRow.children].forEach((b, i) =>
-        b.classList.toggle('uw-cap',
-          tables.length >= MAX_TABLES && !tables.includes(i + 2)));
-      [...chipRow.children].forEach((b, i) =>
-        b.classList.toggle('on', tables.includes(i + 2)));
-      UW.paint(chipRow, 'search');
-    }
-
-    for (let t = 2; t <= T_MAX; t++) {
-      const b = document.createElement('button');
-      b.textContent = '×' + t;
-      b.addEventListener('click', () => {
-        let sel = chipOn();
-        if (sel.includes(t)) sel = sel.filter(x => x !== t);
-        else if (sel.length < MAX_TABLES) sel.push(t);
-        if (!sel.length) sel = [t];
-        document.getElementById('again').style.display = 'none';
-        deal(sel.sort((a, b2) => a - b2));
-        syncChips();
-      });
-      chipRow.appendChild(b);
-    }
+    /* ---------- again / label ---------- */
     document.getElementById('again').addEventListener('click', e => {
       e.target.style.display = 'none';
       deal(tables);
@@ -1142,7 +1153,6 @@
     /* Roger 2026-11-18: open uncommitted — lit chips over an empty
        board; the first tap deals. ?tables= still jumps straight in. */
     if (wanted.length) deal(wanted);
-    syncChips();
     UW.boot('search');
     resize();
     draw(performance.now());            // synchronous first paint
@@ -1162,7 +1172,6 @@
         deal(triple);
       } while (cells.filter(c => c.ts.length > 1).length < 2
                && ++guard < 30);
-      syncChips();
       const sharedness = r => r.filter(c => c.ts.length > 1).length;
       const finale = runs.flat().slice()
         .sort((a, b) => sharedness(b) - sharedness(a))[0] || [];

@@ -103,3 +103,21 @@ teleport its intent.
   into one object makes this bug species structurally impossible.
   Noted, not urgent.
 - Kid testing remains the end-of-polish priority.
+
+## Design proposals logged (Roger, 2026-11-22 late-afternoon — discuss, not yet implement)
+
+- **Heads on the buttons for Search & Find** — Roger's correction: heads
+  were rejected in those games' *grids* (a head doesn't fit a cell), not
+  as a grammar. His new thought: a head *inside* a grid could be "a
+  strong hint of a different kind" — parked, do not implement.
+  Open question on the pickers: the honest version is the tapped head
+  becoming the completion snake's head — then it's the same animal, not
+  a costume on a button.
+- **Numerals in pattern snakes** — the found chain's departure could
+  carry its numerals; consistent object grammar.
+- **Open mouth in tilt-snake** — the head eats its target; jaw opens in
+  the last beat of approach. Subtle, not cartoon.
+- **Hole → large open-mouth snake head in tilt-ball** — the strongest of
+  the four: the hole is a portal, a mouth is a portal with a face;
+  preserves two-way use (a mouth can spit — the ball-server idea
+  survives). Heads there stay *places*, not predators.

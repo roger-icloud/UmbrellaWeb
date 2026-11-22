@@ -242,7 +242,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=16"></script>
+  <script src="anim.js?v=17"></script>
   <script src="hint.js"></script>
   <script src="progress.js"></script>
 
@@ -970,7 +970,15 @@
 
     function draw(now) {
       if (state === 'celebrate' || state === 'done') {
-        Anim.frame(now);
+        /* a throw inside the engine leaves the canvas cleared and the
+           DOM alive — an unexplained blank. Paint the error instead of
+           dying silently (Roger reads the mstat line; Nov 2026) */
+        try { Anim.frame(now); }
+        catch (e) {
+          ctx.font = '12px system-ui'; ctx.fillStyle = '#e0a53a';
+          ctx.textAlign = 'left';
+          ctx.fillText('anim: ' + (e && e.message || e), 12, 40);
+        }
         /* 'home' ends 'gone' when the glance finishes — the row's DOM
            head underneath is already in place; the menu is live again.
            The spent deal (loose numerals, the old body) is cleared —

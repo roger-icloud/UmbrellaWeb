@@ -30,6 +30,20 @@
       (Array.isArray(ts) ? ts : [ts]).forEach(t => { p[t] = (p[t] || 0) + 1; });
     },
     done(page) { return Object.keys(memory.pages[page] || {}).map(Number); },
+    /* the same vocabulary for canvas-drawn pickers (tilt-snake's head
+       rail, 2026-11-22): {table: 'made'|'suggest'|'far'} */
+    marks(page, maxT) {
+      const done = new Set(UW.done(page));
+      const sug = UW.suggest(page, maxT);
+      const sugIdx = SCHOOL.indexOf(sug);
+      const out = {};
+      for (let t = 2; t <= maxT; t++) {
+        out[t] = done.has(t) ? 'made'
+          : t === sug ? 'suggest'
+          : sug && SCHOOL.indexOf(t) > sugIdx ? 'far' : '';
+      }
+      return out;
+    },
     suggest(page, maxT) {
       const done = new Set(UW.done(page));
       return SCHOOL.find(t => t <= maxT && !done.has(t)) || 0;

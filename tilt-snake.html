@@ -122,87 +122,6 @@
       border: 1px solid #3a4a58;
     }
 
-    /* Roger 2026-11-18: the table picker joins the shared vocabulary —
-       bottom chips over the board instead of a covering overlay */
-    #chipRow {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: center;
-      padding: 0 12px;
-      z-index: 5;
-      transition: opacity .4s ease;
-    }
-
-    /* snake heads as the table buttons (Roger, 2026-11-21) — the same
-       grammar as the puzzle's rail: numeral on the face while dormant,
-       a blink when tapped */
-    #chipRow button {
-      position: relative;
-      width: 46px;
-      height: 46px;
-      min-width: 0;
-      padding: 0;
-      border: none;
-      border-radius: 50%;
-      background: radial-gradient(circle at 33% 30%,
-        hsl(var(--hue), 62%, 64%), hsl(var(--hue), 56%, 28%));
-      box-shadow: inset 0 0 0 1.5px hsl(var(--hue), 58%, 40%);
-      color: transparent;
-    }
-
-    #chipRow button .eyes {
-      position: absolute;
-      top: 30%;
-      left: 0;
-      right: 0;
-      display: flex;
-      justify-content: center;
-      gap: 22%;
-    }
-
-    #chipRow button .eyes i {
-      width: 15%;
-      aspect-ratio: 1;
-      background: #101418;
-      border-radius: 50%;
-      transform-origin: center;
-    }
-
-    #chipRow button b {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 57%;
-      font-size: 13px;
-      font-weight: 700;
-      color: rgba(235, 242, 248, .9);
-    }
-
-    #chipRow button.wake .eyes i {
-      animation: headBlink .26s ease-in-out;
-    }
-
-    @keyframes headBlink {
-      50% { transform: scaleY(.1); }
-    }
-
-    #chipRow button.on {
-      box-shadow: inset 0 0 0 1.5px hsl(var(--hue), 58%, 40%),
-        0 0 0 2px hsla(var(--hue), 65%, 60%, .7);
-    }
-
-    /* once a table is chosen the heads are no longer required —
-       they fade away and leave the space to the targets */
-    #chipRow.locked {
-      opacity: 0;
-      pointer-events: none;
-    }
-
     .hidden {
       display: none !important;
     }
@@ -226,8 +145,6 @@
     <div class="title">Tilt Snake</div>
     <div class="sub">Pick a table, then collect <b>in order</b>.</div>
   </div>
-
-  <div id="chipRow"></div>
 
   <div id="overlay" class="overlay hidden">
     <div class="title" id="tableLabel"></div>
@@ -377,6 +294,35 @@
       });
       head.x = Math.min(Math.max(head.x, HEAD_R), Wd - HEAD_R);
       head.y = Math.min(Math.max(head.y, HEAD_R), Hd - HEAD_R);
+      layoutHeadSt();
+    }
+
+    /* the picker is canvas station heads (Roger 2026-11-22 —
+       "subsumed"): the same Anim.stationHead the puzzle's rail uses,
+       sized on the segD yardstick so picker and creature share one
+       head. The DOM chipRow is retired. */
+    let headSt = [], rowLocked = false, rowAlpha = 1, chosenT = 0;
+    function layoutHeadSt() {
+      const n = 11, edge = 6;
+      const spacing = (Wd - edge * 2) / n;
+      const r = Math.min(HEAD_R, spacing / 2 - 1.5);
+      const y = Hd - r - 5;
+      headSt = [];
+      for (let i = 0; i < n; i++)
+        headSt.push({ t: i + 2, x: edge + spacing * (i + 0.5), y, r });
+    }
+    function pickHead(t) {
+      /* a tap wakes it: blink first, then the table is dealt — same
+         move the DOM headchip made */
+      blinkT0 = performance.now();
+      chosenT = t;
+      reset(t);
+      document.getElementById('tableLabel').textContent = '×' + t + ' table';
+      tableOverlay.classList.add('hidden');
+      overlay.classList.remove('hidden');
+      rowLocked = true;
+      window._dbgLock = 'lock@' + Math.round(performance.now() / 1000) + 's';
+      state = 'ready';
     }
     window.addEventListener('resize', resize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
@@ -461,7 +407,7 @@
       doneBar.classList.remove('show');
       /* a dealt round means the heads aren't required — every route in
          (tap, ?t, ?done, demo) fades the row */
-      row.classList.add('locked'); window._dbgLock = 'lock@' + Math.round(performance.now()/1000) + 's';
+      rowLocked = true; window._dbgLock = 'lock@' + Math.round(performance.now()/1000) + 's';
       logEvent('deal', { table, count: nums.length });
     }
 
@@ -470,29 +416,6 @@
     const overlay = document.getElementById('overlay');
     const doneBar = document.getElementById('doneBar');
     const whyEl = document.getElementById('why');
-    const row = document.getElementById('chipRow');
-    for (let t = 2; t <= 12; t++) {
-      const b = document.createElement('button');
-      b.className = 'headchip';
-      b.style.setProperty('--hue', (t * 31 + 200) % 360);
-      b.innerHTML = '<span class="eyes"><i></i><i></i></span><b>' + t + '</b>';
-      b.setAttribute('aria-label', '×' + t + ' table');
-      b.addEventListener('click', () => {
-        /* a tap wakes it: blink first, then the table is dealt */
-        b.classList.add('wake');
-        setTimeout(() => b.classList.remove('wake'), 300);
-        reset(t);
-        document.getElementById('tableLabel').textContent = '×' + t + ' table';
-        tableOverlay.classList.add('hidden');
-        overlay.classList.remove('hidden');
-        row.classList.add('locked'); window._dbgLock = 'lock@' + Math.round(performance.now()/1000) + 's';
-        [...row.children].forEach(ch => ch.classList.toggle('on', ch === b));
-        state = 'ready';
-      });
-      row.appendChild(b);
-    }
-    UW.boot('tilt');
-    UW.paint(row, 'tilt');
 
     function motionNeedsPermission() {
       return typeof DeviceMotionEvent !== 'undefined'
@@ -559,14 +482,10 @@
          the head row and the body feeds into the head. When the head
          stands alone the row fades back up while it finishes a glance
          each way — then the DOM head under it takes over */
-      const btn = row.children[table - 2];
-      const rc = btn.getBoundingClientRect();
-      /* clamp the station into the canvas: a button rect that maps
-         below/above the world (viewport quirks on iOS) would send the
-         snake to a phantom point it can never reach or be seen at —
-         home at the bottom edge instead */
-      const tx = (rc.left + rc.width / 2) / K;
-      const ty = (rc.top + rc.height / 2) / K;
+      /* the landing station is the head's own rail spot */
+      const st = headSt[table - 2];
+      const tx = st ? st.x : Wd / 2;
+      const ty = st ? st.y : Hd - 30;
       Anim.begin({
         ctx, W: Wd, H: Hd,
         board: { x: 12, y: 56, w: Wd - 24, h: Hd - 116 },
@@ -580,8 +499,7 @@
         },
         onDone: () => {
           window._dbgUnlock = 'unlock@' + Math.round(performance.now() / 1000) + 's';
-          row.classList.remove('locked');
-          UW.paint(row, 'tilt');
+          rowLocked = false;
         }
       });
       } catch (e) {
@@ -589,7 +507,7 @@
            draw check then misreads as "finished" — confess it */
         window._dbgErr = 'fin:' + (e && e.message || e) +
           '@' + ((e && e.stack || '').split('\n')[1] || '');
-        row.classList.remove('locked');
+        rowLocked = false;
         state = 'menu';
       }
     }
@@ -602,8 +520,7 @@
     document.getElementById('againYes').addEventListener('click', () => {
       doneBar.classList.remove('show');
       segs = []; nums = []; trail = [];
-      row.classList.remove('locked');
-      UW.paint(row, 'tilt');
+      rowLocked = false;
       state = 'menu';
     });
     document.getElementById('againNo').addEventListener('click', () => {
@@ -624,6 +541,13 @@
 
     let touch = null;
     cv.addEventListener('pointerdown', (t) => {
+      /* the head rail is live whenever unlocked — a tap picks the
+         table, so it must not fall through to steering */
+      if (!rowLocked && rowAlpha > 0.5) {
+        const px = t.clientX / K, py = t.clientY / K;
+        const h = headSt.find(h => Math.hypot(px - h.x, py - h.y) <= h.r * 1.5);
+        if (h) { pickHead(h.t); return; }
+      }
       if (state !== 'play') return;
       // a tap on the next numeral sends the snake straight to it;
       // a tap on any other numeral is a refusal, not a steer
@@ -1067,13 +991,48 @@
         });
       }
 
+      /* the head rail — the picker, canvas-drawn on the segD yardstick;
+         fades when not required (Roger's row-fade, now in-world) */
+      rowAlpha += ((rowLocked ? 0 : 1) - rowAlpha) * 0.07;
+      if (rowAlpha > 0.01) {
+        const marks = UW.marks ? UW.marks('tilt', 13) : {};
+        for (const h of headSt) {
+          const mk = marks[h.t];
+          const hue = (h.t * 31 + 200) % 360;
+          ctx.save();
+          ctx.globalAlpha = rowAlpha * (mk === 'far' ? 0.42 : 1);
+          Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
+            now, 0, undefined, -Math.PI / 2, blinkScale(now));
+          ctx.font = '700 ' + Math.round(h.r * 0.55) +
+            'px Andika, -apple-system, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'rgba(235,242,248,.9)';
+          ctx.fillText(h.t, h.x, h.y + h.r * 0.42);
+          if (mk === 'made') {
+            ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 3, 0, 7);
+            ctx.strokeStyle = 'hsla(' + hue + ',60%,55%,.55)';
+            ctx.lineWidth = 2; ctx.stroke();
+          } else if (mk === 'suggest') {
+            ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 3, 0, 7);
+            ctx.strokeStyle = 'rgba(255,196,96,.75)';
+            ctx.lineWidth = 2; ctx.stroke();
+          }
+          if (h.t === chosenT) {
+            ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 4, 0, 7);
+            ctx.strokeStyle = 'hsla(' + hue + ',65%,60%,.7)';
+            ctx.lineWidth = 2; ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+
     }
 
     /* live state line for the blank-screen hunt — read by the mstat
        poller so a black canvas still says where the page+engine sit */
     window._dbg = () =>
       'pg:' + state + ' an:' + Anim.state +
-      ' row:' + (row.classList.contains('locked') ? 'locked' : 'open') +
+      ' row:' + (rowLocked ? 'locked' : 'open') +
       ' sg:' + segs.length + ' ' + Anim._dbg +
       (window._dbgUnlock ? ' ' + window._dbgUnlock : '') +
       (window._dbgLock ? ' ' + window._dbgLock : '');

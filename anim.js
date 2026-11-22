@@ -1441,6 +1441,12 @@ window.Anim = (function () {
     pose,
     snapshot,
     drawCoil,
-    get state() { return state; }
+    get state() { return state; },
+    // live internals for the blank-screen hunt (the mstat line reads this)
+    get _dbg() {
+      return 'k:' + pageKind + ' dH:' + (denHome ? 1 : 0) +
+        ' dD:' + (denDone ? 1 : 0) + ' g:' + Math.round(gather) +
+        ' r:' + (roost ? 1 : 0);
+    }
   };
 })();

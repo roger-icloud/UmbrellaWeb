@@ -242,7 +242,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=18"></script>
+  <script src="anim.js?v=19"></script>
   <script src="hint.js"></script>
   <script src="progress.js"></script>
 
@@ -542,6 +542,7 @@
     }
 
     function finish() {
+      try {
       state = 'celebrate';
       doneMs = Math.round(performance.now() - startT);
       touch = null;
@@ -582,6 +583,14 @@
           UW.paint(row, 'tilt');
         }
       });
+      } catch (e) {
+        /* a throw here leaves a stale 'gone' in the engine, which the
+           draw check then misreads as "finished" — confess it */
+        window._dbgErr = 'fin:' + (e && e.message || e) +
+          '@' + ((e && e.stack || '').split('\n')[1] || '');
+        row.classList.remove('locked');
+        state = 'menu';
+      }
     }
 
     function showDone() {
@@ -1064,7 +1073,7 @@
     window._dbg = () =>
       'pg:' + state + ' an:' + Anim.state +
       ' row:' + (row.classList.contains('locked') ? 'locked' : 'open') +
-      ' segs:' + segs.length + ' nums:' + nums.length;
+      ' sg:' + segs.length + ' ' + Anim._dbg;
 
     function frame(now) {
       const dt = Math.min((now - lastT) / 1000, 0.05);
@@ -1130,12 +1139,13 @@
         const el = document.getElementById('mstat');
         el.style.cssText = 'position:fixed;left:6px;bottom:3px;' +
           'font:10px/1.2 system-ui;color:#888;z-index:99;pointer-events:none';
-        let n = 0, grant = '-', lastErr = '';
+        let n = 0, grant = '-', lastErr = '', dbg = '';
         /* game/anim state + swallowed draw errors — polled so the line
-           always shows where the page thinks it is */
+           always shows where the page thinks it is. ERR text is
+           sticky — kept beside the live state, never overwritten. */
         setInterval(() => {
-          if (window._dbgErr) { lastErr = ' ' + window._dbgErr; }
-          else if (window._dbg) lastErr = ' ' + window._dbg();
+          if (window._dbgErr) { lastErr = ' ' + window._dbgErr; window._dbgErr = null; }
+          if (window._dbg) dbg = ' ' + window._dbg();
           show();
         }, 500);
         /* the real crash confesses here — catches anything the frame
@@ -1152,8 +1162,8 @@
         function show() {
           const d = typeof DeviceMotionEvent !== 'undefined';
           const p = d && typeof DeviceMotionEvent.requestPermission === 'function';
-          el.textContent = 'v18 motion:' + (d ? 'y' : 'n') + ' ask:' +
-            (p ? 'y' : 'n') + ' grant:' + grant + ' events:' + n + lastErr;
+          el.textContent = 'v19 motion:' + (d ? 'y' : 'n') + ' ask:' +
+            (p ? 'y' : 'n') + ' grant:' + grant + ' events:' + n + lastErr + dbg;
         }
         window._motionGrant = r => { grant = r; show(); };
         window.addEventListener('devicemotion',

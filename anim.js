@@ -777,7 +777,13 @@ window.Anim = (function () {
           ay = hole.y + (s > 0 ? ox : -ox) * R;
         }
         const err = wrapAngle(Math.atan2(ay - headPos.y, ax - headPos.x) - heading);
-        w = Math.max(-HOLE_TURN, Math.min(HOLE_TURN,
+        /* turn-in ramp: steering weight grows over the first ~0.35s of
+           travel in the phrase — otherwise a ~90° heading error at the
+           joint makes the head hard-corner at full turn rate, and every
+           piece behind snaps its tangent crossing the kink (Roger's
+           "jerk at the start of the new trajectory", 2026-11-22) */
+        const rampK = Math.min(1, phraseArc / (v * 0.35));
+        w = rampK * Math.max(-HOLE_TURN, Math.min(HOLE_TURN,
           err * HOLE_GAIN * 180 / Math.PI)) * Math.PI / 180;
         if (script[1] && script[1].spin && dist <= HOLE_ORBIT * segD) {
           script.shift(); phraseArc = 0;

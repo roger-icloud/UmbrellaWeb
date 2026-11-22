@@ -81,6 +81,7 @@ window.Anim = (function () {
   const PILE_JIT = 0.12;              // seat jitter, ×segD
   const PILE_ORDERS = { 3: [1, 0, 2], 4: [1, 2, 0, 3], 5: [2, 1, 3, 0, 4] };
   const SEAT_SECS = 0.35;             // s — the hop from head to seat
+  const ROOST_SECS = 2.4;             // s — glance both ways at home
   /* the melt pile (Roger's remembered collapse, 2026-11-04): at home
      the body's momentum continues — every segment keeps pressing
      toward the head until it meets resistance, then accommodates
@@ -145,6 +146,14 @@ window.Anim = (function () {
     // home to the den: one straight seek at a given point — nothing
     // else. The den journey's first piece.
     den: [
+      { seek: true, speed: 1.15 },
+    ],
+    // home to the head row (tilt games, 2026-11-22): a lap of the
+    // board to say the table is whole, then a seek to the station and
+    // the roost collapse — body feeds into the head until it stands
+    // alone, glances both ways, and goes still
+    home: [
+      { laptrack: true, calm: true, laps: 1, speed: 1.6 },
       { seek: true, speed: 1.15 },
     ],
   };
@@ -300,6 +309,7 @@ window.Anim = (function () {
   let spinning = false, whirlpool = false, spinProg = 0;
   let stillK = 1, ring = null, glowT0 = -1;
   let denHome = false, denDone = false;  // the seek reached its target
+  let roost = false, roostT = 0;         // 'home': absorb-into-head ending
   let gather = 0;                        // arc the body has caught up
   let fidgets = null;                    // restless-in-bed schedule
   let twistSt = null;                    // the head's scanning turns
@@ -439,9 +449,10 @@ window.Anim = (function () {
     spinning = false; whirlpool = false; spinProg = 0;
     denHome = false; denDone = false; gather = 0; fidgets = null;
     twistSt = null; seats = null; pile = null;
-    // 'den' seeks a given point (opts.target), not a hole — hide marks
-    // it so the sandy burrow isn't drawn; no target → bottom-left corner
-    if (kind === 'den') {
+    roost = kind === 'home'; roostT = 0;
+    // 'den'/'home' seek a given point (opts.target), not a hole — hide
+    // marks it so the sandy burrow isn't drawn; no target → corner
+    if (kind === 'den' || kind === 'home') {
       const t = coilTarget || { x: bX + segD * 1.2, y: bY + bH - segD * 1.2 };
       hole = { x: t.x, y: t.y, hide: true };
     }
@@ -772,7 +783,10 @@ window.Anim = (function () {
           continue;
         }
         step = Math.min(dist, v * budget);
-        if (step >= dist) {
+        /* close counts as arrived: a capped turn rate orbits a near
+           target forever at r = v/HOLE_TURN (~0.87·segD at departure
+           speed) — so a one-disc capture is enough to dock */
+        if (step >= dist || dist <= segD) {
           headPos.x = hole.x; headPos.y = hole.y;
           tipArc += dist; budget -= dist / v;
           holeArc = tipArc;
@@ -1092,7 +1106,25 @@ window.Anim = (function () {
       }
       const ax = pos[0] ? pos[0].x : tip.x, ay = pos[0] ? pos[0].y : tip.y;
       if (!denHomeT) denHomeT = departAge;   // live-path fallback
-      if (PILE === 'melt') {
+      if (roost) {
+        /* the row-homecoming: the body feeds into the head a disc at a
+           time (nearest first, tail last) until the head stands alone —
+           then a beat of the restless glance (twistSt, already running
+           above) before it goes still and the page takes the head over
+           as a row button */
+        for (let i = 1; i < N; i++)
+          if (pos[i] && i * sp - gather <= 0) pos[i] = null;
+        if (!denDone && gather >= (N - 1) * sp) {
+          denDone = true; roostT = now;
+          if (onDone) onDone(now);   // the page fades the row up now —
+          // the canvas head keeps glancing until 'gone'
+        }
+        if (denDone && now - roostT > ROOST_SECS * 1000) {
+          state = 'gone';
+          if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
+          return;
+        }
+      } else if (PILE === 'melt') {
         // momentum continues: every segment keeps pressing toward the
         // head at gather pace; accommodation happens by contact —
         // overlaps push apart, and the slide goes sideways. The heap

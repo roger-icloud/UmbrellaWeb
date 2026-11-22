@@ -459,6 +459,9 @@
       nextBlinkAt = performance.now() + 2000 + Math.random() * 2000;
       blinkT0 = -1;
       doneBar.classList.remove('show');
+      /* a dealt round means the heads aren't required — every route in
+         (tap, ?t, ?done, demo) fades the row */
+      row.classList.add('locked');
       logEvent('deal', { table, count: nums.length });
     }
 
@@ -550,15 +553,28 @@
         { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
         ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
       ];
+      /* the celebration's last act is a homecoming (Roger 2026-11-22):
+         a lap of the board, then the snake slinks to its own button on
+         the head row and the body feeds into the head. When the head
+         stands alone the row fades back up while it finishes a glance
+         each way — then the DOM head under it takes over */
+      const btn = row.children[table - 2];
+      const rc = btn.getBoundingClientRect();
       Anim.begin({
         ctx, W: Wd, H: Hd,
         board: { x: 12, y: 56, w: Wd - 24, h: Hd - 116 },
         segD: HEAD_R * 2,
         table,
         segs: fullSegs,
-        kind: 'wind',
-        hold: true,
-        onDone: showDone
+        kind: 'home',
+        target: {
+          x: (rc.left + rc.width / 2) / K,
+          y: (rc.top + rc.height / 2) / K
+        },
+        onDone: () => {
+          row.classList.remove('locked');
+          UW.paint(row, 'tilt');
+        }
       });
     }
 
@@ -955,6 +971,14 @@
     function draw(now) {
       if (state === 'celebrate' || state === 'done') {
         Anim.frame(now);
+        /* 'home' ends 'gone' when the glance finishes — the row's DOM
+           head underneath is already in place; the menu is live again.
+           The spent deal (loose numerals, the old body) is cleared —
+           the returned snake lives on the row now */
+        if (state === 'celebrate' && Anim.state === 'gone') {
+          segs = []; nums = [];
+          state = 'menu';
+        }
         return;
       }
       ctx.clearRect(0, 0, Wd, Hd);
@@ -1064,7 +1088,7 @@
       setInterval(() => {
         if (state === 'play' && !autoTarget && nextIdx < nums.length)
           autoTarget = nums[nextIdx];
-        else if (state === 'done') demoStart();
+        else if (state === 'done' || state === 'menu') demoStart();
       }, 700);
     }
     requestAnimationFrame(frame);

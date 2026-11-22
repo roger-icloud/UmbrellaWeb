@@ -1137,12 +1137,45 @@
           ctx.stroke();
         }
         const flashing = h === holeFlash && now < flashUntil;
+        /* the hole is a head's open mouth (Roger 2026-11-22 — "replacing
+           hole in tilt with a larger snake head with an open mouth"):
+           a face-coloured ring surrounds the dark gullet, eyes perch
+           on the upper arc — neutral, expectant, never prey-tracking */
+        const hue = h.v === 0 ? 155 : (h.v * 31 + 200) % 360;
+        const sat = h.v === 0 ? 28 : 58;
+        const faceR = HOLE_R + 11;
+        const fg = ctx.createRadialGradient(
+          hx, hy - faceR * 0.5, faceR * 0.2, hx, hy, faceR);
+        fg.addColorStop(0, `hsl(${hue},${sat}%,62%)`);
+        fg.addColorStop(1, `hsl(${hue},${sat}%,30%)`);
+        ctx.fillStyle = fg;
+        ctx.beginPath(); ctx.arc(hx, hy, faceR, 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = `hsla(${hue},${sat}%,24%,0.9)`;
+        ctx.stroke();
+        /* the eyes — a dark pupil in a cream white, looking straight
+           out at the world, not at the ball */
+        for (const s of [-1, 1]) {
+          const ex = hx + s * HOLE_R * 0.34;
+          const ey = hy - HOLE_R - 4;
+          ctx.fillStyle = '#f2e9d8';
+          ctx.beginPath(); ctx.arc(ex, ey, 5.2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#1a1410';
+          ctx.beginPath(); ctx.arc(ex, ey, 2.4, 0, Math.PI * 2); ctx.fill();
+        }
+        /* the mouth stays the hole — gullet dark, a pale lower lip so
+           it reads open rather than painted black */
         ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R, 0, Math.PI * 2); ctx.fill();
         ctx.lineWidth = 2;
         ctx.strokeStyle = flashing ? '#e0a53a'
-          : (h.v === 0 ? 'rgba(53,199,149,.45)' : 'rgba(120,150,175,.5)');
+          : `hsla(${hue},${sat}%,70%,0.55)`;
         ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = `hsla(${hue},${sat}%,75%,0.8)`;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.arc(hx, hy, HOLE_R - 0.5, Math.PI * 0.25, Math.PI * 0.75);
+        ctx.stroke();
         ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
           ' Andika, -apple-system, system-ui, sans-serif';

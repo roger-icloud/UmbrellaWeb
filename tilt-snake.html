@@ -311,10 +311,29 @@
       for (let i = 0; i < n; i++)
         headSt.push({ t: i + 2, x: edge + spacing * (i + 0.5), y, r });
     }
+    /* each head keeps its own blink clock — sharing the game's clock
+       blinked the whole rail in unison, which reads as a row of
+       buttons pulsing, not creatures dozing (Roger 2026-11-22) */
+    function headBlinkSq(h, now) {
+      if (h.bA === undefined) h.bA = now + Math.random() * 5000;
+      if (h.b0 === undefined || h.b0 < 0) {
+        if (now < h.bA) return 1;
+        h.b0 = now;
+      }
+      const k = (now - h.b0) / 280;
+      if (k >= 1) {
+        h.b0 = -1;
+        h.bA = now + 2400 + Math.random() * 3600;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
     function pickHead(t) {
       /* a tap wakes it: blink first, then the table is dealt — same
          move the DOM headchip made */
       blinkT0 = performance.now();
+      const wh = headSt[t - 2];
+      if (wh) wh.b0 = performance.now();   // the tapped head blinks awake
       chosenT = t;
       reset(t);
       document.getElementById('tableLabel').textContent = '×' + t + ' table';
@@ -993,16 +1012,25 @@
 
       /* the head rail — the picker, canvas-drawn on the segD yardstick;
          fades when not required (Roger's row-fade, now in-world) */
-      rowAlpha += ((rowLocked ? 0 : 1) - rowAlpha) * 0.07;
+      /* slow fade — the rail returns gently around the landed head
+         (Roger 2026-11-22); the arrived head itself stands at full
+         strength from the moment it's home */
+      rowAlpha += ((rowLocked ? 0 : 1) - rowAlpha) * 0.035;
       if (rowAlpha > 0.01) {
         const marks = UW.marks ? UW.marks('tilt', 13) : {};
         for (const h of headSt) {
           const mk = marks[h.t];
           const hue = (h.t * 31 + 200) % 360;
+          /* the landed snake's head IS this station's head — it stands
+             at full alpha once it's home; the others fade up to join
+             it */
+          const arrived = (Anim.state === 'gone' || state === 'menu') &&
+            h.t === table ? 1 : 0;
           ctx.save();
-          ctx.globalAlpha = rowAlpha * (mk === 'far' ? 0.42 : 1);
+          ctx.globalAlpha = Math.max(rowAlpha, arrived) *
+            (mk === 'far' ? 0.42 : 1);
           Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
-            now, 0, undefined, -Math.PI / 2, blinkScale(now));
+            now, 0, undefined, -Math.PI / 2, headBlinkSq(h, now));
           ctx.font = '700 ' + Math.round(h.r * 0.55) +
             'px Andika, -apple-system, sans-serif';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';

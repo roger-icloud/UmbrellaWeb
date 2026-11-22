@@ -308,6 +308,7 @@ window.Anim = (function () {
   let hole = null, holeArc = null, holeShowArc = 0;
   let spinning = false, whirlpool = false, spinProg = 0;
   let stillK = 1, ring = null, glowT0 = -1;
+  let beginN = 0, doneN = 0;             // begin/onDone call counters (debug)
   let denHome = false, denDone = false;  // the seek reached its target
   let roost = false, roostT = 0;         // 'home': absorb-into-head ending
   let gather = 0;                        // arc the body has caught up
@@ -904,6 +905,7 @@ window.Anim = (function () {
     bX = opts.board.x; bY = opts.board.y; bW = opts.board.w; bH = opts.board.h;
     segD = opts.segD; table = opts.table; segs = opts.segs;
     onFade = opts.onFade || null; onDone = opts.onDone || null;
+    beginN++;
     pageKind = opts.kind || null;
     coilTarget = opts.target || null;
     doClear = opts.clear !== false;
@@ -1118,7 +1120,7 @@ window.Anim = (function () {
           if (pos[i] && i * sp - gather <= 0) pos[i] = null;
         if (!denDone && gather >= (N - 1) * sp) {
           denDone = true; roostT = now;
-          if (onDone) onDone(now);   // the page fades the row up now —
+          if (onDone) { doneN++; onDone(now); } // the page fades the row up now —
           // the canvas head keeps glancing until 'gone'
         }
         if (denDone && now - roostT > ROOST_SECS * 1000) {
@@ -1182,7 +1184,7 @@ window.Anim = (function () {
           if (pile[i]) pos[i] = { x: pile[i].x, y: pile[i].y, sc: 1 };
         if (!denDone && departAge - denHomeT > MELT_SETTLE) {
           denDone = true;
-          if (onDone) onDone(now);
+          if (onDone) { doneN++; onDone(now); }
         }
       } else {
         // 'seats': each arrived segment takes a fixed place in a
@@ -1206,7 +1208,7 @@ window.Anim = (function () {
         }
         if (!denDone && allSeated) {
           denDone = true;
-          if (onDone) onDone(now);
+          if (onDone) { doneN++; onDone(now); }
         }
       }
       if (denDone) {
@@ -1260,14 +1262,14 @@ window.Anim = (function () {
     if (roost && state === 'depart' && departAge > 30) {
       state = 'gone';
       if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
-      if (onDone) onDone(now);
+      if (onDone) { doneN++; onDone(now); }
       return;
     }
     if (state === 'depart' && !holdCoil && (allGone || (glowT0 >= 0 &&
       departAge - glowT0 > GLOW_SECS + FADE_SECS + NUM_LINGER + NUM_FADE))) {
       state = 'gone';
       if (!fadeFired) { fadeFired = true; if (onFade) onFade(); }
-      if (onDone) onDone();
+      if (onDone) { doneN++; onDone(); }
       return;
     }
     const headTip = sampleTrail(0);
@@ -1337,7 +1339,7 @@ window.Anim = (function () {
       };
       state = 'gone';
       if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
-      if (onDone) onDone(now);
+      if (onDone) { doneN++; onDone(now); }
     }
   }
 
@@ -1444,9 +1446,9 @@ window.Anim = (function () {
     get state() { return state; },
     // live internals for the blank-screen hunt (the mstat line reads this)
     get _dbg() {
-      return 'k:' + pageKind + ' dH:' + (denHome ? 1 : 0) +
-        ' dD:' + (denDone ? 1 : 0) + ' g:' + Math.round(gather) +
-        ' r:' + (roost ? 1 : 0);
+      return 'b:' + beginN + ' dn:' + doneN + ' k:' + pageKind +
+        ' dH:' + (denHome ? 1 : 0) + ' dD:' + (denDone ? 1 : 0) +
+        ' g:' + Math.round(gather) + ' r:' + (roost ? 1 : 0);
     }
   };
 })();

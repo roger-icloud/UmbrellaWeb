@@ -242,7 +242,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=19"></script>
+  <script src="anim.js?v=20"></script>
   <script src="hint.js"></script>
   <script src="progress.js"></script>
 
@@ -461,7 +461,7 @@
       doneBar.classList.remove('show');
       /* a dealt round means the heads aren't required — every route in
          (tap, ?t, ?done, demo) fades the row */
-      row.classList.add('locked');
+      row.classList.add('locked'); window._dbgLock = 'lock@' + Math.round(performance.now()/1000) + 's';
       logEvent('deal', { table, count: nums.length });
     }
 
@@ -485,7 +485,7 @@
         document.getElementById('tableLabel').textContent = '×' + t + ' table';
         tableOverlay.classList.add('hidden');
         overlay.classList.remove('hidden');
-        row.classList.add('locked');
+        row.classList.add('locked'); window._dbgLock = 'lock@' + Math.round(performance.now()/1000) + 's';
         [...row.children].forEach(ch => ch.classList.toggle('on', ch === b));
         state = 'ready';
       });
@@ -579,6 +579,7 @@
           y: Math.min(Math.max(isFinite(ty) ? ty : Hd - 30, 56), Hd - 8)
         },
         onDone: () => {
+          window._dbgUnlock = 'unlock@' + Math.round(performance.now() / 1000) + 's';
           row.classList.remove('locked');
           UW.paint(row, 'tilt');
         }
@@ -1073,7 +1074,9 @@
     window._dbg = () =>
       'pg:' + state + ' an:' + Anim.state +
       ' row:' + (row.classList.contains('locked') ? 'locked' : 'open') +
-      ' sg:' + segs.length + ' ' + Anim._dbg;
+      ' sg:' + segs.length + ' ' + Anim._dbg +
+      (window._dbgUnlock ? ' ' + window._dbgUnlock : '') +
+      (window._dbgLock ? ' ' + window._dbgLock : '');
 
     function frame(now) {
       const dt = Math.min((now - lastT) / 1000, 0.05);
@@ -1162,7 +1165,7 @@
         function show() {
           const d = typeof DeviceMotionEvent !== 'undefined';
           const p = d && typeof DeviceMotionEvent.requestPermission === 'function';
-          el.textContent = 'v19 motion:' + (d ? 'y' : 'n') + ' ask:' +
+          el.textContent = 'v20 motion:' + (d ? 'y' : 'n') + ' ask:' +
             (p ? 'y' : 'n') + ' grant:' + grant + ' events:' + n + lastErr + dbg;
         }
         window._motionGrant = r => { grant = r; show(); };

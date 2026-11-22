@@ -242,7 +242,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=17"></script>
+  <script src="anim.js?v=18"></script>
   <script src="hint.js"></script>
   <script src="progress.js"></script>
 
@@ -560,6 +560,12 @@
          each way — then the DOM head under it takes over */
       const btn = row.children[table - 2];
       const rc = btn.getBoundingClientRect();
+      /* clamp the station into the canvas: a button rect that maps
+         below/above the world (viewport quirks on iOS) would send the
+         snake to a phantom point it can never reach or be seen at —
+         home at the bottom edge instead */
+      const tx = (rc.left + rc.width / 2) / K;
+      const ty = (rc.top + rc.height / 2) / K;
       Anim.begin({
         ctx, W: Wd, H: Hd,
         board: { x: 12, y: 56, w: Wd - 24, h: Hd - 116 },
@@ -568,8 +574,8 @@
         segs: fullSegs,
         kind: 'home',
         target: {
-          x: (rc.left + rc.width / 2) / K,
-          y: (rc.top + rc.height / 2) / K
+          x: Math.min(Math.max(isFinite(tx) ? tx : Wd / 2, 12), Wd - 12),
+          y: Math.min(Math.max(isFinite(ty) ? ty : Hd - 30, 56), Hd - 8)
         },
         onDone: () => {
           row.classList.remove('locked');

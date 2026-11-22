@@ -785,8 +785,10 @@ window.Anim = (function () {
         step = Math.min(dist, v * budget);
         /* close counts as arrived: a capped turn rate orbits a near
            target forever at r = v/HOLE_TURN (~0.87·segD at departure
-           speed) — so a one-disc capture is enough to dock */
-        if (step >= dist || dist <= segD) {
+           speed) — so a one-disc capture is enough to dock. A NaN
+           distance can never dock — snap home rather than chase a
+           phantom forever (blank-screen lesson, 2026-11-22) */
+        if (!isFinite(dist) || step >= dist || dist <= segD) {
           headPos.x = hole.x; headPos.y = hole.y;
           tipArc += dist; budget -= dist / v;
           holeArc = tipArc;
@@ -1250,6 +1252,16 @@ window.Anim = (function () {
         ' gather=' + Math.round(gather) +
         ' p1=' + (pos[1] ? Math.round(pos[1].x) + ',' + Math.round(pos[1].y) : 'null') +
         ' p12=' + (pos[12] ? Math.round(pos[12].x) + ',' + Math.round(pos[12].y) : 'null'), 8, 8);
+    }
+    /* watchdog (2026-11-22): a 'home' departure that outlives its
+       whole script — lap ≈10s + dive + roost ≈6s — has lost its snake;
+       failing safe beats a blank screen: finish the ending so the
+       page gets its row back either way */
+    if (roost && state === 'depart' && departAge > 30) {
+      state = 'gone';
+      if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
+      if (onDone) onDone(now);
+      return;
     }
     if (state === 'depart' && !holdCoil && (allGone || (glowT0 >= 0 &&
       departAge - glowT0 > GLOW_SECS + FADE_SECS + NUM_LINGER + NUM_FADE))) {

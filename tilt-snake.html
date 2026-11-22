@@ -1053,11 +1053,24 @@
 
     }
 
+    /* live state line for the blank-screen hunt — read by the mstat
+       poller so a black canvas still says where the page+engine sit */
+    window._dbg = () =>
+      'pg:' + state + ' an:' + Anim.state +
+      ' row:' + (row.classList.contains('locked') ? 'locked' : 'open') +
+      ' segs:' + segs.length + ' nums:' + nums.length;
+
     function frame(now) {
       const dt = Math.min((now - lastT) / 1000, 0.05);
       lastT = now;
       step(dt, now);
-      try { draw(now); } catch (e) { /* a bad frame must never kill the loop */ }
+      try { draw(now); }
+      catch (e) {
+        /* a bad frame must never kill the loop — but it must confess
+           (the canvas itself may not composite on iOS, so the message
+           goes to the DOM line, not the canvas) */
+        window._dbgErr = 'draw:' + (e && e.message || e);
+      }
       requestAnimationFrame(frame);
     }
     // lab aids: ?t=N jumps straight into table N; ?done auditions the
@@ -1112,6 +1125,13 @@
         el.style.cssText = 'position:fixed;left:6px;bottom:3px;' +
           'font:10px/1.2 system-ui;color:#888;z-index:99;pointer-events:none';
         let n = 0, grant = '-', lastErr = '';
+        /* game/anim state + swallowed draw errors — polled so the line
+           always shows where the page thinks it is */
+        setInterval(() => {
+          if (window._dbgErr) { lastErr = ' ' + window._dbgErr; }
+          else if (window._dbg) lastErr = ' ' + window._dbg();
+          show();
+        }, 500);
         /* the real crash confesses here — catches anything the frame
            loop's own try/catch doesn't, with file+line (Nov 2026) */
         window.addEventListener('error', e => {
@@ -1126,7 +1146,7 @@
         function show() {
           const d = typeof DeviceMotionEvent !== 'undefined';
           const p = d && typeof DeviceMotionEvent.requestPermission === 'function';
-          el.textContent = 'v17 motion:' + (d ? 'y' : 'n') + ' ask:' +
+          el.textContent = 'v18 motion:' + (d ? 'y' : 'n') + ' ask:' +
             (p ? 'y' : 'n') + ' grant:' + grant + ' events:' + n + lastErr;
         }
         window._motionGrant = r => { grant = r; show(); };

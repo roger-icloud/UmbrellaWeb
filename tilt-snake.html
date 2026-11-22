@@ -1142,6 +1142,10 @@
         const el = document.getElementById('mstat');
         el.style.cssText = 'position:fixed;left:6px;bottom:3px;' +
           'font:10px/1.2 system-ui;color:#888;z-index:99;pointer-events:none';
+        /* hidden by default — the trap stays armed for later hunts;
+           ?mstat=1 brings the line back (Roger, 2026-11-22) */
+        if (!new URLSearchParams(location.search).has('mstat'))
+          el.style.display = 'none';
         let n = 0, grant = '-', lastErr = '', dbg = '';
         /* game/anim state + swallowed draw errors — polled so the line
            always shows where the page thinks it is. ERR text is

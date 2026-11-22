@@ -71,7 +71,7 @@ window.Anim = (function () {
   const TWIST_MIN = 1.8, TWIST_SPAN = 5;  // s between turns
   const TWIST_EASE = 0.12;    // per-frame approach of a turn
   const LEAN_AMP = 0.08;      // segD — weight shift into a turn
-  /* the pile: twelve seats in three rows behind the head, centres
+  /* the run.pile: twelve run.seats in three rows behind the head, centres
      closer than a disc so the body overlaps and reads as a heap.
      Row 0 tucks behind the head; the tail takes the last back seat.
      Seats fill centre-out so the mound grows symmetrically. */
@@ -82,12 +82,12 @@ window.Anim = (function () {
   const PILE_ORDERS = { 3: [1, 0, 2], 4: [1, 2, 0, 3], 5: [2, 1, 3, 0, 4] };
   const SEAT_SECS = 0.35;             // s — the hop from head to seat
   const ROOST_SECS = 2.4;             // s — glance both ways at home
-  /* the melt pile (Roger's remembered collapse, 2026-11-04): at home
+  /* the melt run.pile (Roger's remembered collapse, 2026-11-04): at home
      the body's momentum continues — every segment keeps pressing
      toward the head until it meets resistance, then accommodates
      sideways. The heap forms by compression, irregular by nature:
      "a bunch of ice cubes part melted" is what the SEATS version
-     looked like — this is the elastic pile-up instead. */
+     looked like — this is the elastic run.pile-up instead. */
   const MELT_MIN = 0.62;              // ×segD — closest centres may sit
   const MELT_SETTLE = 2.4;            // s after arrival → counted piled
 
@@ -150,7 +150,7 @@ window.Anim = (function () {
     ],
     // home to the head row (tilt games, 2026-11-22): a lap of the
     // board to say the table is whole, then a seek to the station and
-    // the roost collapse — body feeds into the head until it stands
+    // the run.roost collapse — body feeds into the head until it stands
     // alone, glances both ways, and goes still
     home: [
       { laptrack: true, calm: true, laps: 1, speed: 1.6 },
@@ -170,8 +170,8 @@ window.Anim = (function () {
   if (qs.get('motion') === '0') MOTION = false;
   if (qs.get('motion') === '1') MOTION = true;
   // how the body piles at home: 'melt' = momentum collapse (default),
-  // 'seats' = fixed mound slots. ?pile=seats keeps the variant alive.
-  const PILE = qs.get('pile') || 'melt';
+  // 'run.seats' = fixed mound slots. ?run.pile=run.seats keeps the variant alive.
+  const PILE = qs.get('run.pile') || 'melt';
   let rng = Math.random;
   if (qs.get('seed')) {
     let s = (parseInt(qs.get('seed'), 10) >>> 0) || 1;
@@ -309,13 +309,15 @@ window.Anim = (function () {
   let spinning = false, whirlpool = false, spinProg = 0;
   let stillK = 1, ring = null, glowT0 = -1;
   let beginN = 0, doneN = 0;             // begin/onDone call counters (debug)
-  let denHome = false, denDone = false;  // the seek reached its target
-  let roost = false, roostT = 0;         // 'home': absorb-into-head ending
-  let gather = 0;                        // arc the body has caught up
-  let fidgets = null;                    // restless-in-bed schedule
-  let twistSt = null;                    // the head's scanning turns
-  let seats = null;                      // the mound layout
-  let pile = null, denHomeT = 0;         // melt positions + arrival clock
+  /* all per-run flags live in one object created fresh in begin() —
+     "new run = new object", so no leftover can survive between runs
+     (the lesson of the second-completion blank, 2026-11-22). Fields:
+     denHome/denDone: the seek reached its target; roost/roostT: the
+     'home' absorb-into-head ending; gather: arc the body has caught
+     up; denHomeT: arrival clock; seats: mound layout; pile: melt
+     positions; fidgets: restless-in-bed schedule; twistSt: the
+     head's scanning turns. */
+  let run = null;
   let gaze = 0, nextBlinkAt = 0, blinkT0 = -1;
   let from = [], settleT = 0;  // positions the page handed over + when —
   //   segments ease from there onto the trail (a page's pose spacing is
@@ -448,9 +450,7 @@ window.Anim = (function () {
     hole = null; holeArc = null;
     ring = null; glowT0 = -1; stillK = 1;
     spinning = false; whirlpool = false; spinProg = 0;
-    denHome = false; denDone = false; gather = 0; fidgets = null;
-    twistSt = null; seats = null; pile = null;
-    roost = kind === 'home'; roostT = 0;
+    run.roost = kind === 'home';
     // 'den'/'home' seek a given point (opts.target), not a hole — hide
     // marks it so the sandy burrow isn't drawn; no target → corner
     if (kind === 'den' || kind === 'home') {
@@ -801,20 +801,20 @@ window.Anim = (function () {
           holeArc = tipArc;
           script.shift(); phraseArc = 0;
           if (hole.hide && !script.length) {
-            denHome = true;
-            denHomeT = depAge;   // arrival time on the depart clock —
+            run.denHome = true;
+            run.denHomeT = depAge;   // arrival time on the depart clock —
             // baked runs (departAt) count it the same as live frames
           }
           continue;
         }
       } else if (!ph) {
-        if (denHome) {
+        if (run.denHome) {
           // the head is home; the body keeps coming — each segment's
           // read distance shortens to zero, then it hops onto its seat
-          // (the last seatArc of gather is the hop itself)
-          gather = Math.min((N - 1) * SPACING_K * segD +
+          // (the last seatArc of run.gather is the hop itself)
+          run.gather = Math.min((N - 1) * SPACING_K * segD +
             DEPART_SPEED * segD * 1.15 * SEAT_SECS,
-            gather + v * budget);
+            run.gather + v * budget);
           break;
         }
         if (holeArc !== null) {
@@ -898,6 +898,65 @@ window.Anim = (function () {
       ctx.fillStyle = '#101418'; ctx.fill();
     }
   }
+  /* the interactive head — the one canvas head for station/rail and
+     celebration contexts (ported verbatim from snake-puzzle's drawHead
+     2026-11-22; the engine's own drawHead stays for departures — a
+     simpler register). Pure renderer: the page computes `look` (its
+     gaze target, e.g. watching the piece in hand) and `sq` (lid
+     openness — the page owns its blink clock: a scripted wink must
+     never collide with a random blink).
+     face: 0 = eyes on the heading, 1 = turned to look out at you;
+     fac: the repertoire recipe — {l,r} lids, bob, yaw, gx, gy. */
+  function stationHead(c, sd, s, nxt, tbl, now, face, fac, look, sq) {
+    nxt = nxt || { x: s.x, y: s.y + 1 };
+    fac = fac || { l: 1, r: 1 };
+    if (sq === undefined) sq = 1;   // lid openness — the page owns its
+    // blink clock (a scripted wink must never collide with a random one)
+    const ang = Math.atan2(s.y - nxt.y, s.x - nxt.x);
+    const r = sd / 2 * (1 + 0.1 * face);   // 0.1 = LOOK_GROW
+    const hue = (tbl * 31 + 200) % 360;
+    c.save();
+    c.translate(0, (fac.bob || 0) * r * 2);
+
+    const g = c.createRadialGradient(
+      s.x - r * 0.33, s.y - r * 0.33, r * 0.2,
+      s.x, s.y, r);
+    g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
+    g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
+    c.beginPath(); c.arc(s.x, s.y, r, 0, 7);
+    c.fillStyle = g; c.fill();
+    c.lineWidth = 1.5;
+    c.strokeStyle = 'hsl(' + hue + ',58%,40%)';
+    c.stroke();
+
+    const ex = Math.cos(look), ey = Math.sin(look);
+    const px = -ey, py = ex;
+    // each eye eases from its place on the heading to the front of the
+    // face — the left-hand eye stays the left-hand eye, so none cross
+    const eyes = [-1, 1].map(side => ({
+      x: s.x + ex * r * 0.38 + px * side * r * 0.36,
+      y: s.y + ey * r * 0.38 + py * side * r * 0.36
+    })).sort((a, b) => a.x - b.x);
+    /* pupils clipped to the head's rim — the yaw sends them round
+       one edge and back round the other, as on the lab's obverse */
+    c.save();
+    c.beginPath(); c.arc(s.x, s.y, r, 0, 7); c.clip();
+    eyes.forEach((e, k) => {
+      const fx = s.x + (k ? 1 : -1) * r * 0.34, fy = s.y - r * 0.06;
+      const x = e.x + (fx - e.x) * face + (fac.gx || 0) * r +
+          Math.sin(fac.yaw || 0) * r * .5,
+        y = e.y + (fy - e.y) * face + (fac.gy || 0) * r;
+      const er = r * (0.16 + 0.03 * face);
+      const lid = Math.min(sq, k ? fac.r : fac.l);
+      c.beginPath();
+      c.ellipse(x, y, er, Math.max(er * lid, r * 0.03),
+        look * (1 - face), 0, 7);
+      c.fillStyle = '#101418'; c.fill();
+    });
+    c.restore();
+    c.restore();
+  }
+
   function numeral(v, cx, cy, size, colour) {
     ctx.font = '700 ' + size + 'px Andika, -apple-system, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -927,15 +986,15 @@ window.Anim = (function () {
     tipArc = 0; hole = null; holeArc = null; script = [];
     spinning = false; whirlpool = false; spinProg = 0;
     ring = null; glowT0 = -1; stillK = 1;
-    /* every run starts clean (2026-11-22, the second-completion bug):
-       these used to reset only in startDepart — but 'beat' lasts
-       ~1.4s, and the roost block keys on denHome alone, so a stale
-       denHome+denDone+old roostT ended run 2 in a single frame with
-       the !denDone guard swallowing the second onDone — blank screen,
-       locked row. begin() is the invariant: no leftovers. */
-    denHome = false; denDone = false; gather = 0; denHomeT = 0;
-    roost = false; roostT = 0;
-    seats = null; pile = null; fidgets = null; twistSt = null;
+    /* new run = new object — the lesson of the second-completion blank
+       (2026-11-22): run flags that reset only in startDepart let the
+       roost block read game one's leftovers during 'beat' and satisfy
+       the ending in one frame, the !denDone guard swallowing onDone —
+       blank screen, locked row. begin() is the invariant: no
+       leftovers, by construction. */
+    run = { denHome: false, denDone: false, gather: 0, denHomeT: 0,
+      roost: false, roostT: 0, seats: null, pile: null,
+      fidgets: null, twistSt: null };
     prevNow = t0;
     gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
     nextBlinkAt = t0 + 2000 + rng() * 2000;
@@ -981,7 +1040,7 @@ window.Anim = (function () {
       now - beatT > (N - 1) * BEAT_STAGGER * 1000 + BEAT_HOLD * 1000 + 250)
       startDepart(undefined, now);
 
-    // (home reporting lives in the pile block below — onDone fires
+    // (home reporting lives in the run.pile block below — onDone fires
     // when the last seat is taken)
 
     // the hole, if there is one, under everything — a flat sandy circle
@@ -1035,7 +1094,7 @@ window.Anim = (function () {
     const pos = [];
     let allGone = true;
     for (let i = 0; i < N; i++) {
-      const sm = sampleTrail(Math.max(0, i * sp - gather));
+      const sm = sampleTrail(Math.max(0, i * sp - run.gather));
       let sc = 1;
       if (state === 'depart') {
         if (sm.x < -segD || sm.x > W + segD || sm.y < -segD || sm.y > H + segD) {
@@ -1086,20 +1145,20 @@ window.Anim = (function () {
         pos[i].y = from[i].y + (pos[i].y - from[i].y) * e;
       }
     }
-    // home — the pile gathers (Roger, 2026-11-04): the head scans and
+    // home — the run.pile gathers (Roger, 2026-11-04): the head scans and
     // bobs from the moment it parks. The body keeps walking the trail
     // until each segment reaches the tip, then takes a fixed seat in
     // an overlapping mound behind the head — the pack gathered one
     // card at a time, tail last. Settled, the heap stays restless:
     // a standing-still wriggle, small shifts out of place and back.
-    if (denHome) {
+    if (run.denHome) {
       const tip = sampleTrail(0);
       const facing = Math.atan2(tip.ty, tip.tx);
-      if (!seats && PILE === 'seats') {
-        seats = [];
+      if (!run.seats && PILE === 'run.seats') {
+        run.seats = [];
         PILE_ROWS.forEach((cnt, r) => {
           PILE_ORDERS[cnt].forEach(k => {
-            seats.push({
+            run.seats.push({
               u: -PILE_U[r] * segD + (rng() - 0.5) * PILE_JIT * segD,
               p: (k - (cnt - 1) / 2) * PILE_GAP * segD +
                 (rng() - 0.5) * PILE_JIT * segD
@@ -1107,15 +1166,15 @@ window.Anim = (function () {
           });
         });
       }
-      if (!twistSt) twistSt = { a: 0, tgt: 0, next: now + 1400 + rng() * 2000 };
-      if (now >= twistSt.next) {
-        twistSt.tgt = (rng() * 2 - 1) * TWIST_MAX *
+      if (!run.twistSt) run.twistSt = { a: 0, tgt: 0, next: now + 1400 + rng() * 2000 };
+      if (now >= run.twistSt.next) {
+        run.twistSt.tgt = (rng() * 2 - 1) * TWIST_MAX *
           (rng() < 0.22 ? 1.25 : 1);   // the odd bigger look-back
-        twistSt.next = now + (TWIST_MIN + rng() * TWIST_SPAN) * 1000;
+        run.twistSt.next = now + (TWIST_MIN + rng() * TWIST_SPAN) * 1000;
       }
-      twistSt.a += wrapAngle(twistSt.tgt - twistSt.a) * TWIST_EASE;
-      const la = facing + Math.PI / 2 * Math.sign(twistSt.a || 1);
-      const lean = Math.min(1, Math.abs(twistSt.a) / TWIST_MAX)
+      run.twistSt.a += wrapAngle(run.twistSt.tgt - run.twistSt.a) * TWIST_EASE;
+      const la = facing + Math.PI / 2 * Math.sign(run.twistSt.a || 1);
+      const lean = Math.min(1, Math.abs(run.twistSt.a) / TWIST_MAX)
         * LEAN_AMP * segD;
       if (pos[0]) {
         pos[0].x += Math.cos(la) * lean
@@ -1124,96 +1183,96 @@ window.Anim = (function () {
           + Math.sin(now / 850) * HEAD_BOB * segD;
       }
       const ax = pos[0] ? pos[0].x : tip.x, ay = pos[0] ? pos[0].y : tip.y;
-      if (!denHomeT) denHomeT = departAge;   // live-path fallback
-      if (roost) {
+      if (!run.denHomeT) run.denHomeT = departAge;   // live-path fallback
+      if (run.roost) {
         /* the row-homecoming: the body feeds into the head a disc at a
            time (nearest first, tail last) until the head stands alone —
-           then a beat of the restless glance (twistSt, already running
+           then a beat of the restless glance (run.twistSt, already running
            above) before it goes still and the page takes the head over
            as a row button */
         for (let i = 1; i < N; i++)
-          if (pos[i] && i * sp - gather <= 0) pos[i] = null;
-        if (!denDone && gather >= (N - 1) * sp) {
-          denDone = true; roostT = now;
+          if (pos[i] && i * sp - run.gather <= 0) pos[i] = null;
+        if (!run.denDone && run.gather >= (N - 1) * sp) {
+          run.denDone = true; run.roostT = now;
           if (onDone) { doneN++; onDone(now); } // the page fades the row up now —
           // the canvas head keeps glancing until 'gone'
         }
-        if (denDone && now - roostT > ROOST_SECS * 1000) {
+        if (run.denDone && now - run.roostT > ROOST_SECS * 1000) {
           state = 'gone';
           if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
           return;
         }
       } else if (PILE === 'melt') {
         // momentum continues: every segment keeps pressing toward the
-        // head at gather pace; accommodation happens by contact —
+        // head at run.gather pace; accommodation happens by contact —
         // overlaps push apart, and the slide goes sideways. The heap
         // is never assigned shape — it jams where physics leaves it.
         const gv = DEPART_SPEED * segD * 1.15;
         const min = MELT_MIN * segD;
         const meltStep = st => {
           for (let i = 1; i < N; i++) {
-            if (!pile[i]) continue;
-            const dx = ax - pile[i].x, dy = ay - pile[i].y;
+            if (!run.pile[i]) continue;
+            const dx = ax - run.pile[i].x, dy = ay - run.pile[i].y;
             const d = Math.hypot(dx, dy) || 1;
-            pile[i].x += dx / d * gv * st;
-            pile[i].y += dy / d * gv * st;
+            run.pile[i].x += dx / d * gv * st;
+            run.pile[i].y += dy / d * gv * st;
           }
           for (let pass = 0; pass < 4; pass++) {
             for (let i = 1; i < N; i++) {
-              if (!pile[i]) continue;
-              let dx = pile[i].x - ax, dy = pile[i].y - ay;
+              if (!run.pile[i]) continue;
+              let dx = run.pile[i].x - ax, dy = run.pile[i].y - ay;
               let d = Math.hypot(dx, dy);
               if (d < min) {
                 const push = (min - d) / (d || 1);
-                pile[i].x += dx * push; pile[i].y += dy * push;
+                run.pile[i].x += dx * push; run.pile[i].y += dy * push;
               }
               for (let j = 1; j < i; j++) {
-                if (!pile[j]) continue;
-                dx = pile[i].x - pile[j].x; dy = pile[i].y - pile[j].y;
+                if (!run.pile[j]) continue;
+                dx = run.pile[i].x - run.pile[j].x; dy = run.pile[i].y - run.pile[j].y;
                 d = Math.hypot(dx, dy);
                 if (d < min) {
                   const half = (min - d) / (d || 1) * 0.5;
-                  pile[i].x += dx * half; pile[i].y += dy * half;
-                  pile[j].x -= dx * half; pile[j].y -= dy * half;
+                  run.pile[i].x += dx * half; run.pile[i].y += dy * half;
+                  run.pile[j].x -= dx * half; run.pile[j].y -= dy * half;
                 }
               }
             }
           }
         };
-        if (!pile) {
+        if (!run.pile) {
           // seed from the body's natural arrival arrangement — the
           // trail as it lay when the head parked, NOT the gathered
           // sample (all-at-tip seeds coincide and can't separate)
-          pile = segs.map((s, i) => {
+          run.pile = segs.map((s, i) => {
             if (!i) return null;
             const p = sampleTrail(i * sp);
             return { x: p.x, y: p.y };
           });
           // a baked run pretends the melt already ran — step it forward
           // so stills show the settled heap, not its first instant
-          const bake = Math.min(4, Math.max(0, departAge - denHomeT));
+          const bake = Math.min(4, Math.max(0, departAge - run.denHomeT));
           for (let k = 0; k < bake / 0.016; k++) meltStep(0.016);
         }
         meltStep(dt);
         for (let i = 1; i < N; i++)
-          if (pile[i]) pos[i] = { x: pile[i].x, y: pile[i].y, sc: 1 };
-        if (!denDone && departAge - denHomeT > MELT_SETTLE) {
-          denDone = true;
+          if (run.pile[i]) pos[i] = { x: run.pile[i].x, y: run.pile[i].y, sc: 1 };
+        if (!run.denDone && departAge - run.denHomeT > MELT_SETTLE) {
+          run.denDone = true;
           if (onDone) { doneN++; onDone(now); }
         }
       } else {
-        // 'seats': each arrived segment takes a fixed place in a
+        // 'run.seats': each arrived segment takes a fixed place in a
         // three-row mound behind the head, tail last
         const ux = Math.cos(facing), uy = Math.sin(facing);
         const px = -uy, py = ux;
         const seatArc = DEPART_SPEED * segD * 1.15 * SEAT_SECS;
         let allSeated = true;
         for (let i = 1; i < N; i++) {
-          const d = i * sp - gather;
+          const d = i * sp - run.gather;
           if (d > 0) { allSeated = false; continue; }
           const k = Math.min(1, -d / seatArc);
           const e = k * k * (3 - 2 * k);
-          const st = seats[i - 1];
+          const st = run.seats[i - 1];
           const tx = ax + ux * st.u + px * st.p;
           const ty = ay + uy * st.u + py * st.p;
           pos[i] = pos[i] || { x: ax, y: ay, sc: 1 };
@@ -1221,23 +1280,23 @@ window.Anim = (function () {
           pos[i].y = ay + (ty - ay) * e;
           if (k < 1) allSeated = false;
         }
-        if (!denDone && allSeated) {
-          denDone = true;
+        if (!run.denDone && allSeated) {
+          run.denDone = true;
           if (onDone) { doneN++; onDone(now); }
         }
       }
-      if (denDone) {
-        if (!fidgets) fidgets = segs.map((s, i) => ({
+      if (run.denDone) {
+        if (!run.fidgets) run.fidgets = segs.map((s, i) => ({
           t0: -1,
           next: now + (qs.has('fig') ? 200 + i * 60
             : 700 + rng() * FIDGET_SPAN * 1000 * (0.3 + i / N)),
           a: 0, amp: 0
         }));
         let act = 0;
-        fidgets.forEach(f => {
+        run.fidgets.forEach(f => {
           if (f.t0 >= 0 && now - f.t0 < FIDGET_DUR * 1000) act++;
         });
-        fidgets.forEach((f, i) => {
+        run.fidgets.forEach((f, i) => {
           if (!i || !pos[i]) return;
           if (f.t0 < 0 && now >= f.next && act < 3) {
             f.t0 = now; act++;
@@ -1265,16 +1324,16 @@ window.Anim = (function () {
         Math.round(p.x) + ',' + Math.round(p.y) : 'x').join(' ');
       ctx.fillStyle = '#9ab0c0'; ctx.font = '11px monospace';
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText('denHome=' + denHome + ' denDone=' + denDone +
-        ' gather=' + Math.round(gather) +
+      ctx.fillText('run.denHome=' + run.denHome + ' run.denDone=' + run.denDone +
+        ' run.gather=' + Math.round(run.gather) +
         ' p1=' + (pos[1] ? Math.round(pos[1].x) + ',' + Math.round(pos[1].y) : 'null') +
         ' p12=' + (pos[12] ? Math.round(pos[12].x) + ',' + Math.round(pos[12].y) : 'null'), 8, 8);
     }
     /* watchdog (2026-11-22): a 'home' departure that outlives its
-       whole script — lap ≈10s + dive + roost ≈6s — has lost its snake;
+       whole script — lap ≈10s + dive + run.roost ≈6s — has lost its snake;
        failing safe beats a blank screen: finish the ending so the
        page gets its row back either way */
-    if (roost && state === 'depart' && departAge > 30) {
+    if (run.roost && state === 'depart' && departAge > 30) {
       state = 'gone';
       if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
       if (onDone) { doneN++; onDone(now); }
@@ -1309,7 +1368,7 @@ window.Anim = (function () {
       if (!pos[i]) continue;
       const s = segs[i], r = segD / 2;
       if (i === 0) {
-        drawHead(pos[0], headFacing + (twistSt ? twistSt.a : 0),
+        drawHead(pos[0], headFacing + (run.twistSt ? run.twistSt.a : 0),
           now, pos[0].sc);
         continue;
       }
@@ -1458,12 +1517,15 @@ window.Anim = (function () {
     pose,
     snapshot,
     drawCoil,
+    stationHead,
     get state() { return state; },
     // live internals for the blank-screen hunt (the mstat line reads this)
     get _dbg() {
       return 'b:' + beginN + ' dn:' + doneN + ' k:' + pageKind +
-        ' dH:' + (denHome ? 1 : 0) + ' dD:' + (denDone ? 1 : 0) +
-        ' g:' + Math.round(gather) + ' r:' + (roost ? 1 : 0);
+        ' dH:' + (run && run.denHome ? 1 : 0) +
+        ' dD:' + (run && run.denDone ? 1 : 0) +
+        ' g:' + Math.round(run ? run.gather : 0) +
+        ' r:' + (run && run.roost ? 1 : 0);
     }
   };
 })();

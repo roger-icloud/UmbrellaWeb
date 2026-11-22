@@ -198,7 +198,7 @@
   </div>
 
   <script src="snake.js?v=2"></script>
-  <script src="anim.js?v=22"></script>
+  <script src="anim.js?v=23"></script>
   <script src="progress.js"></script>
 
   <script>
@@ -264,7 +264,6 @@
     const CHEER_AMP = 0.3;      // peak sway, × segD
     const LOOK_AT = 2.8;        // s in: the head turns to face you
     const LOOK_SECS = 0.5;      // s for the turn
-    const LOOK_GROW = 0.1;      // the head comes a little toward you
     const WINK_AT = 3.5;        // s in: one slow wink
     const WINK_SECS = 0.7;      // s for the wink, held shut in the middle
     const ASK_AT = 4.2;         // s in: "Another snake?" fades up
@@ -979,13 +978,16 @@
         ctx.translate(h.x, h.y);
         ctx.scale(h.r / (segD / 2), h.r / (segD / 2));
         ctx.translate(-h.x, -h.y);
-        drawHead({ x: h.x, y: h.y }, null, h.t, now, 0,
+        /* the shared interactive head (anim.js stationHead) — the
+           page passes its gaze (eyeLook) and blink clock (blinkScale) */
+        Anim.stationHead(ctx, segD, { x: h.x, y: h.y }, null, h.t, now, 0,
           chosen ? {
             l: 1, r: 1,
             bob: 0.05 * Math.sin(now / 350),
             gx: Math.max(-0.35, Math.min(0.35, (offerMid - h.x) / W * 2)),
             gy: -0.05
-          } : undefined);
+          } : undefined,
+          eyeLook({ x: h.x, y: h.y }, -Math.PI / 2), blinkScale(now));
         ctx.restore();
         if (chosen) {
           /* the waiting ring pulses gently: "picked; find me a
@@ -1251,60 +1253,8 @@
       return 1 - Math.sin(k * Math.PI) * 0.88;
     }
 
-    /* same construction as the tilt-snake head — radial-shaded ball,
-       rim stroke, pupil pair forward and across — but the hue comes
-       from the table so the snake takes its table's colour */
-    /* face: 0 = eyes on the heading, 1 = turned to look out at you;
-       fac: the shared repertoire's per-frame recipe — {l,r} lid
-       factors, gaze offsets gx/gy, a bob and a yaw slide (snake.js) */
-    function drawHead(s, nxt, tbl, now, face = 0, fac = { l: 1, r: 1 }) {
-      nxt = nxt || { x: s.x, y: s.y + 1 };
-      const ang = Math.atan2(s.y - nxt.y, s.x - nxt.x);
-      const r = segD / 2 * (1 + LOOK_GROW * face);
-      const hue = (tbl * 31 + 200) % 360;
-      ctx.save();
-      ctx.translate(0, (fac.bob || 0) * r * 2);
-
-      const g = ctx.createRadialGradient(
-        s.x - r * 0.33, s.y - r * 0.33, r * 0.2,
-        s.x, s.y, r);
-      g.addColorStop(0, 'hsl(' + hue + ',62%,64%)');
-      g.addColorStop(1, 'hsl(' + hue + ',56%,28%)');
-      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7);
-      ctx.fillStyle = g; ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = 'hsl(' + hue + ',58%,40%)';
-      ctx.stroke();
-
-      const look = eyeLook(s, ang);
-      const ex = Math.cos(look), ey = Math.sin(look);
-      const px = -ey, py = ex;
-      const sq = blinkScale(now);
-      // each eye eases from its place on the heading to the front of the
-      // face — the left-hand eye stays the left-hand eye, so none cross
-      const eyes = [-1, 1].map(side => ({
-        x: s.x + ex * r * 0.38 + px * side * r * 0.36,
-        y: s.y + ey * r * 0.38 + py * side * r * 0.36
-      })).sort((a, b) => a.x - b.x);
-      /* pupils clipped to the head's rim — the yaw sends them round
-         one edge and back round the other, as on the lab's obverse */
-      ctx.save();
-      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 7); ctx.clip();
-      eyes.forEach((e, k) => {
-        const fx = s.x + (k ? 1 : -1) * r * 0.34, fy = s.y - r * 0.06;
-        const x = e.x + (fx - e.x) * face + (fac.gx || 0) * r +
-            Math.sin(fac.yaw || 0) * r * .5,
-          y = e.y + (fy - e.y) * face + (fac.gy || 0) * r;
-        const er = r * (0.16 + 0.03 * face);
-        const lid = Math.min(sq, k ? fac.r : fac.l);
-        ctx.beginPath();
-        ctx.ellipse(x, y, er, Math.max(er * lid, r * 0.03),
-          look * (1 - face), 0, 7);
-        ctx.fillStyle = '#101418'; ctx.fill();
-      });
-      ctx.restore();
-      ctx.restore();
-    }
+    /* the head renderer now lives in anim.js as Anim.stationHead —
+       one canvas head, shared (the local copy retired 2026-11-22) */
 
     function draw(now) {
       if (demo) stepDemo(now);
@@ -1461,7 +1411,11 @@
           const cx = s.x + ox + (w ? w[i].x : 0),
             cy = s.y + (w ? w[i].y : 0), r = segD / 2;
           if (i === 0) {
-            drawHead({ x: cx, y: cy }, L[1], sn.tbl, now, face, fac);
+            Anim.stationHead(ctx, segD, { x: cx, y: cy }, L[1], sn.tbl,
+              now, face, fac,
+              eyeLook({ x: cx, y: cy },
+                L[1] ? Math.atan2(cy - L[1].y, cx - L[1].x) : -Math.PI / 2),
+              blinkScale(now));
             continue;
           }
           if (duoOn && sn.sn === 0 && i === xA &&

@@ -45,36 +45,6 @@
       white-space: pre;
     }
 
-    #chipRow {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: center;
-      padding: 0 12px;
-      z-index: 5;
-    }
-
-    #chipRow button {
-      min-width: 44px;
-      height: 44px;
-      font-size: 15px;
-      font-family: inherit;
-      border-radius: 10px;
-      border: 1px solid #3a4a58;
-      background: rgba(30, 42, 54, .9);
-      color: #cfd8e0;
-    }
-
-    #chipRow button.on {
-      border-color: #4da3ff;
-      color: #fff;
-      background: rgba(40, 64, 88, .95);
-    }
-
     .overlay {
       position: fixed;
       inset: 0;
@@ -123,7 +93,6 @@
 
   <canvas id="c"></canvas>
   <div id="hud"></div>
-  <div id="chipRow"></div>
 
   <div id="rotOverlay" class="overlay hidden">
     <div class="title">Turn upright</div>
@@ -136,6 +105,8 @@
     <button class="go" id="again">Another table</button>
   </div>
 
+  <script src="anim.js?v=23"></script>
+  <script src="progress.js"></script>
   <script>
     'use strict';
 
@@ -172,6 +143,41 @@
       cell = bS / 10;
       bX = (W - bS) / 2;
       bY = TOP_RESERVE + (availH - bS) / 2;
+      layoutHeadSt();
+    }
+
+    /* the picker is canvas station heads (Roger 2026-11-22 — "heads
+       that promise"): the same Anim.stationHead the snake games use.
+       The head you wake is the table you play — promise kept. */
+    let headSt = [], chosenT = 0;
+    function layoutHeadSt() {
+      const n = 11, edge = 8;
+      const spacing = (W - edge * 2) / n;
+      const r = Math.min(22, spacing / 2 - 1.5, BOT_RESERVE / 2 - 10);
+      const y = H - BOT_RESERVE / 2;
+      headSt = [];
+      for (let i = 0; i < n; i++)
+        headSt.push({ t: i + 2, x: edge + spacing * (i + 0.5), y, r });
+    }
+    function headBlinkSq(h, now) {
+      if (h.bA === undefined) h.bA = now + Math.random() * 5000;
+      if (h.b0 === undefined || h.b0 < 0) {
+        if (now < h.bA) return 1;
+        h.b0 = now;
+      }
+      const k = (now - h.b0) / 280;
+      if (k >= 1) {
+        h.b0 = -1;
+        h.bA = now + 2400 + Math.random() * 3600;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+    function pickHead(t) {
+      const wh = headSt[t - 2];
+      if (wh) wh.b0 = performance.now();
+      chosenT = t;
+      reset(t);
     }
     window.addEventListener('resize', resize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
@@ -207,19 +213,6 @@
       logEvent('start', { table: t });
     }
 
-    /* ---------- table chips ---------- */
-    const chips = document.getElementById('chipRow');
-    for (let t = 2; t <= 12; t++) {
-      const b = document.createElement('button');
-      b.textContent = '×' + t;
-      b.dataset.t = t;
-      b.addEventListener('click', () => {
-        [...chips.children].forEach(c => c.classList.remove('on'));
-        b.classList.add('on');
-        reset(t);
-      });
-      chips.appendChild(b);
-    }
 
     /* ---------- tap → nearest cell ----------
        Cells are drawn at whatever size the screen affords — on a phone
@@ -249,6 +242,11 @@
     checkOrientation();
 
     cv.addEventListener('pointerdown', (t) => {
+      /* a head tap picks any time — heads never lock; the board tap
+         resolves only while playing */
+      const ph = headSt.find(h =>
+        Math.hypot(t.clientX - h.x, t.clientY - h.y) <= h.r * 1.5);
+      if (ph) { pickHead(ph.t); return; }
       if (state !== 'play' || paused) return;
       const gx = (t.clientX - bX) / cell;
       const gy = (t.clientY - bY) / cell;
@@ -288,7 +286,7 @@
       state = 'idle';
       table = 0;
       found = new Set();
-      [...chips.children].forEach(c => c.classList.remove('on'));
+      chosenT = 0;
     });
 
     /* ---------- draw ---------- */
@@ -354,6 +352,28 @@
       hud.textContent = state === 'idle'
         ? 'pick a table —\ntap its multiples'
         : '';
+
+      /* the head rail — awake eyes on the chosen table's head, its
+         numeral on the face; the others wait */
+      for (const h of headSt) {
+        const chosen = h.t === chosenT && state !== 'idle';
+        Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
+          now, 0, chosen ? { l: 1, r: 1, bob: 1 } : undefined,
+          -Math.PI / 2, headBlinkSq(h, now));
+        if (chosen) {
+          const hue = (h.t * 31 + 200) % 360;
+          ctx.strokeStyle = `hsla(${hue},65%,60%,.7)`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(240,246,255,0.85)';
+        ctx.font = '600 ' + Math.round(h.r * 0.55) +
+          'px Andika, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('×' + h.t, h.x, h.y + h.r * 0.42);
+      }
     }
 
     function frame() {

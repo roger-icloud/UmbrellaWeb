@@ -682,6 +682,22 @@ suggest or stage tables accordingly. Design deferred; the stats
 (misses, doneMs) already exist in-page per round — persistence and
 the guidance policy are the open parts.
 
+**Run-state invariant (the blank-screen bug, 2026-11-22).** `begin()`
+must reset *every* module-level run flag — `denHome`, `denDone`,
+`gather`, `roost`, `roostT`, `seats`, `pile`, `fidgets`, `twistSt` —
+not just `state`. The flags used to clear in `startDepart` (~1.4s into
+a run); in between, the roost block (guarded by `denHome` alone, not
+`state==='depart'`) read game one's leftovers, satisfied the ending in
+one frame, and the `!denDone` guard swallowed `onDone` — row locked,
+page black, no error. Signature: *works once, fails every time after* —
+state surviving between runs. When adding module-level state, reset it
+in `begin()`; when adding a phase-block, gate it on `state` too.
+Diagnostic grammar that cornered it (kept, `?mstat=1` on tilt-snake):
+`b:`/`dn:` begin/onDone counters + `unlock@`/`lock@` timestamps — a
+second `b:` without a matching `dn:` names the swallowed callback.
+Cache-buster discipline: bump `?v=` on every anim.js change, including
+fixes shipped under an already-bumped URL.
+
 ## Intro page — snake frame (built 2026-11-11)
 
 `intro.html` runs two household snakes (×3 purple, ×9 green — green was

@@ -214,7 +214,11 @@
          leftovers never go there; its job is widening the dealt
          pool (11, 13, 17, 19, 23… become askable).
        · capture feel: HOLE_R vs BALL_R gap, PUSH strength. */
-    const HOLE_R = 30;        // hole rim radius
+    const HOLE_R = 30;        // hole rim radius — the open mouth
+    const FACE_R = HOLE_R * 2.05; /* Roger 2026-11-23: the mouth sits
+       where a mouth would be on a much larger head — a committee of
+       great snake faces, just touching at the fullest rows */
+    const GULP_SECS = 1.3;    // mouth closes on a correct sink, reopens
     const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
     const HOLE_PUSH = 300;    // refusal ejection speed
     const HOLE_FLASH = 0.6;   // s of rim flash on refusal
@@ -1085,6 +1089,7 @@
                was an invented ranking, retired 2026-10-28 */
             if (holeFits(h, ballNum)) {
               sink = { hole: h, k: 0 };
+              h.gulpT = now;   // the mouth closes over its catch
               ball.vx = ball.vy = 0;
             } else {
               flashUntil = now + HOLE_FLASH * 1000;
@@ -1143,7 +1148,19 @@
            on the upper arc — neutral, expectant, never prey-tracking */
         const hue = h.v === 0 ? 155 : (h.v * 31 + 200) % 360;
         const sat = h.v === 0 ? 28 : 58;
-        const faceR = HOLE_R + 11;
+        const faceR = FACE_R;
+        /* the gulp — a correct sink sets gulpT; the mouth closes
+           over the swallowed ball, holds a beat, then eases open */
+        let gs = 1;
+        if (h.gulpT !== undefined) {
+          const g = (now - h.gulpT) / (GULP_SECS * 1000);
+          if (g < 1) {
+            if (g < 0.32) { const t = g / 0.32; gs = 1 - 0.78 * t * t * (3 - 2 * t); }
+            else if (g < 0.55) gs = 0.22;
+            else { const t = (g - 0.55) / 0.45; gs = 0.22 + 0.78 * t * t * (3 - 2 * t); }
+          }
+        }
+        const mR = Math.max(3, HOLE_R * gs);
         const fg = ctx.createRadialGradient(
           hx, hy - faceR * 0.5, faceR * 0.2, hx, hy, faceR);
         fg.addColorStop(0, `hsl(${hue},${sat}%,62%)`);
@@ -1156,26 +1173,29 @@
         /* the eyes — a dark pupil in a cream white, looking straight
            out at the world, not at the ball */
         for (const s of [-1, 1]) {
-          const ex = hx + s * HOLE_R * 0.34;
-          const ey = hy - HOLE_R - 4;
+          const ex = hx + s * FACE_R * 0.5;
+          const ey = hy - FACE_R * 0.52;
           ctx.fillStyle = '#f2e9d8';
-          ctx.beginPath(); ctx.arc(ex, ey, 5.2, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(ex, ey, 9.5, 0, Math.PI * 2); ctx.fill();
           ctx.fillStyle = '#1a1410';
-          ctx.beginPath(); ctx.arc(ex, ey, 2.4, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(ex, ey, 4.4, 0, Math.PI * 2); ctx.fill();
         }
         /* the mouth stays the hole — gullet dark, a pale lower lip so
            it reads open rather than painted black */
         ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
-        ctx.beginPath(); ctx.arc(hx, hy, HOLE_R, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(hx, hy, mR, 0, Math.PI * 2); ctx.fill();
         ctx.lineWidth = 2;
         ctx.strokeStyle = flashing ? '#e0a53a'
           : `hsla(${hue},${sat}%,70%,0.55)`;
-        ctx.beginPath(); ctx.arc(hx, hy, HOLE_R - 1, 0, Math.PI * 2); ctx.stroke();
-        ctx.strokeStyle = `hsla(${hue},${sat}%,75%,0.8)`;
-        ctx.lineWidth = 2.6;
-        ctx.beginPath();
-        ctx.arc(hx, hy, HOLE_R - 0.5, Math.PI * 0.25, Math.PI * 0.75);
-        ctx.stroke();
+        ctx.beginPath(); ctx.arc(hx, hy, Math.max(2, mR - 1), 0, Math.PI * 2); ctx.stroke();
+        if (mR > 6) {
+          ctx.strokeStyle = `hsla(${hue},${sat}%,75%,0.8)`;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(hx, hy, mR - 0.5, Math.PI * 0.25, Math.PI * 0.75);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = Math.min(1, gs * 1.5);
         ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +
           ' Andika, -apple-system, system-ui, sans-serif';

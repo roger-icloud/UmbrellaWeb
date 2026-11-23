@@ -307,9 +307,13 @@
       const spacing = (Wd - edge * 2) / n;
       const r = Math.min(HEAD_R, spacing / 2 - 1.5);
       const y = Hd - r - 5;
+      const prev = headSt;
       headSt = [];
-      for (let i = 0; i < n; i++)
-        headSt.push({ t: i + 2, x: edge + spacing * (i + 0.5), y, r });
+      for (let i = 0; i < n; i++) {
+        const h = { t: i + 2, x: edge + spacing * (i + 0.5), y, r };
+        if (prev[i]) { h.b0 = prev[i].b0; h.bA = prev[i].bA; }
+        headSt.push(h);
+      }
     }
     /* each head keeps its own blink clock — sharing the game's clock
        blinked the whole rail in unison, which reads as a row of

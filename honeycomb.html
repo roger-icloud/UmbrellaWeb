@@ -215,9 +215,13 @@
       const spacing = (W - edge * 2) / n;
       const r = Math.min(22, spacing / 2 - 1.5, BOT_RESERVE / 2 - 10);
       const y = H - BOT_RESERVE / 2;
+      const prev = headSt;
       headSt = [];
-      for (let i = 0; i < n; i++)
-        headSt.push({ t: i + 2, x: edge + spacing * (i + 0.5), y, r });
+      for (let i = 0; i < n; i++) {
+        const h = { t: i + 2, x: edge + spacing * (i + 0.5), y, r };
+        if (prev[i]) { h.b0 = prev[i].b0; h.bA = prev[i].bA; }
+        headSt.push(h);
+      }
     }
     function headBlinkSq(h, now) {
       if (h.bA === undefined) h.bA = now + Math.random() * 5000;
@@ -827,6 +831,8 @@
        every state but 'done' (the coils own the board by then). */
     function drawRail(now) {
       if (state === 'done') return;
+      layoutHeadSt();   // live: the comb refits on viewport drift, so
+                        // must the rail (overlap report, 2026-11-23)
       for (const h of headSt) {
         const on = selected.includes(h.t);
         const kin = !on && selected.some(s => sharedCount(s, h.t) >= 2);

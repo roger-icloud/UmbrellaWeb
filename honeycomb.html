@@ -854,7 +854,16 @@
                  w: W - 2 * BOARD_PAD, h: H - TOP_RESERVE - BOT_RESERVE },
         segD: snap.segD,
         table: snap.table,
-        segs: snap.segs.map(s => ({ ...s })),
+        /* seed the trail from the WOUND positions (snap.pos), not the
+           segs' own x/y — those still carry the original found-path
+           cells, so the snake was re-posing to the zigzag chain at run
+           start and every segment popped through each corner of it
+           (Roger's "jerk passing numeral 13", 2026-11-23) */
+        segs: snap.segs.map((s, i) => ({
+          ...s,
+          x: snap.pos[i] ? snap.pos[i].x : s.x,
+          y: snap.pos[i] ? snap.pos[i].y : s.y
+        })),
         kind: 'home',
         target: st ? { x: st.x, y: st.y }
                    : { x: W / 2, y: H - BOT_RESERVE / 2 },

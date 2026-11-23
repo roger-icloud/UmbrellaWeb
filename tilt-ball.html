@@ -220,6 +220,9 @@
        great snake faces, just touching at the fullest rows */
     const MOUTH_RY = HOLE_R * 0.68;  // an open mouth is wide, not tall
     const GULP_SECS = 1.3;    // mouth closes on a correct sink, reopens
+    const HEAD_STAG = FACE_R * 0.7;  /* Roger 2026-11-23: heads stagger
+       vertically within a row so neighbouring faces don't overlap —
+       the mouth moves with its head, so the aim stays honest */
     const CAPTURE_IN = 14;    // ball centre must come this far inside the rim
     const HOLE_PUSH = 300;    // refusal ejection speed
     const HOLE_FLASH = 0.6;   // s of rim flash on refusal
@@ -470,6 +473,15 @@
         if (LAYOUT !== 'classic') row = row.sort((a, b) => a.v - b.v);
         row.forEach((h, i) => {
           const fx = r.xs[row.length][i], fy = r.y;
+          /* the stagger: alternate heads rise and sink; the same phase
+             every row so stacked rows move together, amplitude trimmed
+             by the headroom each row actually has */
+          const fyPx = fy * playH();
+          const headroom = Math.max(0, fyPx - FACE_R - 6);
+          const footroom = Math.max(0, playH() - fyPx - FACE_R - 6);
+          h.offY = row.length < 2 ? 0
+            : i % 2 ? Math.min(HEAD_STAG, footroom)
+                    : -Math.min(HEAD_STAG, headroom);
           if (now !== undefined && h.fx !== undefined &&
               (h.fx !== fx || h.fy !== fy)) {
             const [x, y] = holeAt(h, now);
@@ -481,11 +493,12 @@
     }
     /* a hole that changed rows slides there, eased */
     function holeAt(h, now) {
-      if (h.moveAt === undefined) return [h.fx, h.fy];
+      const oy = h.offY || 0;
+      if (h.moveAt === undefined) return [h.fx, h.fy + oy];
       const k = Math.min(1, (now - h.moveAt) / (HOLE_GLIDE * 1000));
-      if (k >= 1) { h.moveAt = undefined; return [h.fx, h.fy]; }
+      if (k >= 1) { h.moveAt = undefined; return [h.fx, h.fy + oy]; }
       const e = k * k * (3 - 2 * k);
-      return [h.ox + (h.fx - h.ox) * e, h.oy + (h.fy - h.oy) * e];
+      return [h.ox + (h.fx - h.ox) * e, h.oy + (h.fy - h.oy) * e + oy];
     }
     const holeX = h => holeAt(h, performance.now())[0] * Wd,
       holeY = h => holeAt(h, performance.now())[1] * playH();

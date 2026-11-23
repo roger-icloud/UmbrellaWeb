@@ -366,13 +366,6 @@
         Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
           now, 0, chosen ? { l: 1, r: 1, bob: 0.05 * Math.sin(now / 350 + h.t) } : undefined,
           -Math.PI / 2, headBlinkSq(h, now));
-        if (chosen) {
-          const hue = (h.t * 31 + 200) % 360;
-          ctx.strokeStyle = `hsla(${hue},65%,60%,.7)`;
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 4, 0, Math.PI * 2);
-          ctx.stroke();
-        }
         ctx.fillStyle = 'rgba(240,246,255,0.85)';
         ctx.font = '600 ' + Math.round(h.r * 0.55) +
           'px Andika, -apple-system, sans-serif';

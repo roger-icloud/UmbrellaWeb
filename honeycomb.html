@@ -250,6 +250,8 @@
     window.addEventListener('resize', resize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
     resize();
+    pickShape();   /* Roger 2026-11-23: settle COLS/ROWS up front, else
+                      the first pick refits the comb mid-tap ~100px */
 
     /* ---------- hex grid ---------- */
     // odd-r offset rows (matches the Swift SearchHexagonView geometry):
@@ -880,13 +882,7 @@
         Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
           now, 0, on ? { l: 1, r: 1, bob: 0.05 * Math.sin(now / 350 + h.t) } : undefined,
           -Math.PI / 2, headBlinkSq(h, now));
-        const hue = (h.t * 31 + 200) % 360;
-        if (on) {
-          ctx.strokeStyle = `hsla(${hue},65%,60%,.7)`;
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 4, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (kin) {
+        if (kin) {
           ctx.strokeStyle = 'rgba(255,196,96,.75)';
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 3, 0, Math.PI * 2);

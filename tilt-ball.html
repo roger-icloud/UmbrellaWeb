@@ -1183,10 +1183,10 @@
           }
         }
         const mRY = Math.max(1.5, MOUTH_RY * gs);
-        /* the face rides high: its centre sits above the mouth so the
-           mouth lands where a mouth would be — low on the face, a chin
-           of face-colour tucked beneath it */
-        const fcy = hy - faceR * 0.72;
+        /* Roger 2026-11-23, taking the arrived honeycomb head as the
+           model: the whole mouth sits INSIDE the face circle — the
+           face drops until the gullet is fully framed, no chin */
+        const fcy = hy - faceR * 0.35;
         const fg = ctx.createRadialGradient(
           hx, fcy - faceR * 0.35, faceR * 0.2, hx, fcy, faceR);
         fg.addColorStop(0, `hsl(${hue},${sat}%,62%)`);
@@ -1197,16 +1197,25 @@
            (Roger 2026-11-23: no whites, no border — the rimmed mouth
            read as a minstrel face and that is not our animal) */
         for (const s of [-1, 1]) {
-          const ex = hx + s * FACE_R * 0.42;
-          const ey = fcy - FACE_R * 0.05;
+          const ex = hx + s * FACE_R * 0.30;
+          const ey = fcy - FACE_R * 0.12;
           ctx.fillStyle = '#14100a';
-          ctx.beginPath(); ctx.arc(ex, ey, 7.5, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(ex, ey, 11, 0, Math.PI * 2); ctx.fill();
         }
         /* the mouth is the hole — a dark ellipse, wide and low, no
            border; a refusal paints the whole mouth amber instead.
            On a correct sink its height runs to a hairline and back */
         ctx.fillStyle = flashing ? '#e0a53a'
           : h.v === 0 ? '#141a14' : '#0a0d10';
+        ctx.beginPath();
+        ctx.ellipse(hx, hy, HOLE_R, mRY, 0, 0, Math.PI * 2);
+        ctx.fill();
+        /* a soft halo inside the mouth — the numeral reads lit from
+           within the gullet rather than painted on dark */
+        const hg = ctx.createRadialGradient(hx, hy, 1, hx, hy, HOLE_R);
+        hg.addColorStop(0, 'rgba(255,244,214,0.20)');
+        hg.addColorStop(1, 'rgba(255,244,214,0)');
+        ctx.fillStyle = hg;
         ctx.beginPath();
         ctx.ellipse(hx, hy, HOLE_R, mRY, 0, 0, Math.PI * 2);
         ctx.fill();

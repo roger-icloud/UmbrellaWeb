@@ -310,18 +310,30 @@ window.Anim = (function () {
      engine moment that made it */
   const MTIME = /[?&]mtime\b/.test(location.search);
   let mT0 = 0;
+  const mlines = [];           // last few events, painted on the canvas
+                               // so a screen recording IS the log —
+                               // no console needed (iPad has none)
   function mlog(tag) {
-    if (MTIME) console.log('[mtime ' +
-      ((performance.now() - mT0) / 1000).toFixed(2) + 's]', tag);
+    if (!MTIME) return;
+    const line = ((performance.now() - mT0) / 1000).toFixed(2) +
+      's  ' + tag;
+    mlines.push(line);
+    if (mlines.length > 6) mlines.shift();
+    console.log('[mtime]', line);
   }
   function mclock(c) {
     if (!MTIME || !c) return;
     c.save();
     c.font = '700 14px ui-monospace, monospace';
     c.textAlign = 'left'; c.textBaseline = 'bottom';
+    const y0 = c.canvas.height / (window.devicePixelRatio || 1);
+    mlines.forEach((l, i) => {
+      c.fillStyle = 'rgba(255,220,120,' + (0.45 + 0.09 * i) + ')';
+      c.fillText(l, 8, y0 - 24 - (mlines.length - 1 - i) * 16);
+    });
     c.fillStyle = 'rgba(255,220,120,0.9)';
     c.fillText(((performance.now() - mT0) / 1000).toFixed(1) + 's',
-      8, c.canvas.height / (window.devicePixelRatio || 1) - 6);
+      8, y0 - 6);
     c.restore();
   }
   let beatT = 0, departT = 0, prevNow = 0;

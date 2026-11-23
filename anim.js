@@ -531,7 +531,12 @@ window.Anim = (function () {
         const c = lapPt(ph.t, ph.s + ph.dir * LAP_LOOKAHEAD * segD);
         const err = wrapAngle(Math.atan2(c.y - headPos.y,
           c.x - headPos.x) - heading);
-        const w = Math.max(-LAP_TURN, Math.min(LAP_TURN,
+        /* same turn-in ramp as the seek: from a posed start (the
+           honeycomb coils) the lap-join heading error can be ~180°,
+           and full steering on frame one snaps a corner the whole
+           body then visibly jumps through (Roger's 2026-11-23 clip) */
+        const lapRamp = Math.min(1, phraseArc / (v * 0.35));
+        const w = lapRamp * Math.max(-LAP_TURN, Math.min(LAP_TURN,
           err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
         heading += w * budget;
         const step = v * budget;
@@ -637,7 +642,12 @@ window.Anim = (function () {
         const c = ptOf(ph.s + (ph.circ ? look : ph.dir * look));
         const err = wrapAngle(Math.atan2(c.y - headPos.y,
           c.x - headPos.x) - heading);
-        const w = Math.max(-LAP_TURN, Math.min(LAP_TURN,
+        /* same turn-in ramp as the seek: from a posed start (the
+           honeycomb coils) the lap-join heading error can be ~180°,
+           and full steering on frame one snaps a corner the whole
+           body then visibly jumps through (Roger's 2026-11-23 clip) */
+        const lapRamp = Math.min(1, phraseArc / (v * 0.35));
+        const w = lapRamp * Math.max(-LAP_TURN, Math.min(LAP_TURN,
           err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
         // once on the final loop, accelerate smoothly into the middle of
         // the three circuits and ease back down so 3 turns take ~1.5× time
@@ -707,7 +717,8 @@ window.Anim = (function () {
           const ay = ring.y + (s > 0 ? ox : -ox) * ring.r;
           const err = wrapAngle(Math.atan2(ay - headPos.y,
             ax - headPos.x) - heading);
-          const w = Math.max(-LAP_TURN, Math.min(LAP_TURN,
+          const ringRamp = Math.min(1, phraseArc / (v * 0.35));
+          const w = ringRamp * Math.max(-LAP_TURN, Math.min(LAP_TURN,
             err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
           heading += w * budget;
           const step = v * budget;

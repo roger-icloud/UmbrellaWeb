@@ -149,7 +149,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=24"></script>
+  <script src="anim.js?v=25"></script>
   <script src="progress.js"></script>
 
   <script>
@@ -841,6 +841,7 @@
         state = 'idle';
         selected = [];
         rowLocked = false;
+        recvTab = -1;
         return;
       }
       const snap = finishedCoils[i];
@@ -873,13 +874,19 @@
       if (state === 'done') return;
       layoutHeadSt();   // live: the comb refits on viewport drift, so
                         // must the rail (overlap report, 2026-11-23)
+      const dp = Anim.dockPos ? Anim.dockPos() : null;
       for (const h of headSt) {
         const on = selected.includes(h.t);
         const kin = !on && selected.some(s => sharedCount(s, h.t) >= 2);
         const cap = !on && selected.length >= MAX_TABLES;
+        const rk = recvK[h.t] = (recvK[h.t] || 0) +
+          ((recvTab === h.t ? 1 : 0) - (recvK[h.t] || 0)) * 0.06;
         ctx.save();
-        ctx.globalAlpha = rowLocked ? 0.45 : cap ? 0.42 : 1;
-        Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
+        ctx.globalAlpha = Math.max(rowLocked ? 0.45 : cap ? 0.42 : 1, rk);
+        const sd = rk > 0.01
+          ? h.r * 2 * (1 + (recvSegD / (h.r * 2) - 1) * rk) : h.r * 2;
+        const hp = rk > 0.01 && dp ? dp : { x: h.x, y: h.y };
+        Anim.stationHead(ctx, sd, hp, null, h.t,
           now, 0, on ? { l: 1, r: 1, bob: 0.05 * Math.sin(now / 350 + h.t) } : undefined,
           -Math.PI / 2, headBlinkSq(h, now));
         if (kin) {

@@ -159,7 +159,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=24"></script>
+  <script src="anim.js?v=25"></script>
   <script src="hint.js"></script>
   <script src="progress.js"></script>
 
@@ -302,6 +302,9 @@
        sized on the segD yardstick so picker and creature share one
        head. The DOM chipRow is retired. */
     let headSt = [], rowLocked = false, rowAlpha = 1, chosenT = 0;
+    /* the receiving head swells to meet the returning snake and then
+       settles back to rail size (Roger 2026-11-23) */
+    let recvK = 0;
     function layoutHeadSt() {
       const n = 11, edge = 6;
       const spacing = (Wd - edge * 2) / n;
@@ -946,12 +949,30 @@
            head underneath is already in place; the menu is live again.
            The spent deal (loose numerals, the old body) is cleared —
            the returned snake lives on the row now */
+        /* the receiver: the standing head swells to the arriving
+           head's size while the snake comes home, drawn opaque over
+           it so there is only ever one set of eyes (Roger 2026-11-23) */
+        {
+          const st = headSt[table - 2];
+          if (st) {
+            recvK += (1 - recvK) * 0.05;
+            const sd = st.r * 2 *
+              (1 + (HEAD_R * 2 / (st.r * 2) - 1) * recvK);
+            const dp = Anim.dockPos ? Anim.dockPos() : null;
+            ctx.globalAlpha = Math.min(1, recvK * 1.5);
+            Anim.stationHead(ctx, sd, dp || { x: st.x, y: st.y }, null,
+              table, now, 0, undefined, -Math.PI / 2,
+              headBlinkSq(st, now));
+            ctx.globalAlpha = 1;
+          }
+        }
         if (state === 'celebrate' && Anim.state === 'gone') {
           segs = []; nums = [];
           state = 'menu';
         }
         return;
       }
+      recvK *= 0.9;   // landed — the head settles back to rail size
       ctx.clearRect(0, 0, Wd, Hd);
 
       const idle = (state === 'play' && lastCollectT)
@@ -1033,7 +1054,10 @@
           ctx.save();
           ctx.globalAlpha = Math.max(rowAlpha, arrived) *
             (mk === 'far' ? 0.42 : 1);
-          Anim.stationHead(ctx, h.r * 2, { x: h.x, y: h.y }, null, h.t,
+          const sd = h.t === table && recvK > 0.01
+            ? h.r * 2 * (1 + (HEAD_R * 2 / (h.r * 2) - 1) * recvK)
+            : h.r * 2;
+          Anim.stationHead(ctx, sd, { x: h.x, y: h.y }, null, h.t,
             now, 0, undefined, -Math.PI / 2, headBlinkSq(h, now));
           ctx.font = '700 ' + Math.round(h.r * 0.55) +
             'px Andika, -apple-system, sans-serif';

@@ -302,6 +302,8 @@ window.Anim = (function () {
 
   /* ---------- engine state ---------- */
   let state = 'off';           // off | beat | depart | gone
+  let dockPt = null;         // live pos[0] while a 'home' run is roosting —
+                             // the page pins its swollen receiver head here
   let beatT = 0, departT = 0, prevNow = 0;
   let trail = [], headPos = { x: 0, y: 0 }, heading = 0;
   let script = [], phraseArc = 0, tipArc = 0;
@@ -538,7 +540,8 @@ window.Anim = (function () {
         const lapRamp = Math.min(1, phraseArc / (v * 0.35));
         const w = lapRamp * Math.max(-LAP_TURN, Math.min(LAP_TURN,
           err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
-        heading += w * budget;
+        run.wSm += (w - run.wSm) * Math.min(1, dt * 6);
+        heading += run.wSm * budget;
         const step = v * budget;
         headPos.x += Math.cos(heading) * step;
         headPos.y += Math.sin(heading) * step;
@@ -649,6 +652,7 @@ window.Anim = (function () {
         const lapRamp = Math.min(1, phraseArc / (v * 0.35));
         const w = lapRamp * Math.max(-LAP_TURN, Math.min(LAP_TURN,
           err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
+        run.wSm += (w - run.wSm) * Math.min(1, dt * 6);
         // once on the final loop, accelerate smoothly into the middle of
         // the three circuits and ease back down so 3 turns take ~1.5× time
         let pace = 1;
@@ -661,7 +665,7 @@ window.Anim = (function () {
           pace = 1 - 0.25 * u + WIND_ACCEL * Math.sin(Math.PI * u);
         }
         const step = v * pace * budget;
-        heading += w * pace * budget;
+        heading += run.wSm * pace * budget;
         headPos.x += Math.cos(heading) * step;
         headPos.y += Math.sin(heading) * step;
         tipArc += step; phraseArc += step;
@@ -720,7 +724,8 @@ window.Anim = (function () {
           const ringRamp = Math.min(1, phraseArc / (v * 0.35));
           const w = ringRamp * Math.max(-LAP_TURN, Math.min(LAP_TURN,
             err * LAP_GAIN * 180 / Math.PI)) * Math.PI / 180;
-          heading += w * budget;
+          run.wSm += (w - run.wSm) * Math.min(1, dt * 6);
+          heading += run.wSm * budget;
           const step = v * budget;
           headPos.x += Math.cos(heading) * step;
           headPos.y += Math.sin(heading) * step;
@@ -839,7 +844,12 @@ window.Anim = (function () {
         step = Math.min(ph.arc - phraseArc, v * budget);
       }
       const dtStep = step / v;
-      heading += w * dtStep;
+      /* the shoulder jerk (Roger, 2026-11-23): a phrase joint can hand
+         the steering a large error instantly, and the turn rate snaps —
+         the head corners hard and every segment hops the kink. Smooth
+         the rate itself so each joint is an S-bend, not a corner */
+      run.wSm += (w - run.wSm) * Math.min(1, dt * 6);
+      heading += run.wSm * dtStep;
       headPos.x += Math.cos(heading) * step;
       headPos.y += Math.sin(heading) * step;
       tipArc += step;
@@ -1004,8 +1014,9 @@ window.Anim = (function () {
        blank screen, locked row. begin() is the invariant: no
        leftovers, by construction. */
     run = { denHome: false, denDone: false, gather: 0, denHomeT: 0,
-      roost: false, roostT: 0, seats: null, pile: null,
+      roost: false, roostT: 0, seats: null, pile: null, wSm: 0,
       fidgets: null, twistSt: null };
+    dockPt = null;
     prevNow = t0;
     gaze = Math.atan2(segs[0].y - segs[1].y, segs[0].x - segs[1].x);
     nextBlinkAt = t0 + 2000 + rng() * 2000;
@@ -1193,6 +1204,7 @@ window.Anim = (function () {
         pos[0].y += Math.sin(la) * lean
           + Math.sin(now / 850) * HEAD_BOB * segD;
       }
+      dockPt = pos[0] ? { x: pos[0].x, y: pos[0].y } : null;
       const ax = pos[0] ? pos[0].x : tip.x, ay = pos[0] ? pos[0].y : tip.y;
       if (!run.denHomeT) run.denHomeT = departAge;   // live-path fallback
       if (run.roost) {
@@ -1529,6 +1541,7 @@ window.Anim = (function () {
     snapshot,
     drawCoil,
     stationHead,
+    dockPos() { return dockPt; },
     get state() { return state; },
     // live internals for the blank-screen hunt (the mstat line reads this)
     get _dbg() {

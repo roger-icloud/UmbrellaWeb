@@ -149,7 +149,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=25"></script>
+  <script src="anim.js?v=26"></script>
   <script src="progress.js"></script>
 
   <script>
@@ -785,6 +785,12 @@
        snake unwinds and goes home to its rail station — the heads
        come back and the board is ready; "search again?" is retired */
     let homeIdx = -1, restT0 = 0;
+    /* the receiving station head swells to meet its returning snake
+       (Roger 2026-11-23): without it the standing head and the larger
+       arriving head overlap — two sets of eyes at right angles. The
+       receiver grows opaque over the flight so there is only ever one
+       set, then settles back down on completion */
+    let recvTab = -1, recvSegD = 0; const recvK = {};
     function startCoil(ti, nowTs) {
       coilIdx = ti;
       if (ti >= tables.length) {
@@ -847,6 +853,7 @@
       const snap = finishedCoils[i];
       finishedCoils[i] = null;    // the departing snake takes over
                                   // from its own standing portrait
+      recvTab = snap.table; recvSegD = snap.segD;
       const st = headSt[tables[i] - 2];
       Anim.begin({
         ctx, W, H,
@@ -1065,7 +1072,8 @@
 
     let timeOffset = 0;
     function frame(now) {
-      try { draw(now + timeOffset); } catch (e) { /* a bad frame must never kill the loop */ }
+      try { draw(now + timeOffset); if (window.Anim && Anim.mclock) Anim.mclock(ctx); }
+      catch (e) { /* a bad frame must never kill the loop */ }
       requestAnimationFrame(frame);
     }
     const qs = new URLSearchParams(location.search);

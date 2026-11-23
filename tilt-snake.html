@@ -159,7 +159,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=25"></script>
+  <script src="anim.js?v=26"></script>
   <script src="hint.js"></script>
   <script src="progress.js"></script>
 
@@ -1097,7 +1097,7 @@
       const dt = Math.min((now - lastT) / 1000, 0.05);
       lastT = now;
       step(dt, now);
-      try { draw(now); }
+      try { draw(now); if (window.Anim && Anim.mclock) Anim.mclock(ctx); }
       catch (e) {
         /* a bad frame must never kill the loop — but it must confess
            (the canvas itself may not composite on iOS, so the message

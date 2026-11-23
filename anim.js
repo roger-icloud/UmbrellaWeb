@@ -304,6 +304,26 @@ window.Anim = (function () {
   let state = 'off';           // off | beat | depart | gone
   let dockPt = null;         // live pos[0] while a 'home' run is roosting —
                              // the page pins its swollen receiver head here
+
+  /* ?mtime=1 (Roger 2026-11-23): a clock the screen recording can read
+     against console events, so a jerk on video can be matched to the
+     engine moment that made it */
+  const MTIME = /[?&]mtime\b/.test(location.search);
+  let mT0 = 0;
+  function mlog(tag) {
+    if (MTIME) console.log('[mtime ' +
+      ((performance.now() - mT0) / 1000).toFixed(2) + 's]', tag);
+  }
+  function mclock(c) {
+    if (!MTIME || !c) return;
+    c.save();
+    c.font = '700 14px ui-monospace, monospace';
+    c.textAlign = 'left'; c.textBaseline = 'bottom';
+    c.fillStyle = 'rgba(255,220,120,0.9)';
+    c.fillText(((performance.now() - mT0) / 1000).toFixed(1) + 's',
+      8, c.canvas.height / (window.devicePixelRatio || 1) - 6);
+    c.restore();
+  }
   let beatT = 0, departT = 0, prevNow = 0;
   let trail = [], headPos = { x: 0, y: 0 }, heading = 0;
   let script = [], phraseArc = 0, tipArc = 0;
@@ -549,6 +569,7 @@ window.Anim = (function () {
         budget = 0;
         if (ph.prog >= ph.t.P * (ph.laps || 1) * 0.985) {
           script.shift(); phraseArc = 0;
+          mlog('lap done -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
         }
         continue;
       }
@@ -818,6 +839,7 @@ window.Anim = (function () {
           script.shift(); phraseArc = 0;
           if (hole.hide && !script.length) {
             run.denHome = true;
+            mlog('denHome');
             run.denHomeT = depAge;   // arrival time on the depart clock —
             // baked runs (departAt) count it the same as live frames
           }
@@ -857,6 +879,7 @@ window.Anim = (function () {
       budget -= dtStep;
       if (ph && !ph.seek && phraseArc >= ph.arc - 1e-6) {
         script.shift(); phraseArc = 0;
+        mlog('phrase -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
       }
     }
     // the wriggle is baked into the trail: the head swims, the body
@@ -1002,6 +1025,8 @@ window.Anim = (function () {
     trail = segs.map(s => ({ x: s.x, y: s.y })).reverse();
     from = segs.map(s => ({ x: s.x, y: s.y }));
     const t0 = opts.now !== undefined ? opts.now : performance.now();
+    mT0 = t0;
+    mlog('begin ' + (pageKind || '?'));
     settleT = t0;
     headPos = { x: segs[0].x, y: segs[0].y };
     tipArc = 0; hole = null; holeArc = null; script = [];
@@ -1216,11 +1241,13 @@ window.Anim = (function () {
         for (let i = 1; i < N; i++)
           if (pos[i] && i * sp - run.gather <= 0) pos[i] = null;
         if (!run.denDone && run.gather >= (N - 1) * sp) {
+          mlog('denDone');
           run.denDone = true; run.roostT = now;
           if (onDone) { doneN++; onDone(now); } // the page fades the row up now —
           // the canvas head keeps glancing until 'gone'
         }
         if (run.denDone && now - run.roostT > ROOST_SECS * 1000) {
+          mlog('gone');
           state = 'gone';
           if (!fadeFired) { fadeFired = true; if (onFade) onFade(now); }
           return;
@@ -1542,6 +1569,8 @@ window.Anim = (function () {
     drawCoil,
     stationHead,
     dockPos() { return dockPt; },
+    mclock,
+    mlog,
     get state() { return state; },
     // live internals for the blank-screen hunt (the mstat line reads this)
     get _dbg() {

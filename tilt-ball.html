@@ -1430,6 +1430,7 @@
       lastT = now;
       step(dt);
       draw(now);
+      if (window.Anim && Anim.mclock) Anim.mclock(ctx);
       requestAnimationFrame(frame);
     }
     layOut();

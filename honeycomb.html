@@ -779,11 +779,15 @@
       return { segD: sd, spots };
     }
 
+    /* Roger 2026-11-23: after the coils settle, a pause, then each
+       snake unwinds and goes home to its rail station — the heads
+       come back and the board is ready; "search again?" is retired */
+    let homeIdx = -1, restT0 = 0;
     function startCoil(ti, nowTs) {
       coilIdx = ti;
       if (ti >= tables.length) {
-        state = 'done';
-        document.getElementById('doneBar').classList.add('show');
+        state = 'rest';
+        restT0 = performance.now();
         return;
       }
       const { segD: sd, spots } = coilPlan();
@@ -820,6 +824,40 @@
           if (snap) finishedCoils.push(snap);
           startCoil(ti + 1, endNow);
         }
+      });
+    }
+
+    /* the homeward leg: each coil in turn unwinds — the trail seeds
+       from the wound pose, so the first lap IS the uncoil — laps once
+       and dives for its own station. When the last head lands the
+       rail reopens, ready; no question asked */
+    function startHome(i) {
+      homeIdx = i;
+      if (i >= finishedCoils.length) {
+        finishedCoils = [];
+        homeIdx = -1;
+        state = 'idle';
+        selected = [];
+        rowLocked = false;
+        return;
+      }
+      const snap = finishedCoils[i];
+      finishedCoils[i] = null;    // the departing snake takes over
+                                  // from its own standing portrait
+      const st = headSt[tables[i] - 2];
+      Anim.begin({
+        ctx, W, H,
+        board: { x: BOARD_PAD, y: TOP_RESERVE,
+                 w: W - 2 * BOARD_PAD, h: H - TOP_RESERVE - BOT_RESERVE },
+        segD: snap.segD,
+        table: snap.table,
+        segs: snap.segs.map(s => ({ ...s })),
+        kind: 'home',
+        target: st ? { x: st.x, y: st.y }
+                   : { x: W / 2, y: H - BOT_RESERVE / 2 },
+        skipBeat: true,
+        clear: false,
+        onDone: () => startHome(i + 1)
       });
     }
 
@@ -998,12 +1036,16 @@
       ctx.globalAlpha = 1;
 
       // Draw any snakes that have already completed their coil, then
-      // advance the currently coiling snake.
+      // advance the currently coiling (or homeward-bound) snake.
       for (const snap of finishedCoils) {
-        Anim.drawCoil(snap, now);
+        if (snap) Anim.drawCoil(snap, now);
       }
       if (coilIdx >= 0 && coilIdx < tables.length) {
         Anim.frame(now);
+      } else if (homeIdx >= 0) {
+        Anim.frame(now);
+      } else if (state === 'rest' && now - restT0 > 1600) {
+        startHome(0);
       }
 
       drawRail(now);

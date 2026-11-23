@@ -479,9 +479,11 @@
           const fyPx = fy * playH();
           const headroom = Math.max(0, fyPx - FACE_R - 6);
           const footroom = Math.max(0, playH() - fyPx - FACE_R - 6);
+          /* offY lives in row-fraction units like h.fy — a pixel value
+             added here flung the head ~30k px off screen (2026-11-23) */
           h.offY = row.length < 2 ? 0
-            : i % 2 ? Math.min(HEAD_STAG, footroom)
-                    : -Math.min(HEAD_STAG, headroom);
+            : i % 2 ? Math.min(HEAD_STAG, footroom) / playH()
+                    : -Math.min(HEAD_STAG, headroom) / playH();
           if (now !== undefined && h.fx !== undefined &&
               (h.fx !== fx || h.fy !== fy)) {
             const [x, y] = holeAt(h, now);

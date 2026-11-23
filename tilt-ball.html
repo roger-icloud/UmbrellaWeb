@@ -1180,31 +1180,23 @@
         fg.addColorStop(1, `hsl(${hue},${sat}%,30%)`);
         ctx.fillStyle = fg;
         ctx.beginPath(); ctx.arc(hx, fcy, faceR, 0, Math.PI * 2); ctx.fill();
-        ctx.lineWidth = 1.4;
-        ctx.strokeStyle = `hsla(${hue},${sat}%,24%,0.9)`;
-        ctx.stroke();
-        /* the eyes — a dark pupil in a cream white, up on the brow,
-           looking straight out at the world, not at the ball */
+        /* the eyes — the snake's own: blank black, up on the brow
+           (Roger 2026-11-23: no whites, no border — the rimmed mouth
+           read as a minstrel face and that is not our animal) */
         for (const s of [-1, 1]) {
           const ex = hx + s * FACE_R * 0.42;
           const ey = fcy - FACE_R * 0.05;
-          ctx.fillStyle = '#f2e9d8';
-          ctx.beginPath(); ctx.arc(ex, ey, 8.5, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#1a1410';
-          ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#14100a';
+          ctx.beginPath(); ctx.arc(ex, ey, 7.5, 0, Math.PI * 2); ctx.fill();
         }
-        /* the mouth is the hole — a dark ellipse, wide and low; on a
-           correct sink its height runs to a hairline and back */
-        ctx.fillStyle = h.v === 0 ? '#141a14' : '#0a0d10';
+        /* the mouth is the hole — a dark ellipse, wide and low, no
+           border; a refusal paints the whole mouth amber instead.
+           On a correct sink its height runs to a hairline and back */
+        ctx.fillStyle = flashing ? '#e0a53a'
+          : h.v === 0 ? '#141a14' : '#0a0d10';
         ctx.beginPath();
         ctx.ellipse(hx, hy, HOLE_R, mRY, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = flashing ? '#e0a53a'
-          : `hsla(${hue},${sat}%,70%,0.55)`;
-        ctx.beginPath();
-        ctx.ellipse(hx, hy, Math.max(2, HOLE_R - 1), Math.max(1, mRY - 1), 0, 0, Math.PI * 2);
-        ctx.stroke();
         ctx.globalAlpha = Math.min(1, gs * 1.5);
         ctx.fillStyle = flashing ? '#e0a53a' : '#cfd8e0';
         ctx.font = (h.v === 0 ? '600 13px' : '600 18px') +

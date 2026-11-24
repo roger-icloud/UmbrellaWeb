@@ -863,6 +863,9 @@
       if (i >= finishedCoils.length) {
         finishedCoils = [];
         homeIdx = -1;
+        /* the third snake home = sockets, not the old numbered comb
+           (Roger 2026-11-24): the grid waits empty for the next deal */
+        blankCells();
         state = 'idle';
         selected = [];
         rowLocked = false;

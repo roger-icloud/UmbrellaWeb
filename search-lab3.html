@@ -959,6 +959,16 @@
           ctx.arc(h.x, h.y, h.r * (1 + 0.09 * riff) + 4, 0, Math.PI * 2);
           ctx.stroke();
         }
+        /* a chosen head wears its table's colour — the bold ring is
+           the shared selection grammar across the path games
+           (Roger, 2026-11-24) */
+        if (on) {
+          ctx.strokeStyle = tableColour(h.t);
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(h.x, h.y, h.r + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.fillStyle = 'rgba(240,246,255,0.85)';
         ctx.font = '600 ' + Math.round(h.r * 0.55) +
           'px Andika, -apple-system, sans-serif';

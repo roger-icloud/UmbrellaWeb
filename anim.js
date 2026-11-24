@@ -45,6 +45,13 @@ window.Anim = (function () {
   const DEPART_RAMP = 0.7;    // s for sway to reach DEPART_AMP
   const HOLE_TURN = 210;      // max steering rate (deg/s) while seeking
   const HOLE_GAIN = 4.5;      // steering eagerness per radian of error
+  /* driver A's hands (Roger 2026-11-24 — 'changing drivers mid
+     journey'): the tilt-snake swim, the motion Roger calls superb,
+     is proportional steering `err × respond` capped at a turn rate —
+     the seek adopts that exact law so the run home is driven the
+     same way the play swim is */
+  const SWIM_RESPOND = 6;     // /s proportional approach (TURN_RESPOND)
+  const SWIM_TURN = 5.0;      // rad/s heading cap (TURN_RATE)
   const HOLE_ORBIT = 2.6;     // segDs out where the vortex catches the head
   const DIVE_LEN = 1.3;       // segDs of trail over which a member sinks
   const SINK_LEN = 2.4;       // whirlpool version — a slide, not a gulp
@@ -151,10 +158,11 @@ window.Anim = (function () {
     // home to the head row (tilt games, 2026-11-22): a lap of the
     // board to say the table is whole, then a seek to the station and
     // the run.roost collapse — body feeds into the head until it stands
-    // alone, glances both ways, and goes still
+    // alone, glances both ways, and goes still. calm: the play swim
+    // bakes no wobble — pure steering is the whole of its grace
     home: [
       { laptrack: true, calm: true, laps: 1, speed: 1.6 },
-      { seek: true, speed: 1.15 },
+      { seek: true, calm: true, speed: 1.15 },
     ],
   };
   // the pool 'random' draws from — one engine, varied goodbyes
@@ -863,14 +871,15 @@ window.Anim = (function () {
           ay = hole.y + (s > 0 ? ox : -ox) * R;
         }
         const err = wrapAngle(Math.atan2(ay - headPos.y, ax - headPos.x) - heading);
-        /* turn-in ramp: steering weight grows over the first ~0.35s of
-           travel in the phrase — otherwise a ~90° heading error at the
-           joint makes the head hard-corner at full turn rate, and every
-           piece behind snaps its tangent crossing the kink (Roger's
-           "jerk at the start of the new trajectory", 2026-11-22) */
-        const rampK = Math.min(1, phraseArc / (v * 0.35));
-        w = rampK * Math.max(-HOLE_TURN, Math.min(HOLE_TURN,
-          err * HOLE_GAIN * 180 / Math.PI)) * Math.PI / 180;
+        /* driver A's law replaces the ramp+gain steering: proportional
+           turn `err × respond` capped at a rate — gentle by construction
+           on any error, so no ramp is needed; wSm is left parked so the
+           shared integrate adds nothing on top */
+        run.wSm = 0;
+        w = 0;
+        const swimStep = Math.max(-SWIM_TURN * budget, Math.min(SWIM_TURN * budget,
+          err * Math.min(1, SWIM_RESPOND * budget)));
+        heading += swimStep;
         if (script[1] && script[1].spin && dist <= HOLE_ORBIT * segD) {
           script.shift(); phraseArc = 0;
           continue;

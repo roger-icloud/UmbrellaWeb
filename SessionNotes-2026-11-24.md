@@ -63,3 +63,23 @@ crossovers.
   set of eyes.
 - `?mtime=1` paints a running clock + last six engine events on-canvas —
   screen recordings become the log. Built for jerk-hunting; kept.
+
+## The one-motion law (settled ~17:30 — "Superb")
+
+Roger's ask, now the engine rule: the play swim IS the motion — one
+law everywhere. Culprits found in order (each named by Roger's eyes +
+the `?mtime=1` on-canvas clock/event log):
+- tempo steps at phrase joints → vSm glides head speed between phrases
+- U-turn opening the seek → lap's steering carrot slides off the track
+  to the home point during the last stretch (smoothstep); no goal swap
+- "pothole each part crosses" → `calm` wriggle snapped on at the
+  handover; calmSm eases swim amplitude ~0.25s
+- "changing drivers mid journey" → seek now uses the play swim's exact
+  law: heading += clamp(err × SWIM_RESPOND(6)/s, ±SWIM_TURN(5 rad/s));
+  'home' script calm end-to-end (pure steering, no baked wobble)
+- ×3's tight circles → blended carrot can collapse onto the head when
+  home sits near the lap path; cTooClose (<1.3 segD) hands off to dock
+
+tilt-snake's homecoming doesn't use Anim at all — homeRun drives the
+page's own play drive at the rail target, drain feeds segs into the
+swollen station head. anim.js → v33.

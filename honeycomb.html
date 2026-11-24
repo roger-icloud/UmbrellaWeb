@@ -968,7 +968,10 @@
       // fade out the surrounding lattice, then coil each completed path
       // one at a time via Anim.
       let latticeAlpha = 1;
-      if (state === 'celebrate' || state === 'done') {
+      /* 'rest' (coils settling + every homecoming) keeps the fade too —
+         else the numbered grid repaints between the coils and the
+         sockets (Roger's reappearing-grid report, 2026-11-24) */
+      if (state === 'celebrate' || state === 'done' || state === 'rest') {
         if (now >= allRippledAt) {
           const afterRipple = (now - allRippledAt) / 1000;
           latticeAlpha = Math.max(0, 1 - afterRipple / LATTICE_FADE);

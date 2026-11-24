@@ -516,7 +516,19 @@ window.Anim = (function () {
     let budget = dt, guard = 32;
     while (budget > 1e-9 && guard--) {
       const ph = script[0];
-      const v = DEPART_SPEED * segD * ((ph && ph.speed) || 1);
+      /* one motion law (Roger, 2026-11-24): phrase speeds used to step
+         instantly at every joint — lap 1.6x snapped to seek 1.15x and
+         the tempo change read as a seam. Glide the head's speed toward
+         each phrase's pace like the turn-rate smoother does for
+         steering, so the whole run is a single unjarring motion */
+      const vT = DEPART_SPEED * segD * ((ph && ph.speed) || 1);
+      /* a run also eases INTO its first pace — the free snake was
+         already moving at its own tempo, so a scripted start that
+         jumps to phrase speed reads as a lurch (the tilt-snake
+         homecoming's "speeding up out of keeping", Roger 2026-11-24) */
+      if (run.vSm === undefined) run.vSm = vT * 0.55;
+      run.vSm += (vT - run.vSm) * Math.min(1, dt * 3);
+      const v = run.vSm;
       if (ph && ph.spin) {
         if (ph.r0 === undefined) {
           const rx = headPos.x - hole.x, ry = headPos.y - hole.y;
@@ -838,7 +850,12 @@ window.Anim = (function () {
           script.shift(); phraseArc = 0;
           continue;
         }
-        step = Math.min(dist, v * budget);
+        /* tilt-style approach (Roger, 2026-11-24): the free snake
+           eases its speed as the goal nears (drive falls with
+           distance) — the seek does the same so docking is a
+           settling-in, not a constant-speed dash that pops to a stop */
+        const approach = Math.max(0.32, Math.min(1, dist / (segD * 3.5)));
+        step = Math.min(dist, v * approach * budget);
         /* close counts as arrived: a capped turn rate orbits a near
            target forever at r = v/HOLE_TURN (~0.87·segD at departure
            speed) — so a one-disc capture is enough to dock. A NaN

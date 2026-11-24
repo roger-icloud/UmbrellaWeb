@@ -590,6 +590,7 @@ window.Anim = (function () {
            continuously moving target off the circuit and into the
            approach — there is no joint */
         let blendU = 0;
+        let cTooClose = false;
         if (script[1] && script[1].seek && hole) {
           const lapLen = ph.t.P * (ph.laps || 1);
           blendU = Math.max(0, Math.min(1,
@@ -597,6 +598,12 @@ window.Anim = (function () {
           const e = blendU * blendU * (3 - 2 * blendU);
           c = { x: c.x + (hole.x - c.x) * e,
                 y: c.y + (hole.y - c.y) * e };
+          /* ×3's tight circles (Roger, 17:26): when home sits near the
+             lap's path the blended carrot can collapse onto the head
+             itself — a head steering at a point on itself just orbits.
+             If the carrot arrives, the goal has: hand the dock over */
+          cTooClose = blendU > 0 &&
+            Math.hypot(c.x - headPos.x, c.y - headPos.y) < segD * 1.3;
         }
         const err = wrapAngle(Math.atan2(c.y - headPos.y,
           c.x - headPos.x) - heading);
@@ -614,7 +621,7 @@ window.Anim = (function () {
         headPos.y += Math.sin(heading) * step;
         tipArc += step; phraseArc += step;
         budget = 0;
-        if (blendU >= 1) {
+        if (blendU >= 1 || cTooClose) {
           /* the carrot IS the home point now — hand the seek the
              approach and dock. Steering target, rate and heading are
              unchanged at the handover; only the phrase label moves.

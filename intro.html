@@ -69,6 +69,30 @@
     .prose details[open] summary {
       margin-bottom: 0.6em;
     }
+
+    /* the way back: mirrors index's booklink so the crossroads is
+       visible even before the snake menu is discovered (Roger,
+       2026-11-24) */
+    .homelink {
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid #2a3540;
+      background: rgba(20, 26, 33, 0.85);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: #aab8c4;
+      font-size: 13px;
+      margin-bottom: 18px;
+    }
+
+    .homelink svg {
+      width: 20px;
+      height: 20px;
+      stroke: #aab8c4;
+    }
   </style>
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
@@ -81,6 +105,13 @@
   <canvas id="frame"></canvas>
 
   <article class="prose">
+    <a class="homelink" href="index.html" title="Back to the games" aria-label="Home">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 11 L12 4 L20 11"/>
+        <path d="M6.5 9.5 L6.5 19 L17.5 19 L17.5 9.5"/>
+      </svg>
+      <span>Home</span>
+    </a>
     <!-- ROGERS TEXT begins — the introduction lives between these
          markers; the snakes only frame it, they never touch it -->
     <h1>Intro</h1>

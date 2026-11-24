@@ -574,7 +574,22 @@ window.Anim = (function () {
         if (dlt < -ph.t.P / 2) dlt += ph.t.P;
         ph.prog += Math.max(0, ph.dir * dlt);
         ph.s = sNew;
-        const c = lapPt(ph.t, ph.s + ph.dir * LAP_LOOKAHEAD * segD);
+        let c = lapPt(ph.t, ph.s + ph.dir * LAP_LOOKAHEAD * segD);
+        /* the goal slides, it never swaps (Roger 2026-11-24: "why do
+           there need to be joins at all"): when the next phrase is a
+           seek, the carrot leaves the track during the last stretch
+           and travels to the home point, so the head follows one
+           continuously moving target off the circuit and into the
+           approach — there is no joint */
+        let blendU = 0;
+        if (script[1] && script[1].seek && hole) {
+          const lapLen = ph.t.P * (ph.laps || 1);
+          blendU = Math.max(0, Math.min(1,
+            (ph.prog - lapLen * 0.55) / (lapLen * 0.35)));
+          const e = blendU * blendU * (3 - 2 * blendU);
+          c = { x: c.x + (hole.x - c.x) * e,
+                y: c.y + (hole.y - c.y) * e };
+        }
         const err = wrapAngle(Math.atan2(c.y - headPos.y,
           c.x - headPos.x) - heading);
         /* same turn-in ramp as the seek: from a posed start (the
@@ -591,23 +606,15 @@ window.Anim = (function () {
         headPos.y += Math.sin(heading) * step;
         tipArc += step; phraseArc += step;
         budget = 0;
-        /* peel off toward home (Roger's 9.2s clip, 2026-11-24): a lap
-           that ends at the join can leave the head facing away from
-           the rail, so the seek opens with a U-turn that reads as a
-           kink crossing the first few segments. When the next phrase
-           is a seek, end the lap instead at the point in its last
-           stretch where the head already points near the target —
-           the snake leaves the circuit aimed home and there is no
-           joint to see */
-        const lastStretch = ph.prog >= ph.t.P * (ph.laps || 1) * 0.7;
-        if (lastStretch && script[1] && script[1].seek && hole) {
-          const aimErr = Math.abs(wrapAngle(
-            Math.atan2(hole.y - headPos.y, hole.x - headPos.x) - heading));
-          if (aimErr < 0.9) {
-            script.shift(); phraseArc = 0;
-            mlog('lap done -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
-            continue;
-          }
+        if (blendU >= 1) {
+          /* the carrot IS the home point now — hand the seek the
+             approach and dock. Steering target, rate and heading are
+             unchanged at the handover; only the phrase label moves.
+             phraseArc seeds open the seek's own turn-in ramp — that
+             ramp guards a fresh goal-swap, and nothing swapped */
+          script.shift(); phraseArc = run.vSm * 0.35;
+          mlog('lap blended -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
+          continue;
         }
         if (ph.prog >= ph.t.P * (ph.laps || 1) * 0.985) {
           script.shift(); phraseArc = 0;

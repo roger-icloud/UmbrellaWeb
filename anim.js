@@ -940,7 +940,14 @@ window.Anim = (function () {
     // retraces the wiggly path — nothing to add at draw time
     const amp = (DEPART_AMP * Math.min(1, depAge / DEPART_RAMP)) * segD;
     let wob = Math.sin(depAge * DEPART_FREQ) * amp;
-    if (script[0] && script[0].calm) wob = 0;   // a calm phrase runs straight
+    /* a calm phrase runs straight — but easing, not a switch: when
+       the lap hands to the (wriggling) seek, an instant wob on/off
+       steps the trail sideways half a segment and every member then
+       travels over the pothole (Roger's 17:12 clip, 2026-11-24) */
+    const calmT = (script[0] && script[0].calm) ? 0 : 1;
+    if (run.calmSm === undefined) run.calmSm = calmT;
+    run.calmSm += (calmT - run.calmSm) * Math.min(1, dt * 4);
+    wob *= run.calmSm;
     if (hole && hole.hide)
       // the swim keeps its sway until the last couple of segDs, so the
       // arrival reads as settling, not as a switch-off

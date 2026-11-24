@@ -1158,10 +1158,17 @@
         startPlay();
       };
       demoStart();
+      let doneAt = 0;
       setInterval(() => {
-        if (state === 'play' && !autoTarget && nextIdx < nums.length)
+        if (state === 'play' && !autoTarget && nextIdx < nums.length) {
           autoTarget = nums[nextIdx];
-        else if (state === 'done' || state === 'menu') demoStart();
+          doneAt = 0;
+        } else if (state === 'done' || state === 'menu') {
+          /* a beat on the empty board before the next pass, so the
+             loop has a breath in it */
+          if (!doneAt) doneAt = performance.now();
+          else if (performance.now() - doneAt > 2500) demoStart();
+        } else doneAt = 0;
       }, 700);
     }
     requestAnimationFrame(frame);

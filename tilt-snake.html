@@ -504,35 +504,24 @@
       logEvent('complete', { table, ms: doneMs, misses });
       gamesDone[table] = (gamesDone[table] || 0) + 1;
       UW.completed('tilt', [table]);
-      const fullSegs = [
-        { x: head.x, y: head.y, expected: 0, filled: true, blank: false },
-        ...segs.map(s => ({ x: s.x, y: s.y, expected: s.v, filled: true, blank: false }))
-      ];
-      /* the celebration's last act is a homecoming (Roger 2026-11-22):
-         a lap of the board, then the snake slinks to its own button on
-         the head row and the body feeds into the head. When the head
-         stands alone the row fades back up while it finishes a glance
-         each way — then the DOM head under it takes over */
+      /* the celebration's last act is a homecoming: the snake slinks
+         to its own button on the head row on its own swim drive and
+         the body feeds into the head. When the head stands alone the
+         row fades back up and the DOM head under it takes over */
       /* the landing station is the head's own rail spot */
       const st = headSt[table - 2];
       const tx = st ? st.x : Wd / 2;
       const ty = st ? st.y : Hd - 30;
-      Anim.begin({
-        ctx, W: Wd, H: Hd,
-        board: { x: 12, y: 56, w: Wd - 24, h: Hd - 116 },
-        segD: HEAD_R * 2,
-        table,
-        segs: fullSegs,
-        kind: 'home',
-        target: {
-          x: Math.min(Math.max(isFinite(tx) ? tx : Wd / 2, 12), Wd - 12),
-          y: Math.min(Math.max(isFinite(ty) ? ty : Hd - 30, 56), Hd - 8)
-        },
-        onDone: () => {
-          window._dbgUnlock = 'unlock@' + Math.round(performance.now() / 1000) + 's';
-          rowLocked = false;
-        }
-      });
+      /* the run home IS the free swim (Roger 2026-11-24): handing the
+         celebration to the script engine swapped stroke, tempo and
+         renderer in one frame — a seam no smoothing could hide. The
+         rail head becomes a goal the play drive swims to; the tail
+         then feeds into the swollen station head, front first */
+      homeRun = {
+        tx: Math.min(Math.max(isFinite(tx) ? tx : Wd / 2, 12), Wd - 12),
+        ty: Math.min(Math.max(isFinite(ty) ? ty : Hd - 30, 56), Hd - 8),
+        phase: 'swim', drainT: 0
+      };
       } catch (e) {
         /* a throw here leaves a stale 'gone' in the engine, which the
            draw check then misreads as "finished" — confess it */
@@ -702,14 +691,24 @@
       return Math.atan2(p[1] - head.y, p[0] - head.x);
     }
 
+    let homeRun = null;
     function step(dt, now) {
-      if (state !== 'play' || paused) return;
+      /* 'celebrate' keeps this same drive alive while homeRun steers
+         it — one motion law end to end, no engine swap at the seam */
+      if ((state !== 'play' && !(state === 'celebrate' && homeRun)) || paused) return;
       const fresh = !sleepy;
       sleepy = false;
 
       let target = null;
       let drive = IDLE_DRIVE;
-      if (now < dazeUntil) {
+      if (homeRun) {
+        const dx = homeRun.tx - head.x, dy = homeRun.ty - head.y;
+        const dist = Math.hypot(dx, dy);
+        if (homeRun.phase === 'swim') {
+          target = Math.atan2(dy, dx);
+          drive = Math.max(IDLE_DRIVE, Math.min(dist / AUTO_FULL, 1));
+        } else drive = 0;
+      } else if (now < dazeUntil) {
         // wrong catch: steering is withheld for a beat — a quiet penalty
         // that makes slapdash cost time (flat, per the Cargo lesson)
         const k = (now - dazeT0) / (MISS_STALL * 1000);
@@ -801,6 +800,27 @@
       head.x = Math.max(HEAD_R, Math.min(Wd - HEAD_R, head.x));
       head.y = Math.max(HEAD_R, Math.min(Hd - HEAD_R, head.y));
       if ((hx || hy) && now > bumpUntil) bump(hx, hy, now);
+
+      if (homeRun) {
+        if (homeRun.phase === 'swim' &&
+            Math.hypot(homeRun.tx - head.x, homeRun.ty - head.y) < HEAD_R * 1.15) {
+          homeRun.phase = 'drain';
+          homeRun.drainT = now;
+        }
+        if (homeRun.phase === 'drain') {
+          head.x = homeRun.tx; head.y = homeRun.ty;
+          if (now - homeRun.drainT > 45 && segs.length) {
+            segs.shift();          // the front of the body feeds in first
+            homeRun.drainT = now;
+          }
+          if (!segs.length) {
+            homeRun = null;
+            window._dbgUnlock = 'unlock@' + Math.round(now / 1000) + 's';
+            rowLocked = false;
+            state = 'menu';
+          }
+        }
+      }
 
       // tail follows the head's own path, as a real snake's body does: each
       // segment sits a further SEG_GAP back along the trail the head drew.
@@ -940,7 +960,7 @@
     }
 
     function draw(now) {
-      if (state === 'celebrate' || state === 'done') {
+      if ((state === 'celebrate' || state === 'done') && !homeRun) {
         /* a throw inside the engine leaves the canvas cleared and the
            DOM alive — an unexplained blank. Paint the error instead of
            dying silently (Roger reads the mstat line; Nov 2026) */
@@ -977,7 +997,10 @@
         }
         return;
       }
-      recvK *= 0.9;   // landed — the head settles back to rail size
+      /* the receiver: the standing head swells to the arriving
+         head's size while the snake comes home (Roger 2026-11-23) —
+         grows during homeRun, settles back once landed */
+      if (homeRun) recvK += (1 - recvK) * 0.05; else recvK *= 0.9;
       ctx.clearRect(0, 0, Wd, Hd);
 
       const idle = (state === 'play' && lastCollectT)
@@ -1009,7 +1032,8 @@
         ctx.fillText(sg.v, sg.x, sg.y + 1);
       }
 
-      if (state === 'play' || state === 'done' || state === 'ready') {
+      if (state === 'play' || state === 'done' || state === 'ready' ||
+          (homeRun && homeRun.phase !== 'drain')) {
         // head — same construction as Snake Puzzle: radial-shaded ball,
         // rim stroke, pupil pair forward and across. Here the eyes stay
         // on the heading — where they point is steering information —
@@ -1084,6 +1108,24 @@
             ctx.lineWidth = 2; ctx.stroke();
           }
           ctx.restore();
+        }
+      }
+
+      /* the receiver swell, painted over the arriving head so there is
+         only ever one set of eyes: tracks the head while it swims,
+         pins to the station once the tail starts feeding in */
+      if (homeRun) {
+        const st = headSt[table - 2];
+        if (st) {
+          const sd = st.r * 2 *
+            (1 + (HEAD_R * 2 / (st.r * 2) - 1) * recvK);
+          const dp = homeRun.phase === 'drain'
+            ? { x: st.x, y: st.y } : { x: head.x, y: head.y };
+          ctx.globalAlpha = Math.min(1, recvK * 1.5);
+          Anim.stationHead(ctx, sd, dp, null,
+            table, now, 0, undefined, -Math.PI / 2,
+            headBlinkSq(st, now));
+          ctx.globalAlpha = 1;
         }
       }
 

@@ -591,6 +591,24 @@ window.Anim = (function () {
         headPos.y += Math.sin(heading) * step;
         tipArc += step; phraseArc += step;
         budget = 0;
+        /* peel off toward home (Roger's 9.2s clip, 2026-11-24): a lap
+           that ends at the join can leave the head facing away from
+           the rail, so the seek opens with a U-turn that reads as a
+           kink crossing the first few segments. When the next phrase
+           is a seek, end the lap instead at the point in its last
+           stretch where the head already points near the target —
+           the snake leaves the circuit aimed home and there is no
+           joint to see */
+        const lastStretch = ph.prog >= ph.t.P * (ph.laps || 1) * 0.7;
+        if (lastStretch && script[1] && script[1].seek && hole) {
+          const aimErr = Math.abs(wrapAngle(
+            Math.atan2(hole.y - headPos.y, hole.x - headPos.x) - heading));
+          if (aimErr < 0.9) {
+            script.shift(); phraseArc = 0;
+            mlog('lap done -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
+            continue;
+          }
+        }
         if (ph.prog >= ph.t.P * (ph.laps || 1) * 0.985) {
           script.shift(); phraseArc = 0;
           mlog('lap done -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));

@@ -345,10 +345,13 @@
       reset(t);
       document.getElementById('tableLabel').textContent = '×' + t + ' table';
       tableOverlay.classList.add('hidden');
-      overlay.classList.remove('hidden');
       rowLocked = true;
       window._dbgLock = 'lock@' + Math.round(performance.now() / 1000) + 's';
       state = 'ready';
+      /* the tilt-enable dance happens once per session — later picks
+         go straight to play (Roger, 2026-11-24) */
+      if (tiltEnabled) startPlay();
+      else overlay.classList.remove('hidden');
     }
     window.addEventListener('resize', resize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
@@ -447,6 +450,7 @@
       return typeof DeviceMotionEvent !== 'undefined'
         && typeof DeviceMotionEvent.requestPermission === 'function';
     }
+    let tiltEnabled = false;   // set once the enable flow has run
 
     document.getElementById('go').addEventListener('click', async () => {
       try {
@@ -457,11 +461,12 @@
             whyEl.textContent = 'Permission "' + res +
               '" — tilt unavailable, but touch-drag still works.';
             document.getElementById('go').textContent = 'Play with touch';
-            document.getElementById('go').onclick = () => { overlay.classList.add('hidden'); startPlay(); };
+            document.getElementById('go').onclick = () => { overlay.classList.add('hidden'); tiltEnabled = true; startPlay(); };
             return;
           }
         }
         overlay.classList.add('hidden');
+        tiltEnabled = true;
         if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => { });
         const el = document.documentElement;
         const req = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -1136,6 +1141,20 @@
         tableOverlay.classList.add('hidden');
         overlay.classList.add('hidden');
         doneBar.classList.remove('show');
+        /* menu-card demo shows the END of a game, not the hunt — start
+           with most multiples already in the tail so the autopilot
+           collects the last few then runs the victory wriggle home
+           (Roger, 2026-11-24) */
+        const PRE_COLLECTED = 8;
+        for (let i = 0; i < PRE_COLLECTED; i++) {
+          nums[i].collected = true;
+          segs.push({
+            x: head.x - Math.sin(i * 0.35) * 18,
+            y: head.y + (i + 1) * SEG_GAP * 0.85,
+            v: table * (i + 1)
+          });
+        }
+        nextIdx = PRE_COLLECTED;
         startPlay();
       };
       demoStart();

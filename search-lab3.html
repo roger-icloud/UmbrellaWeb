@@ -864,9 +864,13 @@
 
         ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
         ctx.strokeStyle = cell.found
-          ? tableColour(tables[cell.disp ?? cell.ts[0]]) : '#2c3e50';
+          ? tableColour(tables[cell.disp ?? cell.ts[0]])
+          : cell.v === null ? '#1d2832' : '#2c3e50';
         ctx.lineWidth = 1.2; ctx.stroke();
 
+        /* undealt cells draw as sockets only — the grid promises
+           numbers before any arrive (Roger, 2026-11-24) */
+        if (cell.v === null) continue;
         ctx.font = '700 ' +
           Math.min(rad * 0.85 * g.tall, rad * FONT_MAX) +
           'px Andika, sans-serif';
@@ -1092,7 +1096,8 @@
     function autoReturn() {
       setTimeout(() => {
         resumeFlip();
-        cells = []; byKey = new Map(); runs = []; tables = [];
+        buildComb();          // sockets again, not nothing
+        runs = []; tables = [];
         lastT = null; press = null; halo = null; revealT.clear();
         state = 'idle';
         const pr = document.getElementById('backPrompt');
@@ -1186,6 +1191,8 @@
     /* Roger 2026-11-18: open uncommitted — lit chips over an empty
        board; the first tap deals. ?tables= still jumps straight in. */
     if (wanted.length) deal(wanted);
+    else buildComb();   /* an empty grid waits under the rail —
+                           sockets before numbers (Roger, 2026-11-24) */
     UW.boot('search');
     resize();
     draw(performance.now());            // synchronous first paint

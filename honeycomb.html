@@ -915,7 +915,6 @@
       const dp = Anim.dockPos ? Anim.dockPos() : null;
       for (const h of headSt) {
         const on = selected.includes(h.t);
-        const kin = !on && selected.some(s => sharedCount(s, h.t) >= 2);
         const cap = !on && selected.length >= MAX_TABLES;
         const rk = recvK[h.t] = (recvK[h.t] || 0) +
           ((recvTab === h.t ? 1 : 0) - (recvK[h.t] || 0)) * 0.06;
@@ -950,12 +949,9 @@
           ctx.arc(hp.x, hp.y, h.r + 4, 0, Math.PI * 2);
           ctx.stroke();
         }
-        if (kin) {
-          ctx.strokeStyle = 'rgba(255,196,96,.75)';
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 3, 0, Math.PI * 2);
-          ctx.stroke();
-        }
+        /* the kin ring is retired (Roger 2026-11-24): two highlight
+           grammars competed and the selection ring lost. Unpicked
+           heads now carry only the riff; picked, only the table ring */
         ctx.fillStyle = 'rgba(240,246,255,0.85)';
         ctx.font = '600 ' + Math.round(h.r * 0.55) +
           'px Andika, -apple-system, sans-serif';

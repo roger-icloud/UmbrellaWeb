@@ -66,6 +66,20 @@ widened to 0.58p for pointy corners. `HEX_V = HEX_A·2/√3` is the
 vertical extent in geom()'s fit, `tall` gate, cap and COMB_DROP's
 spare maths.
 
+## Side 6 retired same day (0c4e7e1)
+
+Roger tested: four iPhone deals, zero crossovers (iPad fine — it
+keeps side 7). Cause confirmed in the deal code: a length-10 run has
+~12 legal slots on a side-6 comb vs ~48 on side 7, so `attempt`'s
+60-try crossing ambition always exhausted into parallel words (the
+declared degrade — honest, just bland). Options weighed: MEMBERS 9
+(restores density, loses ×10) vs SIDE 7 (smaller cells, full table).
+Roger chose side 7 — "smaller cells? yes please" — helped by the
+hexagons' bigger inscribed circle. Also brightened cell seams
+(sockets #1d2832→#31455a, unfound #2c3e50→#41587a): his ask,
+"cell dividers visible during selection" — the empty comb now reads
+as a honeycomb skeleton under the picker rail.
+
 ## Publish logistics (Roger: "I'd like to be neat")
 
 - mix-demo → main merge is the publish; waiting on his word and on

@@ -104,10 +104,10 @@ is for the next session's agent, not for Roger.
   and triDeal weaves, tumble completion
 - `search-lab3.html` — redirect stub → `honeycomb.html`, kept
 - `patterns.html` — hundred-square multiples
-- `lattice.html` — loose multiples of a table rest on the ground;
-  drag (or tap) each home to its socket on the hundred square.
-  On the main menu since 2026-10-21 — "earned its place" though the
-  idea isn't fully thought through; no departure yet.
+- ~~`lattice.html`~~ — retired 2026-11-25 (Roger: "contains nothing
+  of value"); had already lost its menu tile. The idea: loose
+  multiples resting on the ground, dragged home to hundred-square
+  sockets — noted here in case it deserves resurrection someday.
 - `tilt-ball.html` — bar-billiards factors game. Steering = snake-head
   heading drive (tilt or drag). STAGES curriculum table: holes unlock
   progressively in rows (near = easy tests, far = hard), every deal

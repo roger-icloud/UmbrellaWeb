@@ -54,14 +54,14 @@
     const GROUND = 0.92;
     const PULLEY_R = 16;       // pulley radius, css px
     const CORD_OFF = 0.035;    // cord loop half-width (fraction of W)
-    const FLAG_W = 66, FLAG_H = 44;
+    const FLAG_W = 104, FLAG_H = 68;
     const RISE_SECS = 7;       // flag's climb once driven
     const TRAY_H = 96;         // parts shelf at the bottom
     const SNAP_R = 56;         // anchor acceptance radius
     const REFUSE_R = 40;       // near-enough-to-mean-it radius
     const WIND_SPINS = 2.2;    // windmill turns while the flag climbs
     const HOIST_SPIN = 2.6;    // rad/s windmill turns when blown
-    const FLUTTER = 8;         // flag wave amplitude at the top fan
+    const FLUTTER = 11;        // flag wave amplitude at the top fan
     const ANCHOR_PULSE = 1.6;  // s per anchor glow cycle
     const RETURN_MS = 600;     // a rejected part glides home
 
@@ -147,6 +147,12 @@
     let flutterT = 0;
     const running = () =>
       parts.cord.placed && parts.windmill.placed && parts.fanHoist.placed;
+
+    /* ?flag — diagnostic: machine pre-built, flag up and fluttering */
+    if (new URLSearchParams(location.search).has('flag')) {
+      ORDER.forEach(id => parts[id].placed = true);
+      riseK = 1;
+    }
 
     /* ---------- input ---------- */
     let drag = null, touch = false;
@@ -322,6 +328,17 @@
       g.addColorStop(1, '#c98a2e');
       ctx.fillStyle = g; ctx.fill();
       ctx.lineWidth = 1.5; ctx.strokeStyle = '#8a5f1d'; ctx.stroke();
+      /* the words ride the cloth — hoisted rather than spoken, keeping
+         "the object says it". Near the hoist they barely travel */
+      ctx.save();
+      ctx.translate(FLAG_W * 0.42, fl * 0.25);
+      ctx.rotate(fl * 0.008);
+      ctx.fillStyle = '#101418';
+      ctx.font = '700 ' + Math.round(FLAG_H * 0.30) + 'px Andika, -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('Well', 0, -FLAG_H * 0.17);
+      ctx.fillText('Done', 0, FLAG_H * 0.17);
+      ctx.restore();
       ctx.restore();
     }
 

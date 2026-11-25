@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs><radialGradient id="head" cx="50%" cy="50%" r="72%" fx="36%" fy="30%"><stop offset="0" stop-color="hsl(150,68%,70%)"/><stop offset="0.38" stop-color="hsl(150,62%,58%)"/><stop offset="1" stop-color="hsl(150,56%,28%)"/></radialGradient></defs>
+<rect width="512" height="512" fill="#101418"/>
+<circle cx="184.7" cy="165.3" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="184.7" y="167.3" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">10</text>
+<circle cx="139.1" cy="217.4" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="139.1" y="219.4" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">20</text>
+<circle cx="123.8" cy="284.9" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="123.8" y="286.9" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">30</text>
+<circle cx="144.9" cy="350.8" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="144.9" y="352.8" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">40</text>
+<circle cx="198.3" cy="394.4" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="198.3" y="396.4" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">50</text>
+<circle cx="266.9" cy="398.0" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="266.9" y="400.0" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">60</text>
+<circle cx="321.0" cy="356.3" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="321.0" y="358.3" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">70</text>
+<circle cx="327.1" cy="288.9" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="327.1" y="290.9" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">80</text>
+<circle cx="274.2" cy="249.3" r="40" fill="hsl(150,60%,45%)" stroke="hsl(150,55%,36%)" stroke-width="1.5"/>
+<text x="274.2" y="251.3" font-family="Andika,-apple-system,sans-serif" font-size="31" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">90</text>
+<circle cx="212.2" cy="120.6" r="60" fill="url(#head)" stroke="hsl(150,58%,40%)" stroke-width="2"/>
+<ellipse cx="233.8" cy="97.8" rx="9.6" ry="9.6" fill="#101418" transform="rotate(-90.0 233.8 97.8)"/>
+<ellipse cx="190.6" cy="97.8" rx="9.6" ry="9.6" fill="#101418" transform="rotate(-90.0 190.6 97.8)"/>
+</svg>

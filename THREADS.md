@@ -3,6 +3,8 @@ _One line per open thread. Status: TRIAL · DISCUSSING · PARKED · WAITING (on 
 _Updated: 2026-11-19 ~01:50_
 
 ## TRIAL (built on mix-demo, test locally)
+- Honeycomb rename + true hexagon cells (was Search Tables) — built 2026-11-25, awaiting iPhone verdict
+- Narrow-phone legibility — side-6/104-cell deal + trimmed reserves (find) + comb drop (search) — on iPhone now
 - Selection mods — chips everywhere, uncommitted opens, rings/warm/cool edges, opt-in progress record — awaiting your verdict then publish word
 - Tilt-ball encore v1 + 3 racks + speed tax/sloppy pause — built; your feedback: two-phase, whistle-y, 3 racks too long
 

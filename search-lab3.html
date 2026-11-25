@@ -223,6 +223,11 @@
     const qs = new URLSearchParams(location.search);
     const num = (k, d) => qs.has(k) ? parseFloat(qs.get(k)) : d;
     if (qs.get('side')) SIDE = Math.max(4, Math.min(9, +qs.get('side') | 0));
+    /* narrow phones try side 6 (Roger 2026-11-25 — "commit and try
+       four"): one ring fewer but cells ~18% wider, and lines of ten
+       still fit (longest 11). The known cost is tighter crossing
+       arms for three tables — the experiment will judge. */
+    else if (Math.min(window.innerWidth, window.innerHeight) < 430) SIDE = 6;
     if (qs.get('members')) MEMBERS = Math.max(4, Math.min(12, +qs.get('members') | 0));
     if (qs.has('ordered')) ORDERED = qs.get('ordered') !== '0';
     if (qs.has('near')) NEAR_P = Math.max(0, Math.min(1, num('near', NEAR_P)));

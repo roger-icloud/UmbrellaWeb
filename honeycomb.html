@@ -156,8 +156,13 @@
     'use strict';
 
     /* ---------- tunables ---------- */
-    const TARGET_CELLS = 132; // ~how many circles to deal; the silhouette
+    let TARGET_CELLS = 132; // ~how many circles to deal; the silhouette
     // (rows × cols) adapts to the screen's aspect
+    /* narrow phones deal fewer, bigger cells (Roger 2026-11-25 — the
+       find-tables counterpart of search tables' side-6 experiment):
+       132 -> 104 is one fewer row+col in effect, paths of twelve
+       still fit with room for twins and decoys */
+    if (Math.min(window.innerWidth, window.innerHeight) < 430) TARGET_CELLS = 104;
     const COLS_MIN = 6, COLS_MAX = 14;
     const BOARD_PAD = 16;    // css px clear space around the board
     const TOP_RESERVE = 92;   // room for HUD text + status

@@ -309,36 +309,60 @@
       const y = pBot - (pBot - pTop) * riseK;
       return { x: cordX, y };
     }
+    /* the cloth baked once: gradient, border, the words — then each
+       frame it's drawn in vertical strips, every strip displaced by a
+       wave that travels outward and grows toward the fly end. The
+       words ride the contour because they're IN the cloth — same
+       decal-mapping idea as tilt-ball's rolling numerals, texture
+       strips instead of a tangent plane */
+    let flagTex = null;
+    function flagTexture() {
+      if (flagTex) return flagTex;
+      const S = 2;                                // supersample, crisp text
+      flagTex = document.createElement('canvas');
+      flagTex.width = FLAG_W * S; flagTex.height = FLAG_H * S;
+      const c2 = flagTex.getContext('2d'); c2.scale(S, S);
+      const g = c2.createLinearGradient(0, 0, FLAG_W, 0);
+      g.addColorStop(0, '#e0a53a'); g.addColorStop(1, '#c98a2e');
+      c2.fillStyle = g; c2.fillRect(0, 0, FLAG_W, FLAG_H);
+      c2.lineWidth = 1.5; c2.strokeStyle = '#8a5f1d';
+      c2.strokeRect(0.75, 0.75, FLAG_W - 1.5, FLAG_H - 1.5);
+      c2.fillStyle = '#101418';
+      c2.font = '700 ' + Math.round(FLAG_H * 0.30) +
+        'px Andika, -apple-system, sans-serif';
+      c2.textAlign = 'center'; c2.textBaseline = 'middle';
+      c2.fillText('Well', FLAG_W * 0.70, FLAG_H * 0.5 - FLAG_H * 0.17);
+      c2.fillText('Done', FLAG_W * 0.70, FLAG_H * 0.5 + FLAG_H * 0.17);
+      return flagTex;
+    }
+
     function drawFlag(x, y, now) {
-      const fl = parts.fanTop.placed
-        ? Math.sin(now / 160) * FLUTTER
-        : Math.sin(now / 900) * 2;
-      ctx.save(); ctx.translate(x, y);
-      /* clipped to the cord, flying right */
-      ctx.beginPath();
-      ctx.moveTo(0, -FLAG_H / 2);
-      ctx.quadraticCurveTo(FLAG_W * 0.55, -FLAG_H / 2 + fl * 0.4,
-        FLAG_W, -FLAG_H / 2 + fl);
-      ctx.lineTo(FLAG_W, FLAG_H / 2 + fl * 0.7);
-      ctx.quadraticCurveTo(FLAG_W * 0.55, FLAG_H / 2 - fl * 0.3,
-        0, FLAG_H / 2);
-      ctx.closePath();
-      const g = ctx.createLinearGradient(0, 0, FLAG_W, 0);
-      g.addColorStop(0, '#e0a53a');
-      g.addColorStop(1, '#c98a2e');
-      ctx.fillStyle = g; ctx.fill();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = '#8a5f1d'; ctx.stroke();
-      /* the words ride the cloth — hoisted rather than spoken, keeping
-         "the object says it". Near the hoist they barely travel */
-      ctx.save();
-      ctx.translate(FLAG_W * 0.42, fl * 0.25);
-      ctx.rotate(fl * 0.008);
-      ctx.fillStyle = '#101418';
-      ctx.font = '700 ' + Math.round(FLAG_H * 0.30) + 'px Andika, -apple-system, sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('Well', 0, -FLAG_H * 0.17);
-      ctx.fillText('Done', 0, FLAG_H * 0.17);
-      ctx.restore();
+      /* clipped to the cord, streaming LEFT — away from the top fan
+         (Roger: flags blow away from the fan, not into it) */
+      const powered = parts.fanTop.placed;
+      const amp = powered ? FLUTTER : 2;
+      const ph0 = powered ? now / 150 : now / 900;
+      const tex = flagTexture(), N = 18, sw = FLAG_W / N;
+      const S = tex.width / FLAG_W;            // texture supersample
+      ctx.save(); ctx.translate(x, y - FLAG_H / 2);
+      for (let i = 0; i < N; i++) {
+        const t = (i + 0.5) * sw;               // strip centre; x=0 fly … FLAG_W hoist
+        const g = 1 - t / FLAG_W;               // 0 at hoist → 1 at fly
+        const ph = ph0 - (FLAG_W - t) * 0.055;
+        const dy = Math.sin(ph) * amp * g * g;  // hoist stays pinned
+        ctx.drawImage(tex, i * sw * S, 0, sw * S, FLAG_H * S,
+          i * sw - FLAG_W, dy, sw, FLAG_H);
+        /* fold shading from the wave's slope — lit face and shadowed
+           back of each ripple, the 3D cue */
+        const sh = Math.cos(ph) * g * 0.20;
+        if (sh > 0.006) {
+          ctx.fillStyle = 'rgba(255,255,255,' + sh.toFixed(3) + ')';
+          ctx.fillRect(i * sw - FLAG_W, dy - 2, sw, FLAG_H + 4);
+        } else if (sh < -0.006) {
+          ctx.fillStyle = 'rgba(0,0,0,' + (-sh).toFixed(3) + ')';
+          ctx.fillRect(i * sw - FLAG_W, dy - 2, sw, FLAG_H + 4);
+        }
+      }
       ctx.restore();
     }
 
@@ -350,13 +374,13 @@
         ctx.lineWidth = 3; ctx.strokeStyle = '#c9b48a'; ctx.stroke();
       } else if (id === 'flag') {
         ctx.beginPath();
-        ctx.moveTo(-8, -18); ctx.lineTo(-8, 18);
+        ctx.moveTo(8, -18); ctx.lineTo(8, 18);
         ctx.strokeStyle = '#8a97a3'; ctx.lineWidth = 3; ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(-8, -18);
-        ctx.quadraticCurveTo(10, -16, 24, -14 + Math.sin(now / 400) * 2);
-        ctx.lineTo(24, 0 + Math.sin(now / 400 + 1) * 2);
-        ctx.quadraticCurveTo(10, -2, -8, 0);
+        ctx.moveTo(8, -18);
+        ctx.quadraticCurveTo(-10, -16, -24, -14 + Math.sin(now / 400) * 2);
+        ctx.lineTo(-24, 0 + Math.sin(now / 400 + 1) * 2);
+        ctx.quadraticCurveTo(-10, -2, 8, 0);
         ctx.closePath();
         ctx.fillStyle = '#e0a53a'; ctx.fill();
       } else if (id === 'windmill') {
@@ -431,7 +455,7 @@
         const a = anchorOf('fanTop');
         drawFan(a.x, a.y, fanA * 0.8, false);
         const f = flagPos();
-        drawWind(a.x - 18, a.y - 8, f.x + FLAG_W * 0.6, f.y - 8,
+        drawWind(a.x - 18, a.y - 8, f.x - FLAG_W * 0.6, f.y - 8,
           parts.flag.placed && riseK > 0.92, now);
       }
 

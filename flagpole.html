@@ -141,6 +141,7 @@
 
     /* ---------- machine state ---------- */
     let riseK = 0;            // 0..1 the flag's climb
+    let starK = 0;            // 0..1 the mark's fade-in at the top
     let millA = 0;            // windmill angle
     let fanA = 0;             // fan blade angle
     let touchX = 0;
@@ -151,7 +152,7 @@
     /* ?flag — diagnostic: machine pre-built, flag up and fluttering */
     if (new URLSearchParams(location.search).has('flag')) {
       ORDER.forEach(id => parts[id].placed = true);
-      riseK = 1;
+      riseK = 1; starK = 1;
     }
 
     /* ---------- input ---------- */
@@ -315,10 +316,10 @@
        words ride the contour because they're IN the cloth — same
        decal-mapping idea as tilt-ball's rolling numerals, texture
        strips instead of a tangent plane */
-    let flagTex = null;
-    function flagTexture() {
-      if (flagTex) return flagTex;
-      const S = 2;                                // supersample, crisp text
+    let flagTex = null, starTex = null;
+    function flagTextures() {
+      if (flagTex) return;
+      const S = 2;                                // supersample, crisp edges
       flagTex = document.createElement('canvas');
       flagTex.width = FLAG_W * S; flagTex.height = FLAG_H * S;
       const c2 = flagTex.getContext('2d'); c2.scale(S, S);
@@ -327,13 +328,21 @@
       c2.fillStyle = g; c2.fillRect(0, 0, FLAG_W, FLAG_H);
       c2.lineWidth = 1.5; c2.strokeStyle = '#8a5f1d';
       c2.strokeRect(0.75, 0.75, FLAG_W - 1.5, FLAG_H - 1.5);
-      c2.fillStyle = '#101418';
-      c2.font = '700 ' + Math.round(FLAG_H * 0.30) +
-        'px Andika, -apple-system, sans-serif';
-      c2.textAlign = 'center'; c2.textBaseline = 'middle';
-      c2.fillText('Well', FLAG_W * 0.70, FLAG_H * 0.5 - FLAG_H * 0.17);
-      c2.fillText('Done', FLAG_W * 0.70, FLAG_H * 0.5 + FLAG_H * 0.17);
-      return flagTex;
+      /* the mark on its own transparent cloth — drawn through the same
+         strips so it rides the wave, but it can fade up on its own.
+         A star for now; the personal mark (initial, avatar) slots in
+         here when users are recorded */
+      starTex = document.createElement('canvas');
+      starTex.width = FLAG_W * S; starTex.height = FLAG_H * S;
+      const c3 = starTex.getContext('2d'); c3.scale(S, S);
+      const cx = FLAG_W * 0.70, cy = FLAG_H * 0.5, R = FLAG_H * 0.36;
+      c3.beginPath();
+      for (let k = 0; k < 10; k++) {
+        const r = k % 2 ? R * 0.42 : R, a = -Math.PI / 2 + k * Math.PI / 5;
+        c3[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      }
+      c3.closePath();
+      c3.fillStyle = '#101418'; c3.fill();
     }
 
     function drawFlag(x, y, now) {
@@ -342,16 +351,22 @@
       const powered = parts.fanTop.placed;
       const amp = powered ? FLUTTER : 2;
       const ph0 = powered ? now / 150 : now / 900;
-      const tex = flagTexture(), N = 18, sw = FLAG_W / N;
-      const S = tex.width / FLAG_W;            // texture supersample
+      flagTextures();
+      const N = 18, sw = FLAG_W / N, S = flagTex.width / FLAG_W;
       ctx.save(); ctx.translate(x, y - FLAG_H / 2);
       for (let i = 0; i < N; i++) {
         const t = (i + 0.5) * sw;               // strip centre; x=0 fly … FLAG_W hoist
         const g = 1 - t / FLAG_W;               // 0 at hoist → 1 at fly
         const ph = ph0 - (FLAG_W - t) * 0.055;
         const dy = Math.sin(ph) * amp * g * g;  // hoist stays pinned
-        ctx.drawImage(tex, i * sw * S, 0, sw * S, FLAG_H * S,
+        ctx.drawImage(flagTex, i * sw * S, 0, sw * S, FLAG_H * S,
           i * sw - FLAG_W, dy, sw, FLAG_H);
+        if (starK > 0) {
+          ctx.globalAlpha = starK;
+          ctx.drawImage(starTex, i * sw * S, 0, sw * S, FLAG_H * S,
+            i * sw - FLAG_W, dy, sw, FLAG_H);
+          ctx.globalAlpha = 1;
+        }
         /* fold shading from the wave's slope — lit face and shadowed
            back of each ripple, the 3D cue */
         const sh = Math.cos(ph) * g * 0.20;
@@ -421,6 +436,10 @@
         millA += HOIST_SPIN * dt;   // wind turns the mill, flag or no
       }
       if (parts.fanTop.placed) flutterT += dt;
+      /* the mark fades up only once everything is assembled AND has
+         worked — the star blooms in the last stretch of the climb */
+      if (ORDER.every(id => parts[id].placed) && riseK > 0.85)
+        starK = Math.min(1, starK + dt / 1.2);
 
       /* sky + ground */
       ctx.fillStyle = '#0d141a';

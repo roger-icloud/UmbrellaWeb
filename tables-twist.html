@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#101418">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Tables Twist — NumberFun</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #101418;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: Andika, -apple-system, system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+
+    #hud {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 8px) + 52px);
+      left: 8px;
+      color: #7f9bb0;
+      font-size: 12px;
+      line-height: 1.5;
+      background: rgba(10, 14, 18, .55);
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      white-space: pre;
+    }
+
+    #doneBar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 10px 18px;
+      z-index: 12;
+      color: #cfd8e0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease;
+    }
+
+    #doneBar.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #doneBar .prompt {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    #doneBar button {
+      font-size: 17px;
+      font-family: inherit;
+      padding: 10px 24px;
+      border-radius: 12px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+    }
+
+    #doneBar button.quiet {
+      background: rgba(40, 64, 88, .95);
+      color: #cfd8e0;
+      border: 1px solid #3a4a58;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(10, 14, 18, .88);
+      color: #cfd8e0;
+      z-index: 10;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay .title {
+      font-size: 22px;
+    }
+
+    .overlay .sub {
+      font-size: 13px;
+      color: #8a97a3;
+      margin-top: 14px;
+      max-width: 340px;
+    }
+
+    .overlay button.go {
+      font-size: 20px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: #4da3ff;
+      color: #fff;
+      margin-top: 16px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+  <meta name="description" content="Spot multiples in a honeycomb of numbers — a gentle times-table spotting game.">
+</head>
+
+<body>
+
+  <canvas id="c"></canvas>
+  <div id="hud"></div>
+
+  <div id="rotOverlay" class="overlay hidden">
+    <div class="title">Turn upright</div>
+    <div class="sub">The game waits for you.</div>
+  </div>
+
+  <div id="doneBar">
+    <span class="prompt">Search again?</span>
+    <button id="againYes">Yes</button>
+    <button class="quiet" id="againNo">No</button>
+  </div>
+
+  <script src="anim.js?v=33"></script>
+  <script src="progress.js"></script>
+
+  <script>
+    'use strict';
+
+    /* ---------- tunables ---------- */
+    let TARGET_CELLS = 132; // ~how many circles to deal; the silhouette
+    // (rows × cols) adapts to the screen's aspect
+    /* narrow phones deal fewer, bigger cells (Roger 2026-11-25 — the
+       find-tables counterpart of search tables' side-6 experiment):
+       132 -> 104 is one fewer row+col in effect, paths of twelve
+       still fit with room for twins and decoys */
+    if (Math.min(window.innerWidth, window.innerHeight) < 430) TARGET_CELLS = 104;
+    const COLS_MIN = 6, COLS_MAX = 14;
+    const BOARD_PAD = 16;    // css px clear space around the board
+    let TOP_RESERVE = 92;   // room for HUD text + status
+    let BOT_RESERVE = 116;  // room for the table chips
+    /* narrow phones trade chrome for cell size (Roger 2026-11-25 —
+       try five): the comb is height-limited there, so every px freed
+       from the reserves enlarges the cells (~15%). Same <430px test
+       as the 104-cell experiment; the status box moves up to match. */
+    if (Math.min(window.innerWidth, window.innerHeight) < 430) {
+      TOP_RESERVE = 64;
+      BOT_RESERVE = 76;
+      document.getElementById('hud').style.top =
+        'calc(env(safe-area-inset-top, 8px) + 8px)';
+    }
+    const CIRCLE_R = 0.39;   // cell circle radius as a fraction of pitch
+    const NUM_FONT = 0.30;   // numeral size as a fraction of pitch
+    const FLASH_SECS = 0.6;   // refusal flash duration
+    const HINT_AFTER = 12;   // s idle before the next cells pulse
+    const MAX_TABLES = 3;    // chips selectable at once (one to three)
+    const DECOY_MAX = 72;    // filler values drawn from 1..DECOY_MAX,
+    // excluding multiples of every selected
+    // table — decoys never carry a path value
+    const RIPPLE_STAGGER = 0.11; // s between segments in a completed path's ripple
+    const RIPPLE_HOLD = 0.45;    // s each segment stays enlarged during the ripple
+    const RIPPLE_SCALE = 0.24;   // peak radius boost during ripple (+24%)
+    const LATTICE_FADE = 0.8;    // s to fade unselected lattice after all ripples finish
+    const HOLD_SECS = 5.0;       // s to hold the isolated snakes before the end-card
+
+    /* ---------- canvas ----------
+       Same policy as Patterns: the board is discrete space — it fills
+       the screen at native cell size and the input layer (nearest cell
+       centre) adapts, rather than scaling a virtual world. */
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bX = 0, bY = 0, pitch = 0;   // pitch = centre-to-centre distance
+    let ROWS = 12, COLS = 12;        // set by pickShape() at deal time
+    const VP = Math.sqrt(3) / 2;     // vertical pitch of hex packing
+
+    function resize() {
+      const vv = window.visualViewport;
+      W = vv ? vv.width : window.innerWidth;
+      H = vv ? vv.height : window.innerHeight;
+      if (W < 50 || H < 50) return;
+      DPR = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = W * DPR; cv.height = H * DPR;
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - BOARD_PAD;
+      // odd rows shift half a pitch right: board is COLS+0.5 pitches
+      // wide; rows sit VP pitches apart: 1 + (ROWS-1)*VP pitches tall
+      pitch = Math.min(availW / (COLS + 0.5), availH / (1 + (ROWS - 1) * VP));
+      bX = (W - pitch * (COLS + 0.5)) / 2;
+      bY = TOP_RESERVE + (availH - pitch * (1 + (ROWS - 1) * VP)) / 2;
+      layoutHeadSt();
+    }
+
+    /* the picker is canvas station heads (Roger 2026-11-22 — "heads
+       that promise"): up to three may be awake at once — the heads
+       you wake are the tables you play */
+    let headSt = [], rowLocked = false;
+    function layoutHeadSt() {
+      const n = 11, edge = 8;
+      const spacing = (W - edge * 2) / n;
+      const r = Math.min(22, spacing / 2 - 1.5, BOT_RESERVE / 2 - 10);
+      const y = H - BOT_RESERVE / 2;
+      const prev = headSt;
+      headSt = [];
+      for (let i = 0; i < n; i++) {
+        const h = { t: i + 2, x: edge + spacing * (i + 0.5), y, r };
+        if (prev[i]) { h.b0 = prev[i].b0; h.bA = prev[i].bA; }
+        headSt.push(h);
+      }
+    }
+    function headBlinkSq(h, now) {
+      if (h.bA === undefined) h.bA = now + Math.random() * 5000;
+      if (h.b0 === undefined || h.b0 < 0) {
+        if (now < h.bA) return 1;
+        h.b0 = now;
+      }
+      const k = (now - h.b0) / 280;
+      if (k >= 1) {
+        h.b0 = -1;
+        h.bA = now + 2400 + Math.random() * 3600;
+        return 1;
+      }
+      return 1 - Math.sin(k * Math.PI) * 0.88;
+    }
+    function pickHead(t) {
+      /* the board insists on three (Roger, 2026-11-24): it stays blank
+         while heads are picked and deals once when the third wakes —
+         no more re-drawing the comb on every tap. A fourth pick is
+         refused outright; a picked head can still be put back. */
+      if (state !== 'idle') return;
+      if (selected.includes(t)) selected = selected.filter(x => x !== t);
+      else if (selected.length < MAX_TABLES) {
+        selected.push(t);
+        const wh = headSt[t - 2];
+        if (wh) wh.b0 = performance.now();
+      }
+      if (selected.length === MAX_TABLES) reset(selected);
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    resize();
+    pickShape();   /* Roger 2026-11-23: settle COLS/ROWS up front, else
+                      the first pick refits the comb mid-tap ~100px */
+    /* sockets under the rail are dealt by blankCells() after `cells`
+       is declared — see the call next to UW.boot */
+
+    /* ---------- hex grid ---------- */
+    // odd-r offset rows (matches the Swift SearchHexagonView geometry):
+    // even rows shift left, odd rows half a pitch right, so each cell
+    // has exactly six neighbours
+    function hexDirs(r) {
+      return (r % 2 === 0)
+        ? [[0, -1], [0, 1], [-1, -1], [-1, 0], [1, -1], [1, 0]]
+        : [[0, -1], [0, 1], [-1, 0], [-1, 1], [1, 0], [1, 1]];
+    }
+    function hexNbrs(p) {
+      const out = [];
+      for (const [dr, dc] of hexDirs(p.r)) {
+        const r = p.r + dr, c = p.c + dc;
+        if (r >= 0 && r < ROWS && c >= 0 && c < COLS) out.push({ r, c });
+      }
+      return out;
+    }
+    const key = p => p.r * COLS + p.c;
+    function centreOf(p) {
+      return {
+        x: bX + (p.r % 2 ? pitch / 2 : 0) + p.c * pitch + pitch / 2,
+        y: bY + p.r * pitch * VP + pitch / 2
+      };
+    }
+
+    /* ---------- state ---------- */
+    let tables = [];           // [A] or [A, B] or [A, B, C]
+    let paths = [];            // paths[ti] = ordered [positions] t..12t
+    let idx = [];              // idx[ti] = how many cells collected
+    let rippleAt = [];         // rippleAt[ti] = performance.now() when path ti completed (0 if not yet)
+    let allRippledAt = 0;      // performance.now() when the last path's ripple finishes
+    let coilIdx = -1;          // index of the table currently coiling (-1 before coiling starts)
+    let finishedCoils = [];    // Anim.snapshot() of each table that has finished coiling
+    let cells = [];            // cells[r][c] = {v, claims:Set, flashUntil}
+    let onPath = [];           // onPath[ti] = Map(key -> index in path)
+    let lastCollectT = 0;
+    let state = 'idle';        // idle | play | celebrate | done
+    let startT = 0, doneMs = 0;
+
+    const events = [];
+    const sid = Math.random().toString(36).slice(2, 10);
+    function logEvent(type, data) {
+      events.push({ t: Math.round(performance.now()), sid, type, ...data });
+    }
+
+    function tableColour(t) { return 'hsl(' + ((t * 31 + 200) % 360) + ',60%,45%)'; }
+    function gcd(a, b) { while (b) { const t = b; b = a % b; a = t; } return a; }
+    function lcm(a, b) { return a / gcd(a, b) * b; }
+    /* how many multiples two tables share within their first twelve.
+       Every pair shares at least one (their product), so "kin" means
+       sharing MORE than that bare minimum — 7 and 11 stay dim. */
+    function sharedCount(a, b) {
+      const st = lcm(a, b), cap = 12 * Math.min(a, b);
+      let n = 0;
+      for (let m = st; m <= cap; m += st) n++;
+      return n;
+    }
+
+    /* ---------- board generation ----------
+       Each table's twelve multiples form ONE CONNECTED PATH through
+       the comb — the answer is always a neighbour of the last find.
+       With two tables the paths SHARE one cell: a common multiple
+       (an lcm value) placed once, belonging to both — the crossover,
+       discoverable only by reaching it from both directions. Other
+       shared multiples may land as separate twin cells: same number,
+       different path — a refusal teaches the difference. */
+
+    // Shape follows the screen (see pickShape in history: tall narrow
+    // comb on phones, broad on tablets); chosen at deal time.
+    function pickShape() {
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE - BOARD_PAD;
+      const p = Math.sqrt(availW * availH / (VP * TARGET_CELLS));
+      COLS = Math.max(COLS_MIN, Math.min(COLS_MAX, Math.round(availW / p - 0.5)));
+      ROWS = Math.round(TARGET_CELLS / COLS);
+      resize();
+    }
+
+    /* a self-avoiding walk of n new cells from `start`.
+       `blocked` may not be stepped on; `own` counts toward the chain
+       rule — a new cell must touch exactly one of the path's own cells
+       or the route visually branches. */
+    function walkFrom(start, n, blocked, own) {
+      const out = [];
+      let cur = start;
+      while (out.length < n) {
+        const opts = hexNbrs(cur).filter(q => !blocked.has(key(q)));
+        const chain = opts.filter(q =>
+          hexNbrs(q).filter(s => own.has(key(s))).length === 1);
+        const cands = chain.length ? chain : opts;
+        if (!cands.length) return null;
+        cur = cands[Math.floor(Math.random() * cands.length)];
+        out.push(cur); blocked.add(key(cur)); own.add(key(cur));
+      }
+      return out;
+    }
+
+    /* hex-grid step distance (odd-r offset coordinates) */
+    function hexDist(a, b) {
+      const ax = a.c - (a.r - (a.r & 1)) / 2, az = a.r, ay = -ax - az;
+      const bx = b.c - (b.r - (b.r & 1)) / 2, bz = b.r, by = -bx - bz;
+      return (Math.abs(ax - bx) + Math.abs(ay - by) + Math.abs(az - bz)) / 2;
+    }
+
+    function sharedMultiples(a, b) {
+      const st = lcm(a, b), cap = 12 * Math.min(a, b), out = [];
+      for (let m = st; m <= cap; m += st) out.push(m);
+      return out;
+    }
+
+    /* a twelve-cell path routed through pin X at step `at` (0-based):
+       walk backwards for the prefix, forwards for the suffix. */
+    function pathThrough(at, X, foreign) {
+      for (let attempt = 0; attempt < 300; attempt++) {
+        const blocked = new Set(foreign); blocked.add(key(X));
+        const own = new Set([key(X)]);
+        const back = walkFrom(X, at, blocked, own);
+        if (!back) continue;
+        const fwd = walkFrom(X, 11 - at, blocked, own);
+        if (!fwd) continue;
+        return back.reverse().concat([X], fwd);
+      }
+      return null;
+    }
+
+    /* a twelve-cell path routed through TWO pins X1 (at step at1) and
+       X2 (at step at2, at1 < at2) so two snakes can cross twice. */
+    function pathThroughTwo(at1, X1, at2, X2, foreign) {
+      const steps = at2 - at1;
+      if (hexDist(X1, X2) > steps) return null;
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const blocked = new Set(foreign);
+        blocked.add(key(X1)); blocked.add(key(X2));
+        const own = new Set([key(X1)]);
+        const mid = [];
+        let cur = X1, ok = true;
+        for (let s = 1; s < steps; s++) {
+          const rem = steps - s;
+          const opts = hexNbrs(cur).filter(q =>
+            !blocked.has(key(q)) && hexDist(q, X2) <= rem);
+          if (!opts.length) { ok = false; break; }
+          cur = opts[Math.floor(Math.random() * opts.length)];
+          mid.push(cur); blocked.add(key(cur)); own.add(key(cur));
+        }
+        if (!ok || hexDist(cur, X2) !== 1) continue;
+        own.add(key(X2));
+        const back = walkFrom(X1, at1, blocked, own);
+        if (!back) continue;
+        const fwd = walkFrom(X2, 11 - at2, blocked, own);
+        if (!fwd) continue;
+        return back.reverse().concat([X1], mid, [X2], fwd);
+      }
+      return null;
+    }
+
+    function genPathAnywhere(foreign) {
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const start = {
+          r: Math.floor(Math.random() * ROWS),
+          c: Math.floor(Math.random() * COLS)
+        };
+        if (foreign.has(key(start))) continue;
+        const blocked = new Set(foreign); blocked.add(key(start));
+        const own = new Set([key(start)]);
+        const rest = walkFrom(start, 11, blocked, own);
+        if (rest) return [start].concat(rest);
+      }
+      return null;
+    }
+
+    /* rejection check ported from Swift: from each path cell, exactly
+       ONE neighbour may show the needed next value — hidden path
+       membership must never make one of two identical-looking choices
+       "wrong". */
+    function unambiguous() {
+      for (let ti = 0; ti < tables.length; ti++) {
+        for (let i = 0; i < 11; i++) {
+          const cur = paths[ti][i];
+          const need = tables[ti] * (i + 2);
+          const matches = hexNbrs(cur).filter(q => cells[q.r][q.c].v === need);
+          if (matches.length > 1) return false;
+        }
+      }
+      return true;
+    }
+
+    /* sockets before numbers (Roger, 2026-11-24): the comb's circles
+       wait empty under the rail until the third head lands a deal */
+    function blankCells() {
+      cells = [];
+      for (let r = 0; r < ROWS; r++) {
+        const row = [];
+        for (let c = 0; c < COLS; c++)
+          row.push({ v: 0, claims: new Set(), flashUntil: 0 });
+        cells.push(row);
+      }
+    }
+
+    function genBoard() {
+      // Pick a target crossover pattern for this deal so multi-table
+      // boards vary naturally between 3-way meetings, chained 2-way
+      // meetings (A–B and B–C), double 2-way meetings, and single 2-way
+      // meetings (falling back freely if early attempts don't land).
+      const wantTwoOnPair = Math.random() < 0.45;
+      const mode3Roll = Math.random();
+      const targetMode3 = mode3Roll < 0.40 ? 'chain2'
+        : mode3Roll < 0.62 ? 'one2'
+          : mode3Roll < 0.80 ? 'double2'
+            : 'three';
+
+      for (let attempt = 0; attempt < 250; attempt++) {
+        cells = [];
+        for (let r = 0; r < ROWS; r++) {
+          const row = [];
+          for (let c = 0; c < COLS; c++)
+            row.push({ v: 0, claims: new Set(), flashUntil: 0 });
+          cells.push(row);
+        }
+        paths = [];
+
+        if (tables.length === 1) {
+          paths[0] = genPathAnywhere(new Set());
+        } else if (tables.length === 2) {
+          const [A, B] = tables;
+          const cands = sharedMultiples(A, B);
+          if ((wantTwoOnPair && attempt < 70) && cands.length >= 2) {
+            // two 2-way crossovers between the two snakes
+            paths[0] = genPathAnywhere(new Set());
+            if (!paths[0]) continue;
+            const i1 = Math.floor(Math.random() * (cands.length - 1));
+            const i2 = i1 + 1 + Math.floor(Math.random() * (cands.length - 1 - i1));
+            const m1 = cands[i1], m2 = cands[i2];
+            const X1 = paths[0][m1 / A - 1], X2 = paths[0][m2 / A - 1];
+            const foreign = new Set(paths[0].map(key));
+            foreign.delete(key(X1)); foreign.delete(key(X2));
+            paths[1] = pathThroughTwo(m1 / B - 1, X1, m2 / B - 1, X2, foreign);
+            if (!paths[1]) continue;
+          } else if (cands.length) {
+            // one shared multiple
+            const mX = cands[Math.floor(Math.random() * cands.length)];
+            const X = {
+              r: Math.floor(Math.random() * ROWS),
+              c: Math.floor(Math.random() * COLS)
+            };
+            paths[0] = pathThrough(mX / A - 1, X, new Set());
+            if (!paths[0]) continue;
+            paths[1] = pathThrough(mX / B - 1, X,
+              new Set(paths[0].filter(p => !(p.r === X.r && p.c === X.c)).map(key)));
+          } else {
+            paths[0] = genPathAnywhere(new Set());
+            if (!paths[0]) continue;
+            paths[1] = genPathAnywhere(new Set(paths[0].map(key)));
+          }
+        } else {
+          // three tables: vary between a chain of two 2-way crossovers
+          // (mid meets p at X1, mid meets q at X2), one 2-way crossover
+          // + free third path, two 2-way crossovers on one pair + free
+          // third path, and a single 3-way crossover.
+          const [A, B, C] = tables;
+          const step3 = lcm(lcm(A, B), C), cap3 = 12 * Math.min(A, B, C);
+          const c3 = [];
+          for (let m = step3; m <= cap3; m += step3) c3.push(m);
+          const pairs = [[0, 1], [0, 2], [1, 2]]
+            .filter(([i, j]) => sharedMultiples(tables[i], tables[j]).length > 0);
+          const doublePairs = pairs
+            .filter(([i, j]) => sharedMultiples(tables[i], tables[j]).length >= 2);
+          // middle tables that can bridge to both other tables at two distinct cells
+          const chainMids = [0, 1, 2].filter(mid => {
+            const [p, q] = [0, 1, 2].filter(x => x !== mid);
+            const sp = sharedMultiples(tables[mid], tables[p]);
+            const sq = sharedMultiples(tables[mid], tables[q]);
+            return sp.length > 0 && sq.length > 0 && (sp.length > 1 || sq.length > 1 || sp[0] !== sq[0]);
+          });
+
+          let mode = attempt < 65 ? targetMode3
+            : (chainMids.length && Math.random() < 0.45 ? 'chain2'
+              : (pairs.length ? 'one2' : 'three'));
+          if (mode === 'three' && !c3.length) mode = chainMids.length ? 'chain2' : 'one2';
+          if (mode === 'chain2' && !chainMids.length) mode = pairs.length ? 'one2' : 'three';
+          if (mode === 'double2' && !doublePairs.length) mode = chainMids.length ? 'chain2' : 'one2';
+
+          if (mode === 'chain2' && chainMids.length) {
+            const mid = chainMids[Math.floor(Math.random() * chainMids.length)];
+            const [p, q] = [0, 1, 2].filter(x => x !== mid);
+            const sp = sharedMultiples(tables[mid], tables[p]);
+            const sq = sharedMultiples(tables[mid], tables[q]);
+            const mP = sp[Math.floor(Math.random() * sp.length)];
+            const sqDiff = sq.filter(m => m !== mP);
+            if (!sqDiff.length) continue;
+            const mQ = sqDiff[Math.floor(Math.random() * sqDiff.length)];
+            paths[mid] = genPathAnywhere(new Set());
+            if (!paths[mid]) continue;
+            const X1 = paths[mid][mP / tables[mid] - 1];
+            const X2 = paths[mid][mQ / tables[mid] - 1];
+            const used = new Set(paths[mid].map(key));
+            const usedP = new Set(used); usedP.delete(key(X1));
+            paths[p] = pathThrough(mP / tables[p] - 1, X1, usedP);
+            if (!paths[p]) continue;
+            paths[p].forEach(pt => used.add(key(pt)));
+            const usedQ = new Set(used); usedQ.delete(key(X2));
+            paths[q] = pathThrough(mQ / tables[q] - 1, X2, usedQ);
+            if (!paths[q]) continue;
+          } else if (mode === 'double2' && doublePairs.length) {
+            const [i, j] = doublePairs[Math.floor(Math.random() * doublePairs.length)];
+            const free = [0, 1, 2].find(x => x !== i && x !== j);
+            const cands = sharedMultiples(tables[i], tables[j]);
+            paths[i] = genPathAnywhere(new Set());
+            if (!paths[i]) continue;
+            const i1 = Math.floor(Math.random() * (cands.length - 1));
+            const i2 = i1 + 1 + Math.floor(Math.random() * (cands.length - 1 - i1));
+            const m1 = cands[i1], m2 = cands[i2];
+            const X1 = paths[i][m1 / tables[i] - 1], X2 = paths[i][m2 / tables[i] - 1];
+            const foreign = new Set(paths[i].map(key));
+            foreign.delete(key(X1)); foreign.delete(key(X2));
+            paths[j] = pathThroughTwo(m1 / tables[j] - 1, X1, m2 / tables[j] - 1, X2, foreign);
+            if (!paths[j]) continue;
+            const used = new Set([...paths[i].map(key), ...paths[j].map(key)]);
+            paths[free] = genPathAnywhere(used);
+            if (!paths[free]) continue;
+          } else if (mode === 'three' && c3.length) {
+            const X = {
+              r: Math.floor(Math.random() * ROWS),
+              c: Math.floor(Math.random() * COLS)
+            };
+            const used = new Set();
+            const place = (ti, at) => {
+              paths[ti] = pathThrough(at, X, new Set(used));
+              if (paths[ti])
+                paths[ti].forEach(p => { if (!(p.r === X.r && p.c === X.c)) used.add(key(p)); });
+              return !!paths[ti];
+            };
+            const mX = c3[Math.floor(Math.random() * c3.length)];
+            const pins = [mX / A - 1, mX / B - 1, mX / C - 1];
+            if (!place(0, pins[0]) || !place(1, pins[1]) || !place(2, pins[2])) continue;
+          } else if (pairs.length) {
+            // one 2-way crossover for a random pair, third path free
+            const X = {
+              r: Math.floor(Math.random() * ROWS),
+              c: Math.floor(Math.random() * COLS)
+            };
+            const used = new Set();
+            const place = (ti, at) => {
+              paths[ti] = pathThrough(at, X, new Set(used));
+              if (paths[ti])
+                paths[ti].forEach(p => { if (!(p.r === X.r && p.c === X.c)) used.add(key(p)); });
+              return !!paths[ti];
+            };
+            const [i, j] = pairs[Math.floor(Math.random() * pairs.length)];
+            const cands = sharedMultiples(tables[i], tables[j]);
+            const mX = cands[Math.floor(Math.random() * cands.length)];
+            const free = [0, 1, 2].find(x => x !== i && x !== j);
+            if (!place(i, mX / tables[i] - 1)) continue;
+            if (!place(j, mX / tables[j] - 1)) continue;
+            used.add(key(X));
+            paths[free] = genPathAnywhere(used);
+            if (!paths[free]) continue;
+          } else {
+            const used = new Set();
+            for (let ti = 0; ti < 3; ti++) {
+              paths[ti] = genPathAnywhere(used);
+              if (!paths[ti]) break;
+              paths[ti].forEach(p => used.add(key(p)));
+            }
+          }
+        }
+        if (paths.length !== tables.length || !paths.every(p => p)) continue;
+
+        onPath = paths.map(p => {
+          const m = new Map();
+          p.forEach((q, i) => m.set(key(q), i));
+          return m;
+        });
+        paths.forEach((p, ti) =>
+          p.forEach((q, i) => { cells[q.r][q.c].v = tables[ti] * (i + 1); }));
+        if (tables.length >= 2 && !unambiguous()) continue;
+
+        const occupied = new Set(paths.flatMap(p => p.map(key)));
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS; c++) {
+            if (occupied.has(r * COLS + c)) continue;
+            let v;
+            do { v = 1 + Math.floor(Math.random() * DECOY_MAX); }
+            while (tables.some(t => v % t === 0));
+            cells[r][c].v = v;
+          }
+        return true;
+      }
+      return false;
+    }
+
+    function reset(sel) {
+      tables = sel.slice();
+      pickShape();
+      genBoard();
+      idx = tables.map(() => 0);
+      rippleAt = tables.map(() => 0);
+      allRippledAt = 0;
+      coilIdx = -1;
+      finishedCoils = [];
+      state = 'play';
+      startT = performance.now();
+      lastCollectT = performance.now();
+      rowLocked = false;
+      document.getElementById('doneBar').classList.remove('show');
+      logEvent('deal', { tables });
+    }
+
+    /* ---------- table picks: up to MAX_TABLES awake at once ---------- */
+    let selected = [];
+
+    /* ---------- orientation guard (handhelds only) ----------
+       Can't lock the browser's rotation, so landscape politely pauses:
+       the overlay covers the board and asks for portrait back. Desktops
+       get a pass — a wide window is legitimate there. */
+    const handheld = matchMedia('(pointer: coarse)').matches;
+    const rotOverlay = document.getElementById('rotOverlay');
+    let paused = false;
+    function checkOrientation() {
+      // viewport dims, not the orientation label: during a rotation iOS
+      // fires the events while matchMedia/orientation still report the
+      // OLD facing — dims tell the truth at call time
+      const portrait = H >= W;
+      paused = handheld && !portrait;
+      rotOverlay.classList.toggle('hidden', !paused);
+    }
+    function scheduleOrientationCheck() {
+      checkOrientation();
+      setTimeout(checkOrientation, 350);   // re-read once the turn settles
+    }
+    window.addEventListener('orientationchange', scheduleOrientationCheck);
+    window.addEventListener('resize', scheduleOrientationCheck);
+    checkOrientation();
+
+    /* ---------- tap → nearest cell centre ---------- */
+    cv.addEventListener('pointerdown', (t) => {
+      /* a head tap toggles its table while the row is open */
+      if (!rowLocked) {
+        const ph = headSt.find(h =>
+          Math.hypot(t.clientX - h.x, t.clientY - h.y) <= h.r * 1.5);
+        if (ph) { pickHead(ph.t); return; }
+      }
+      if (state !== 'play' || paused) return;
+      let best = null, bestD = Infinity;
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          const ctr = centreOf({ r, c });
+          const d = (ctr.x - t.clientX) ** 2 + (ctr.y - t.clientY) ** 2;
+          if (d < bestD) { bestD = d; best = { r, c }; }
+        }
+      if (!best) return;
+      const cell = cells[best.r][best.c];
+      const now = performance.now();
+
+      // a tap is correct for table T iff the cell sits at T's next path
+      // index; the crossover can satisfy both tables in one tap, or
+      // each table at its own moment (re-tap when the second arrives)
+      let accepted = false;
+      for (let ti = 0; ti < tables.length; ti++) {
+        const pi = onPath[ti].get(key(best));
+        if (pi === idx[ti] && !cell.claims.has(ti)) {
+          idx[ti]++;
+          cell.claims.add(ti);
+          accepted = true;
+          logEvent('collect', { table: tables[ti], v: cell.v, ord: idx[ti] });
+          if (idx[ti] === 12 && !rippleAt[ti]) {
+            rippleAt[ti] = now;
+          }
+        }
+      }
+      if (accepted) {
+        lastCollectT = now;
+        rowLocked = true;
+        if (idx.every(i => i === 12)) {
+          doneMs = now - startT;
+          state = 'celebrate';
+          const rippleDurMs = (11 * RIPPLE_STAGGER + RIPPLE_HOLD) * 1000;
+          allRippledAt = Math.max(...rippleAt) + rippleDurMs;
+          logEvent('complete', { tables, ms: Math.round(doneMs) });
+          UW.completed('comb', tables);
+        }
+      } else if (now > cell.flashUntil) {
+        // decoy, out-of-order path cell, or right value on the other
+        // path (a twin) — one refusal grammar covers them all
+        cell.flashUntil = now + FLASH_SECS * 1000;
+        logEvent('refuse', { v: cell.v });
+      }
+    });
+    cv.addEventListener('touchmove', (t) => t.preventDefault(), { passive: false });
+
+    document.getElementById('againYes').addEventListener('click', () => {
+      document.getElementById('doneBar').classList.remove('show');
+      rowLocked = false;
+      state = 'idle';
+      selected = [];
+      finishedCoils = [];
+      coilIdx = -1;
+      blankCells();
+    });
+    document.getElementById('againNo').addEventListener('click', () => {
+      location.href = 'index.html';
+    });
+
+    /* Non-overlapping resting spots + segment size for 1, 2 or 3 coils */
+    function coilPlan() {
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE;
+      const cx = BOARD_PAD + availW / 2;
+      const cy = TOP_RESERVE + availH / 2;
+      const n = tables.length;
+      if (n === 1) {
+        const sd = Math.min(pitch * 1.15, Math.min(availW, availH) / 4.6);
+        return { segD: sd, spots: [{ x: cx, y: cy }] };
+      }
+      if (n === 2) {
+        const spots = availH >= availW * 0.85
+          ? [
+            { x: cx - availW * 0.14, y: cy - availH * 0.24 },
+            { x: cx + availW * 0.14, y: cy + availH * 0.24 }
+          ]
+          : [
+            { x: cx - availW * 0.24, y: cy },
+            { x: cx + availW * 0.24, y: cy }
+          ];
+        const dPair = Math.hypot(spots[1].x - spots[0].x, spots[1].y - spots[0].y);
+        const sd = Math.min(pitch * 1.05, dPair / 4.3, Math.min(availW, availH) / 4.8);
+        return { segD: sd, spots };
+      }
+      const spots = [
+        { x: cx, y: cy - availH * 0.27 },
+        { x: cx - availW * 0.26, y: cy + availH * 0.21 },
+        { x: cx + availW * 0.26, y: cy + availH * 0.21 }
+      ];
+      const dPair = Math.min(
+        Math.hypot(spots[1].x - spots[0].x, spots[1].y - spots[0].y),
+        spots[2].x - spots[1].x
+      );
+      const edgeClear = Math.min(availW * 0.24, availH * 0.23);
+      const sd = Math.min(pitch * 1.0, dPair / 4.3, edgeClear / 2.05);
+      return { segD: sd, spots };
+    }
+
+    /* Roger 2026-11-23: after the coils settle, a pause, then each
+       snake unwinds and goes home to its rail station — the heads
+       come back and the board is ready; "search again?" is retired */
+    let homeIdx = -1, restT0 = 0;
+    /* the receiving station head swells to meet its returning snake
+       (Roger 2026-11-23): without it the standing head and the larger
+       arriving head overlap — two sets of eyes at right angles. The
+       receiver grows opaque over the flight so there is only ever one
+       set, then settles back down on completion */
+    let recvTab = -1, recvSegD = 0; const recvK = {};
+    function startCoil(ti, nowTs) {
+      coilIdx = ti;
+      if (ti >= tables.length) {
+        state = 'rest';
+        restT0 = performance.now();
+        return;
+      }
+      const { segD: sd, spots } = coilPlan();
+      const availW = W - 2 * BOARD_PAD;
+      const availH = H - TOP_RESERVE - BOT_RESERVE;
+      const p0 = centreOf(paths[ti][0]);
+      const p1 = centreOf(paths[ti][1]);
+      const dx = p0.x - p1.x, dy = p0.y - p1.y, d = Math.hypot(dx, dy) || 1;
+      const sp = 0.78 * sd;
+      const hx = Math.min(W - sd, Math.max(sd, p0.x + (dx / d) * sp));
+      const hy = Math.min(H - BOT_RESERVE - sd, Math.max(TOP_RESERVE + sd, p0.y + (dy / d) * sp));
+      const snakeSegs = [
+        { x: hx, y: hy, expected: 0, filled: true, blank: false },
+        ...paths[ti].map((q, i) => {
+          const c = centreOf(q);
+          return { x: c.x, y: c.y, expected: tables[ti] * (i + 1), filled: true, blank: false };
+        })
+      ];
+      const tNow = nowTs !== undefined ? nowTs : performance.now();
+      Anim.begin({
+        ctx, W, H,
+        board: { x: BOARD_PAD, y: TOP_RESERVE, w: availW, h: availH },
+        segD: sd,
+        table: tables[ti],
+        segs: snakeSegs,
+        kind: 'coil',
+        target: spots[ti],
+        skipBeat: true,
+        clear: false,
+        hold: true,
+        now: tNow,
+        onDone: (endNow) => {
+          const snap = Anim.snapshot();
+          if (snap) finishedCoils.push(snap);
+          startCoil(ti + 1, endNow);
+        }
+      });
+    }
+
+    /* the homeward leg: each coil in turn unwinds — the trail seeds
+       from the wound pose, so the first lap IS the uncoil — laps once
+       and dives for its own station. When the last head lands the
+       rail reopens, ready; no question asked */
+    function startHome(i) {
+      homeIdx = i;
+      if (i >= finishedCoils.length) {
+        finishedCoils = [];
+        homeIdx = -1;
+        /* the third snake home = sockets, not the old numbered comb
+           (Roger 2026-11-24): the grid waits empty for the next deal */
+        blankCells();
+        state = 'idle';
+        selected = [];
+        rowLocked = false;
+        recvTab = -1;
+        return;
+      }
+      const snap = finishedCoils[i];
+      finishedCoils[i] = null;    // the departing snake takes over
+                                  // from its own standing portrait
+      recvTab = snap.table; recvSegD = snap.segD;
+      const st = headSt[tables[i] - 2];
+      Anim.begin({
+        ctx, W, H,
+        board: { x: BOARD_PAD, y: TOP_RESERVE,
+                 w: W - 2 * BOARD_PAD, h: H - TOP_RESERVE - BOT_RESERVE },
+        segD: snap.segD,
+        table: snap.table,
+        /* seed the trail from the WOUND positions (snap.pos), not the
+           segs' own x/y — those still carry the original found-path
+           cells, so the snake was re-posing to the zigzag chain at run
+           start and every segment popped through each corner of it
+           (Roger's "jerk passing numeral 13", 2026-11-23) */
+        segs: snap.segs.map((s, i) => ({
+          ...s,
+          x: snap.pos[i] ? snap.pos[i].x : s.x,
+          y: snap.pos[i] ? snap.pos[i].y : s.y
+        })),
+        kind: 'home',
+        target: st ? { x: st.x, y: st.y }
+                   : { x: W / 2, y: H - BOT_RESERVE / 2 },
+        skipBeat: true,
+        clear: false,
+        onDone: () => startHome(i + 1)
+      });
+    }
+
+    /* ---------- draw ---------- */
+    const hud = document.getElementById('hud');
+
+    /* the head rail — chosen tables stand awake, kin heads wear the
+       warm suggest ring, capped-out tables dim. The rail is drawn in
+       every state but 'done' (the coils own the board by then). */
+    function drawRail(now) {
+      if (state === 'done') return;
+      layoutHeadSt();   // live: the comb refits on viewport drift, so
+                        // must the rail (overlap report, 2026-11-23)
+      const dp = Anim.dockPos ? Anim.dockPos() : null;
+      for (const h of headSt) {
+        const on = selected.includes(h.t);
+        const cap = !on && selected.length >= MAX_TABLES;
+        const rk = recvK[h.t] = (recvK[h.t] || 0) +
+          ((recvTab === h.t ? 1 : 0) - (recvK[h.t] || 0)) * 0.06;
+        ctx.save();
+        ctx.globalAlpha = Math.max(rowLocked ? 0.45 : cap ? 0.42 : 1, rk);
+        /* the riff: while the board insists on three, unchosen heads
+           pulse slightly bigger and brighter to say "pick me"
+           (Roger, 2026-11-24) */
+        const riff = state === 'idle' && !on
+          ? (Math.sin(now / 320 + h.t * 1.3) + 1) / 2 : 0;
+        const sd = (rk > 0.01
+          ? h.r * 2 * (1 + (recvSegD / (h.r * 2) - 1) * rk) : h.r * 2)
+          * (1 + 0.09 * riff);
+        const hp = rk > 0.01 && dp ? dp : { x: h.x, y: h.y };
+        Anim.stationHead(ctx, sd, hp, null, h.t,
+          now, 0, on ? { l: 1, r: 1, bob: 0.05 * Math.sin(now / 350 + h.t) } : undefined,
+          -Math.PI / 2, headBlinkSq(h, now));
+        if (riff > 0) {
+          ctx.strokeStyle = 'rgba(255,240,200,' + (0.08 + 0.20 * riff).toFixed(3) + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(hp.x, hp.y, h.r * (1 + 0.09 * riff) + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        /* a chosen head wears its table's colour — the bold ring is
+           the shared selection grammar across the path games
+           (Roger, 2026-11-24) */
+        if (on) {
+          ctx.strokeStyle = tableColour(h.t);
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(hp.x, hp.y, h.r + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        /* the kin ring is retired (Roger 2026-11-24): two highlight
+           grammars competed and the selection ring lost. Unpicked
+           heads now carry only the riff; picked, only the table ring */
+        ctx.fillStyle = 'rgba(240,246,255,0.85)';
+        ctx.font = '600 ' + Math.round(h.r * 0.55) +
+          'px Andika, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('×' + h.t, h.x, h.y + h.r * 0.42);
+        ctx.restore();
+      }
+    }
+
+    function draw(nowArg) {
+      ctx.clearRect(0, 0, W, H);
+      const railNow = nowArg !== undefined ? nowArg : performance.now();
+      hud.textContent = state === 'idle'
+        ? 'pick three tables —\nfind their paths' : '';
+      const now = nowArg !== undefined ? nowArg : performance.now();
+      const rad = pitch * CIRCLE_R;
+
+      // Once every selected table has completed and finished its ripple,
+      // fade out the surrounding lattice, then coil each completed path
+      // one at a time via Anim.
+      let latticeAlpha = 1;
+      /* 'rest' (coils settling + every homecoming) keeps the fade too —
+         else the numbered grid repaints between the coils and the
+         sockets (Roger's reappearing-grid report, 2026-11-24) */
+      if (state === 'celebrate' || state === 'done' || state === 'rest') {
+        if (now >= allRippledAt) {
+          const afterRipple = (now - allRippledAt) / 1000;
+          latticeAlpha = Math.max(0, 1 - afterRipple / LATTICE_FADE);
+          if (coilIdx < 0 && afterRipple >= LATTICE_FADE) {
+            startCoil(0, now);
+          }
+        }
+      }
+
+      // found chains — under the cells so circles stay crisp (skip tables
+      // that have already begun or finished coiling)
+      for (let ti = 0; ti < tables.length; ti++) {
+        if (idx[ti] === 0 || (coilIdx >= 0 && ti <= coilIdx)) continue;
+        ctx.strokeStyle = tableColour(tables[ti]);
+        ctx.lineWidth = rad * 0.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 0.45;
+        ctx.beginPath();
+        for (let i = 0; i < idx[ti]; i++) {
+          const ctr = centreOf(paths[ti][i]);
+          if (i === 0) ctx.moveTo(ctr.x, ctr.y); else ctx.lineTo(ctr.x, ctr.y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      const idle = (now - lastCollectT) / 1000;
+
+      // Draw in two passes (unclaimed lattice first, claimed snake cells
+      // and any rippling cells on top) so enlarged ripple segments never
+      // clip under a neighbouring cell.
+      const cellList = [];
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          const k = key({ r, c });
+          const cell = cells[r][c];
+          const activeClaims = [...cell.claims].filter(ti => coilIdx < 0 || ti > coilIdx);
+          const isFound = activeClaims.length > 0;
+          let pop = 0;
+          if (isFound) {
+            for (const ti of activeClaims) {
+              if (!rippleAt[ti]) continue;
+              const pi = onPath[ti].get(k);
+              if (pi === undefined) continue;
+              const dt = (now - rippleAt[ti]) / 1000 - pi * RIPPLE_STAGGER;
+              if (dt > 0 && dt < RIPPLE_HOLD) {
+                pop = Math.max(pop, Math.sin((dt / RIPPLE_HOLD) * Math.PI));
+              }
+            }
+          }
+          cellList.push({ r, c, k, cell, activeClaims, isFound, pop });
+        }
+      cellList.sort((a, b) => (a.isFound - b.isFound) || (a.pop - b.pop));
+
+      for (const { r, c, k, cell, activeClaims, isFound, pop } of cellList) {
+        if (!isFound && latticeAlpha <= 0.005) continue;
+        const ctr = centreOf({ r, c });
+        const isFlash = cell.flashUntil > now;
+        const isFoothold = state === 'play' && tables.some((t, ti) =>
+          idx[ti] === 0 && onPath[ti].get(k) === 0);
+        const isHint = state === 'play' && idle > HINT_AFTER &&
+          tables.some((t, ti) => idx[ti] < 12 && onPath[ti].get(k) === idx[ti]);
+        const rr = rad * (1 + pop * RIPPLE_SCALE);
+
+        ctx.globalAlpha = isFound ? 1 : latticeAlpha;
+        ctx.beginPath();
+        ctx.arc(ctr.x, ctr.y, rr, 0, Math.PI * 2);
+        if (isFound && activeClaims.length > 1) {
+          // a shared cell claimed from two or three sides — wedge
+          // sectors, one colour per claiming table
+          activeClaims.forEach((ti, i) => {
+            const a0 = -Math.PI / 2 + i * 2 * Math.PI / activeClaims.length;
+            const a1 = -Math.PI / 2 + (i + 1) * 2 * Math.PI / activeClaims.length;
+            ctx.beginPath();
+            ctx.moveTo(ctr.x, ctr.y);
+            ctx.arc(ctr.x, ctr.y, rr, a0, a1);
+            ctx.closePath();
+            ctx.fillStyle = tableColour(tables[ti]);
+            ctx.fill();
+          });
+        } else {
+          ctx.fillStyle = isFound ? tableColour(tables[activeClaims[0]])
+            : isFlash ? '#5a4a28' : '#1a2430';
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(ctr.x, ctr.y, rr, 0, Math.PI * 2);
+        ctx.strokeStyle = pop > 0
+          ? 'rgba(255,255,255,' + (0.35 + 0.6 * pop) + ')'
+          : isFound
+            ? (activeClaims.length >= 2 ? '#cfd8e0' : tableColour(tables[activeClaims[0]]))
+            : isFlash ? '#e0a53a'
+            : cell.v === 0 ? '#1d2832' : '#2c3e50';
+        ctx.lineWidth = pop > 0 ? 2.5 : (isFound ? 2 : 1.2);
+        ctx.stroke();
+
+        if (isFoothold || isHint) {
+          ctx.beginPath();
+          ctx.arc(ctr.x, ctr.y,
+            rr + 5 + Math.sin(now / 300) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = isFoothold
+            ? 'rgba(77,163,255,0.55)' : 'rgba(77,163,255,0.7)';
+          ctx.lineWidth = isFoothold ? 2.5 : 3;
+          ctx.stroke();
+        }
+
+        if (cell.v) {   /* sockets stay numeral-less until dealt */
+          ctx.fillStyle = isFound ? '#fff'
+            : (isFlash ? '#e0a53a' : '#8a97a3');
+          ctx.font = 'bold ' + Math.round(pitch * NUM_FONT * (1 + pop * RIPPLE_SCALE * 0.7))
+            + 'px Andika, -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cell.v, ctr.x, ctr.y + 1);
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // Draw any snakes that have already completed their coil, then
+      // advance the currently coiling (or homeward-bound) snake.
+      for (const snap of finishedCoils) {
+        if (snap) Anim.drawCoil(snap, now);
+      }
+      if (coilIdx >= 0 && coilIdx < tables.length) {
+        Anim.frame(now);
+      } else if (homeIdx >= 0) {
+        Anim.frame(now);
+      } else if (state === 'rest' && now - restT0 > 1600) {
+        startHome(0);
+      }
+
+      drawRail(now);
+    }
+
+    let timeOffset = 0;
+    function frame(now) {
+      try { draw(now + timeOffset); if (window.Anim && Anim.mclock) Anim.mclock(ctx); }
+      catch (e) { /* a bad frame must never kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+    const qs = new URLSearchParams(location.search);
+    if (qs.has('t')) {
+      selected = qs.get('t').split(',').map(Number).filter(n => n >= 2 && n <= 12).slice(0, MAX_TABLES);
+      if (selected.length) reset(selected);
+    }
+    if (qs.has('done') && tables.length) {
+      const now = performance.now();
+      for (let ti = 0; ti < tables.length; ti++) {
+        idx[ti] = 12;
+        paths[ti].forEach(q => cells[q.r][q.c].claims.add(ti));
+        rippleAt[ti] = now;
+      }
+      doneMs = 24000;
+      state = 'celebrate';
+      allRippledAt = now + (11 * RIPPLE_STAGGER + RIPPLE_HOLD) * 1000;
+      const adv = parseFloat(qs.get('advance'));
+      if (adv > 0) {
+        const steps = Math.ceil(adv / 0.016);
+        for (let k = 1; k <= steps; k++) draw(now + k * 16);
+        timeOffset = adv * 1000;
+      }
+    }
+    /* sockets under the rail before the first deal — but not over
+       a board a ?t= deal already laid */
+    if (!tables.length) blankCells();
+    UW.boot('comb');
+    /* ?demo=1 — menu-card attract loop: a random table pair plays
+       itself, tapping each next path cell through the real tap path;
+       reloads for a fresh deal once the coils settle */
+
+    if (qs.get('demo') === '1') {
+      const a = 2 + Math.floor(Math.random() * 11);
+      let b = 2 + Math.floor(Math.random() * 11);
+      if (b === a) b = b === 12 ? 11 : b + 1;
+      reset([a, b]);
+      let doneAt = 0;
+      setInterval(() => {
+        if (state !== 'play' || paused) {
+          if (state === 'done') {
+            if (!doneAt) doneAt = performance.now();
+            else if (performance.now() - doneAt > 5000) location.reload();
+          }
+          return;
+        }
+        outer:
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS; c++) {
+            const cell = cells[r][c];
+            for (let ti = 0; ti < tables.length; ti++)
+              if (onPath[ti].get(key({ r, c })) === idx[ti] &&
+                  !cell.claims.has(ti)) {
+                const ctr = centreOf({ r, c });
+                cv.dispatchEvent(new PointerEvent('pointerdown',
+                  { clientX: ctr.x, clientY: ctr.y }));
+                break outer;
+              }
+          }
+      }, 1100);
+    }
+    requestAnimationFrame(frame);
+  </script>
+
+  <script src="nav.js?v=20"></script>
+</body>
+
+</html>

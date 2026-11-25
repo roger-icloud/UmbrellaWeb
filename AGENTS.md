@@ -88,9 +88,18 @@ is for the next session's agent, not for Roger.
 - `tilt-snake.html` — tilt/drag/tap snake collects ×t in order
 - `snake-puzzle.html` — assemble a table on a posed snake; 4 blanks,
   values spawn one at a time, drag home (port of Swift `TailPuzzleModel`)
-- `honeycomb.html` — connected path of multiples in a hex comb; 1–3
+- `tables-twist.html` — connected path of multiples in a hex comb; 1–3
   tables, crossover cells shared by paths (split-colour when claimed by
-  two, wedge by three), twin cells, ambiguity rejection, kin glow
+  two, wedge by three), twin cells, ambiguity rejection, kin glow.
+  Was `honeycomb.html` until 2026-11-25 — renamed so the Honeycomb
+  game could take its rightful filename. Older notes that say
+  "Honeycomb" mean THIS game
+- `honeycomb.html` — the Honeycomb game (was "Search Tables", file
+  `search-lab3.html` until 2026-11-25): word-search runs of a table's
+  multiples on a hexagon board of true hexagonal cells (HEX_A/HEX_V;
+  seams, not edge-to-edge), insist-on-three head picker, crossover
+  and triDeal weaves, tumble completion
+- `search-lab3.html` — redirect stub → `honeycomb.html`, kept
 - `patterns.html` — hundred-square multiples
 - `lattice.html` — loose multiples of a table rest on the ground;
   drag (or tap) each home to its socket on the hundred square.
@@ -106,7 +115,8 @@ is for the next session's agent, not for Roger.
   thread in SessionNotes-2026-10-25.md — full-hole rounds, hole-set
   ordering (4 and 6 before 13), "?" always central.
 - `rationale.html`, `help.html`, `feedback.html` — human-facing pages
-- `snake.html`/`search.html`/`ball.html` — redirect stubs, kept
+- `snake.html`/`search.html`/`ball.html`/`search-lab3.html` — redirect
+  stubs, kept
 
 ## Animation grammar (agreed 2026-10-17)
 

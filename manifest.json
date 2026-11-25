@@ -1,6 +1,6 @@
 {
-  "name": "NumberFun",
-  "short_name": "NumberFun",
+  "name": "Any Number of Times",
+  "short_name": "Any Number of Times",
   "description": "Numbers you can catch, move and discover — tilt and touch activities for exploring multiplication.",
   "start_url": "index.html",
   "scope": "./",

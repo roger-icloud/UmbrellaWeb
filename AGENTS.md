@@ -1,10 +1,13 @@
-# NumberFun (repo: UmbrellaWeb) — project context for Devin
+# Any Number of Times (repo: UmbrellaWeb) — project context for Devin
 
 ## What this is
 
 A family of small exploratory activities about number, hosted as a
-static site at `https://number-fun.uk` (GitHub Pages behind Cloudflare,
-repo `roger-icloud/UmbrellaWeb`, deploys from `main`). It is the
+static site at `https://anynumberoftimes.com` (GitHub Pages behind
+Cloudflare, repo `roger-icloud/UmbrellaWeb`, deploys from `main`).
+**Renamed from "NumberFun" 2026-11-25** — that name belongs to another
+project; `number-fun.uk` is a separate clarifier page for accidental
+visits, not this site. It is the
 lightweight sibling of the Swift app `~/Developer/Umbrella` — the web
 exists to *test mechanics cheaply*; ideas that survive graduate to Swift
 with their semantics already settled.
@@ -683,7 +686,7 @@ work; this is its return on the new invariant).
   2. **Finish the remaining couple of pages** (`Patterns` / `Pattern Snake`
      / `Lattice` consolidation + `Tilt Ball` polish) and retire diagnostic
      leftovers (`#buildTag` on Snake Puzzle, `DEBUG_GRID` on `patterns.html`).
-  3. **Commit and push to `main`** to publish live on `number-fun.uk`.
+  3. **Commit and push to `main`** to publish live on `anynumberoftimes.com`.
 
 **ACTION POINT (Roger, 2026-10-21):** table choice is currently free;
 an enhancement should *guide* users to appropriate tables for their

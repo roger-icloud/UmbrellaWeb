@@ -105,3 +105,21 @@ to place, as he asked.
 - Kin glow (non-ring channel needed), the adaptive/challenge ladder
   (talk before code), tilt-ball hole-set ordering — all as logged
   in SessionNotes-2026-11-24.
+
+## Twist celebration revised (midday, commit 933f05e)
+
+Roger replaced the coil->glow->numeral celebration: each found path's
+snake now runs ONE circuit straight from the found pose, the table
+numeral fades up plainly at its resting spot as the lap hands to the
+seek (anim.js gained an `onPhrase` hook fired at each script phrase
+boundary — the page times the numeral to it), then the snake seeks
+home into the rail. Sequential, one snake at a time — Anim is a
+single-run engine; a multi-run refactor enabling all-three-together
+is parked as possible future work. After the third homecoming the
+created numerals fade out together (`'clearing'` state, CLEAR_FADE),
+sockets fade back in, and one ripple sweeps the rail (railRiffT0,
+RAIL_RIPPLE) before the normal riff resumes. anim.js ?v=33->34 on all
+six consumers. Verified headless via the existing ?t=&done&advance=
+diagnostic: mid-celebration frame shows lap+numeral; end frame shows
+home rail + clean sockets. Old startCoil/startHome/finishedCoils/'rest'
+machinery removed.

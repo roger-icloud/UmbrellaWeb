@@ -302,6 +302,8 @@ window.Anim = (function () {
   let bX = 0, bY = 0, bW = 0, bH = 0;
   let segD = 48, table = 0, segs = [];
   let onFade = null, onDone = null, fadeFired = false;
+  let onPhrase = null;        // opts.onPhrase — fires at each phrase
+                              // boundary with the incoming phrase's key
   let pageKind = null;        // the page's chosen exit; ?depart= outranks it
   let coilTarget = null;      // optional {x,y} centre for a coil
   let doClear = true;         // false when page draws its own backdrop/coils
@@ -629,11 +631,13 @@ window.Anim = (function () {
              ramp guards a fresh goal-swap, and nothing swapped */
           script.shift(); phraseArc = run.vSm * 0.35;
           mlog('lap blended -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
+          onPhrase && onPhrase(script[0] ? Object.keys(script[0])[0] : 'end');
           continue;
         }
         if (ph.prog >= ph.t.P * (ph.laps || 1) * 0.985) {
           script.shift(); phraseArc = 0;
           mlog('lap done -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
+          onPhrase && onPhrase(script[0] ? Object.keys(script[0])[0] : 'end');
         }
         continue;
       }
@@ -950,6 +954,7 @@ window.Anim = (function () {
       if (ph && !ph.seek && phraseArc >= ph.arc - 1e-6) {
         script.shift(); phraseArc = 0;
         mlog('phrase -> ' + (script[0] ? Object.keys(script[0])[0] : 'end'));
+        onPhrase && onPhrase(script[0] ? Object.keys(script[0])[0] : 'end');
       }
     }
     // the wriggle is baked into the trail: the head swims, the body
@@ -1091,6 +1096,7 @@ window.Anim = (function () {
     bX = opts.board.x; bY = opts.board.y; bW = opts.board.w; bH = opts.board.h;
     segD = opts.segD; table = opts.table; segs = opts.segs;
     onFade = opts.onFade || null; onDone = opts.onDone || null;
+    onPhrase = opts.onPhrase || null;
     beginN++;
     pageKind = opts.kind || null;
     coilTarget = opts.target || null;

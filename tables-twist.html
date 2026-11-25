@@ -149,7 +149,7 @@
     <button class="quiet" id="againNo">No</button>
   </div>
 
-  <script src="anim.js?v=33"></script>
+  <script src="anim.js?v=34"></script>
   <script src="progress.js"></script>
 
   <script>
@@ -189,6 +189,10 @@
     const RIPPLE_HOLD = 0.45;    // s each segment stays enlarged during the ripple
     const RIPPLE_SCALE = 0.24;   // peak radius boost during ripple (+24%)
     const LATTICE_FADE = 0.8;    // s to fade unselected lattice after all ripples finish
+    const NUM_IN = 0.8;          // celebration numeral's fade-in — no
+    // glow (Roger 2026-11-25): the number simply appears
+    const CLEAR_FADE = 0.9;      // the created numerals' shared fade-out
+    const RAIL_RIPPLE = 0.9;     // invitation ripple's sweep along the rail
     const HOLD_SECS = 5.0;       // s to hold the isolated snakes before the end-card
 
     /* ---------- canvas ----------
@@ -305,8 +309,13 @@
     let idx = [];              // idx[ti] = how many cells collected
     let rippleAt = [];         // rippleAt[ti] = performance.now() when path ti completed (0 if not yet)
     let allRippledAt = 0;      // performance.now() when the last path's ripple finishes
-    let coilIdx = -1;          // index of the table currently coiling (-1 before coiling starts)
-    let finishedCoils = [];    // Anim.snapshot() of each table that has finished coiling
+    let runIdx = -1;          // index of the table whose run is live (-1 before runs start)
+    let numT0 = [];           // per-table celebration numeral's fade-in start (0 = not up)
+    let numSpots = [];        // where each numeral rests (coilPlan's spots)
+    let numSd = 0;            // numeral size basis (coilPlan's segD)
+    let clearT0 = 0;          // 'clearing' start — created numerals fade out
+    let sockT0 = 0;           // socket grid's fade-in start (0 = already in)
+    let railRiffT0 = 0;       // invitation ripple's start along the rail
     let cells = [];            // cells[r][c] = {v, claims:Set, flashUntil}
     let onPath = [];           // onPath[ti] = Map(key -> index in path)
     let lastCollectT = 0;
@@ -671,8 +680,9 @@
       idx = tables.map(() => 0);
       rippleAt = tables.map(() => 0);
       allRippledAt = 0;
-      coilIdx = -1;
-      finishedCoils = [];
+      runIdx = -1;
+      numT0 = [];
+      numSpots = [];
       state = 'play';
       startT = performance.now();
       lastCollectT = performance.now();
@@ -768,8 +778,9 @@
       rowLocked = false;
       state = 'idle';
       selected = [];
-      finishedCoils = [];
-      coilIdx = -1;
+      numT0 = [];
+      numSpots = [];
+      runIdx = -1;
       blankCells();
     });
     document.getElementById('againNo').addEventListener('click', () => {
@@ -815,24 +826,31 @@
       return { segD: sd, spots };
     }
 
-    /* Roger 2026-11-23: after the coils settle, a pause, then each
-       snake unwinds and goes home to its rail station — the heads
-       come back and the board is ready; "search again?" is retired */
-    let homeIdx = -1, restT0 = 0;
     /* the receiving station head swells to meet its returning snake
        (Roger 2026-11-23): without it the standing head and the larger
        arriving head overlap — two sets of eyes at right angles. The
        receiver grows opaque over the flight so there is only ever one
        set, then settles back down on completion */
     let recvTab = -1, recvSegD = 0; const recvK = {};
-    function startCoil(ti, nowTs) {
-      coilIdx = ti;
+
+    /* the celebration, revised (Roger 2026-11-25 — "instead of
+       curling, glowing and revealing the number"): each found path's
+       snake runs ONE circuit of the board straight from its found
+       pose — no coil, no glow — its table numeral fades up at its
+       resting spot as the lap hands to the seek, and the snake runs
+       home into the rail. One at a time; the engine is one snake. */
+    function startCircuit(ti, nowTs) {
+      runIdx = ti;
       if (ti >= tables.length) {
-        state = 'rest';
-        restT0 = performance.now();
+        /* all three home: the created numerals fade out together,
+           then the rail ripples an invitation (Roger 2026-11-25) */
+        state = 'clearing';
+        clearT0 = performance.now();
         return;
       }
       const { segD: sd, spots } = coilPlan();
+      numSd = sd;
+      numSpots[ti] = spots[ti];
       const availW = W - 2 * BOARD_PAD;
       const availH = H - TOP_RESERVE - BOT_RESERVE;
       const p0 = centreOf(paths[ti][0]);
@@ -848,72 +866,25 @@
           return { x: c.x, y: c.y, expected: tables[ti] * (i + 1), filled: true, blank: false };
         })
       ];
-      const tNow = nowTs !== undefined ? nowTs : performance.now();
+      recvTab = tables[ti]; recvSegD = sd;
+      const st = headSt[tables[ti] - 2];
       Anim.begin({
         ctx, W, H,
         board: { x: BOARD_PAD, y: TOP_RESERVE, w: availW, h: availH },
         segD: sd,
         table: tables[ti],
         segs: snakeSegs,
-        kind: 'coil',
-        target: spots[ti],
-        skipBeat: true,
-        clear: false,
-        hold: true,
-        now: tNow,
-        onDone: (endNow) => {
-          const snap = Anim.snapshot();
-          if (snap) finishedCoils.push(snap);
-          startCoil(ti + 1, endNow);
-        }
-      });
-    }
-
-    /* the homeward leg: each coil in turn unwinds — the trail seeds
-       from the wound pose, so the first lap IS the uncoil — laps once
-       and dives for its own station. When the last head lands the
-       rail reopens, ready; no question asked */
-    function startHome(i) {
-      homeIdx = i;
-      if (i >= finishedCoils.length) {
-        finishedCoils = [];
-        homeIdx = -1;
-        /* the third snake home = sockets, not the old numbered comb
-           (Roger 2026-11-24): the grid waits empty for the next deal */
-        blankCells();
-        state = 'idle';
-        selected = [];
-        rowLocked = false;
-        recvTab = -1;
-        return;
-      }
-      const snap = finishedCoils[i];
-      finishedCoils[i] = null;    // the departing snake takes over
-                                  // from its own standing portrait
-      recvTab = snap.table; recvSegD = snap.segD;
-      const st = headSt[tables[i] - 2];
-      Anim.begin({
-        ctx, W, H,
-        board: { x: BOARD_PAD, y: TOP_RESERVE,
-                 w: W - 2 * BOARD_PAD, h: H - TOP_RESERVE - BOT_RESERVE },
-        segD: snap.segD,
-        table: snap.table,
-        /* seed the trail from the WOUND positions (snap.pos), not the
-           segs' own x/y — those still carry the original found-path
-           cells, so the snake was re-posing to the zigzag chain at run
-           start and every segment popped through each corner of it
-           (Roger's "jerk passing numeral 13", 2026-11-23) */
-        segs: snap.segs.map((s, i) => ({
-          ...s,
-          x: snap.pos[i] ? snap.pos[i].x : s.x,
-          y: snap.pos[i] ? snap.pos[i].y : s.y
-        })),
         kind: 'home',
         target: st ? { x: st.x, y: st.y }
                    : { x: W / 2, y: H - BOT_RESERVE / 2 },
         skipBeat: true,
         clear: false,
-        onDone: () => startHome(i + 1)
+        onPhrase: (name) => {
+          /* the lap hands to the seek — the numeral rises now
+             (phrase boundary reported by Anim.onPhrase) */
+          if (name === 'seek' && !numT0[ti]) numT0[ti] = performance.now();
+        },
+        onDone: (endNow) => startCircuit(ti + 1, endNow)
       });
     }
 
@@ -928,6 +899,11 @@
       layoutHeadSt();   // live: the comb refits on viewport drift, so
                         // must the rail (overlap report, 2026-11-23)
       const dp = Anim.dockPos ? Anim.dockPos() : null;
+      /* the invitation ripple (Roger 2026-11-25): one brightness wave
+         sweeps the rail after a completed board, then the standing
+         riff resumes — "your turn again" said once, not nagged */
+      const rpT = railRiffT0 ? (now - railRiffT0) / 1000 / RAIL_RIPPLE : -1;
+      if (rpT > 1) railRiffT0 = 0;
       for (const h of headSt) {
         const on = selected.includes(h.t);
         const cap = !on && selected.length >= MAX_TABLES;
@@ -938,8 +914,11 @@
         /* the riff: while the board insists on three, unchosen heads
            pulse slightly bigger and brighter to say "pick me"
            (Roger, 2026-11-24) */
+        const wave = rpT >= 0 && headSt.length > 1
+          ? Math.exp(-Math.pow(
+              (rpT - (h.t - 2) / (headSt.length - 1)) * 5, 2)) : 0;
         const riff = state === 'idle' && !on
-          ? (Math.sin(now / 320 + h.t * 1.3) + 1) / 2 : 0;
+          ? Math.max((Math.sin(now / 320 + h.t * 1.3) + 1) / 2, wave) : 0;
         const sd = (rk > 0.01
           ? h.r * 2 * (1 + (recvSegD / (h.r * 2) - 1) * rk) : h.r * 2)
           * (1 + 0.09 * riff);
@@ -989,15 +968,21 @@
       // fade out the surrounding lattice, then coil each completed path
       // one at a time via Anim.
       let latticeAlpha = 1;
-      /* 'rest' (coils settling + every homecoming) keeps the fade too —
+      /* after a completed board the socket grid fades back in, not on
+         — the wipe's other half (Roger 2026-11-25) */
+      if (state === 'idle' && sockT0) {
+        latticeAlpha = Math.min(1, (now - sockT0) / 1000 / LATTICE_FADE);
+        if (latticeAlpha >= 1) sockT0 = 0;
+      }
+      /* 'clearing' (every homecoming) keeps the fade too —
          else the numbered grid repaints between the coils and the
          sockets (Roger's reappearing-grid report, 2026-11-24) */
-      if (state === 'celebrate' || state === 'done' || state === 'rest') {
+      if (state === 'celebrate' || state === 'done' || state === 'clearing') {
         if (now >= allRippledAt) {
           const afterRipple = (now - allRippledAt) / 1000;
           latticeAlpha = Math.max(0, 1 - afterRipple / LATTICE_FADE);
-          if (coilIdx < 0 && afterRipple >= LATTICE_FADE) {
-            startCoil(0, now);
+          if (runIdx < 0 && afterRipple >= LATTICE_FADE) {
+            startCircuit(0, now);
           }
         }
       }
@@ -1005,7 +990,7 @@
       // found chains — under the cells so circles stay crisp (skip tables
       // that have already begun or finished coiling)
       for (let ti = 0; ti < tables.length; ti++) {
-        if (idx[ti] === 0 || (coilIdx >= 0 && ti <= coilIdx)) continue;
+        if (idx[ti] === 0 || (runIdx >= 0 && ti <= runIdx)) continue;
         ctx.strokeStyle = tableColour(tables[ti]);
         ctx.lineWidth = rad * 0.5;
         ctx.lineJoin = 'round';
@@ -1030,7 +1015,7 @@
         for (let c = 0; c < COLS; c++) {
           const k = key({ r, c });
           const cell = cells[r][c];
-          const activeClaims = [...cell.claims].filter(ti => coilIdx < 0 || ti > coilIdx);
+          const activeClaims = [...cell.claims].filter(ti => runIdx < 0 || ti > runIdx);
           const isFound = activeClaims.length > 0;
           let pop = 0;
           if (isFound) {
@@ -1112,17 +1097,42 @@
       }
       ctx.globalAlpha = 1;
 
-      // Draw any snakes that have already completed their coil, then
-      // advance the currently coiling (or homeward-bound) snake.
-      for (const snap of finishedCoils) {
-        if (snap) Anim.drawCoil(snap, now);
+      /* the celebration numerals: each fades up at its resting spot
+         as its snake's lap hands to the seek (no glow — Roger
+         2026-11-25); all fade out together once the last is home */
+      for (let ti = 0; ti < tables.length; ti++) {
+        if (!numT0[ti] || !numSpots[ti]) continue;
+        const inK = Math.min(1, (now - numT0[ti]) / 1000 / NUM_IN);
+        let a = inK * inK * (3 - 2 * inK);
+        if (state === 'clearing')
+          a *= Math.max(0, 1 - (now - clearT0) / 1000 / CLEAR_FADE);
+        if (a <= 0.003) continue;
+        const t = tables[ti];
+        ctx.globalAlpha = a;
+        ctx.fillStyle = tableColour(t);
+        ctx.font = '800 ' + Math.round(numSd * (t >= 10 ? 0.8 : 1.05)) +
+          'px Andika, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(t, numSpots[ti].x, numSpots[ti].y);
       }
-      if (coilIdx >= 0 && coilIdx < tables.length) {
+      ctx.globalAlpha = 1;
+
+      if (runIdx >= 0 && runIdx < tables.length) {
         Anim.frame(now);
-      } else if (homeIdx >= 0) {
-        Anim.frame(now);
-      } else if (state === 'rest' && now - restT0 > 1600) {
-        startHome(0);
+      } else if (state === 'clearing' &&
+                 (now - clearT0) / 1000 >= CLEAR_FADE) {
+        /* the created numerals have faded — the socket grid rises to
+           meet the next deal, then the rail ripples its invitation */
+        blankCells();
+        state = 'idle';
+        selected = [];
+        rowLocked = false;
+        recvTab = -1;
+        sockT0 = now;
+        railRiffT0 = now;
+        numT0 = [];
+        numSpots = [];
       }
 
       drawRail(now);

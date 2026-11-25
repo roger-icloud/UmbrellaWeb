@@ -174,6 +174,10 @@
     // cell diameter in px
     const FONT_MAX = 1.05;             // numeral size cap (× cell radius)
     const CHIP_H = 92;                 // space kept below the board
+    const COMB_DROP = 0.25;            // share of spare height the comb
+    // slides down for balance (Roger 2026-11-25 — the chip rail reads
+    // heavy when the board sits dead-centre; spends only slack, never
+    // reaches the rail)
     const MAX_VAL = 144;               // numerals live in 2..144
     const HALO_N = 1;                  // hex radius of the revealed area
     const HALO_LIFT = 2.1;             // pitches above a touch finger
@@ -588,8 +592,10 @@
       else if (pitch * 2 * CIRCLE_R < TALL_BELOW)
         tall = Math.min(TALL_MAX,
           avail / (pitch * (2 * S * VP + 2 * CIRCLE_R)));
-      return { pitch, tall, vStep: pitch * VP * tall,
-               cx: W / 2, cy: (H - CHIP_H) / 2 };
+      const vStep = pitch * VP * tall;
+      const spare = avail - (2 * S * vStep + 2 * CIRCLE_R * pitch * tall);
+      const cy = (H - CHIP_H) / 2 + Math.max(0, spare) * COMB_DROP;
+      return { pitch, tall, vStep, cx: W / 2, cy };
     }
     const centre = (g, cell) => ({
       x: g.cx + (cell.q + cell.r / 2) * g.pitch,

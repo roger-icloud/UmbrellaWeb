@@ -165,8 +165,18 @@
     if (Math.min(window.innerWidth, window.innerHeight) < 430) TARGET_CELLS = 104;
     const COLS_MIN = 6, COLS_MAX = 14;
     const BOARD_PAD = 16;    // css px clear space around the board
-    const TOP_RESERVE = 92;   // room for HUD text + status
-    const BOT_RESERVE = 116;  // room for the table chips
+    let TOP_RESERVE = 92;   // room for HUD text + status
+    let BOT_RESERVE = 116;  // room for the table chips
+    /* narrow phones trade chrome for cell size (Roger 2026-11-25 —
+       try five): the comb is height-limited there, so every px freed
+       from the reserves enlarges the cells (~15%). Same <430px test
+       as the 104-cell experiment; the status box moves up to match. */
+    if (Math.min(window.innerWidth, window.innerHeight) < 430) {
+      TOP_RESERVE = 64;
+      BOT_RESERVE = 76;
+      document.getElementById('hud').style.top =
+        'calc(env(safe-area-inset-top, 8px) + 8px)';
+    }
     const CIRCLE_R = 0.39;   // cell circle radius as a fraction of pitch
     const NUM_FONT = 0.30;   // numeral size as a fraction of pitch
     const FLASH_SECS = 0.6;   // refusal flash duration

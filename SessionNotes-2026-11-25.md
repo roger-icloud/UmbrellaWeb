@@ -123,3 +123,12 @@ six consumers. Verified headless via the existing ?t=&done&advance=
 diagnostic: mid-celebration frame shows lap+numeral; end frame shows
 home rail + clean sockets. Old startCoil/startHome/finishedCoils/'rest'
 machinery removed.
+
+## Platform quirk noted (Roger field report)
+
+DuckDuckGo browser on desktop Mac renders the Twist celebration
+jerkily; Safari desktop, DDG on iPad Air, and iPhone 8 are all smooth.
+Cause is environmental: DDG-Mac is a WKWebView wrapper (weaker
+compositing than Safari's own renderer) plus injected
+fingerprinting-protection scripts hooking the canvas API. Per-site
+privacy toggle can confirm. Not a defect, not blocking publish.

@@ -128,7 +128,19 @@ machinery removed.
 
 DuckDuckGo browser on desktop Mac renders the Twist celebration
 jerkily; Safari desktop, DDG on iPad Air, and iPhone 8 are all smooth.
-Cause is environmental: DDG-Mac is a WKWebView wrapper (weaker
+First read: environmental — DDG-Mac is a WKWebView wrapper (weaker
 compositing than Safari's own renderer) plus injected
 fingerprinting-protection scripts hooking the canvas API. Per-site
 privacy toggle can confirm. Not a defect, not blocking publish.
+
+Caveat recorded same day (Roger): DDG was "entirely fine" until the
+celebration revision — which weakens the pure-compositing story and
+points at the new code path. Suspects if it resurfaces: (a) the
+`home` run — laptrack + trail sampling for all segments + roost
+(meltStep, fidgets) for ~15–20s vs the coil's mostly-held frames;
+(b) anim.js v34 — driveHead changed globally (vSm speed easing, wSm
+turn smoothing) for every departure kind. Discrimination tests left
+unrun, noted for the future: does DDG jerk on tilt-snake's
+homecoming (same `home` kind, same anim.js since 2026-11-22)?
+And `?motion=0` on twist — jerky stills = compositor, stutter only
+in motion = our per-frame work.

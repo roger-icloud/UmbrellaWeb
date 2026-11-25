@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#101418">
-  <title>Search Tables — NumberFun</title>
+  <title>Honeycomb — NumberFun</title>
   <style>
     html,
     body {
@@ -165,7 +165,12 @@
     let   CROSS_P = 0.7;               // Roger: bias toward crossovers
     const FLASH_S = 0.38;              // refusal amber
     const BEAT_S = 0.09;               // completion stagger per member
-    const CIRCLE_R = 0.40;             // cell radius as pitch fraction
+    const HEX_A = 0.48;                // hexagon half-width (apothem)
+    // as a pitch fraction — 0.50 tiles edge-to-edge; the small inset
+    // leaves dark seams (Roger 2026-11-25: true comb cells set this
+    // board apart from find tables' circles, and its inscribed circle
+    // is larger than the old cell circle — digits gain room)
+    const HEX_V = HEX_A * 2 / Math.sqrt(3);   // half-height = circumradius
     const MARGIN = 20;                 // board margin (shrinks on phones)
     const TALL_MAX = 1.45;             // vertical stretch cap — tall
     // cells on small screens only; big screens keep circles (Roger:
@@ -585,15 +590,15 @@
       const m = Math.min(MARGIN, W * 0.035);
       const avail = H - CHIP_H - 2 * m;
       const pitch = Math.min(
-        (W - 2 * m) / (2 * S + 2 * CIRCLE_R),
-        avail / (2 * S * VP + 2 * CIRCLE_R));
+        (W - 2 * m) / (2 * S + 2 * HEX_A),
+        avail / (2 * S * VP + 2 * HEX_V));
       let tall = 1;
       if (TALL_Q !== null) tall = Math.max(1, TALL_Q);
-      else if (pitch * 2 * CIRCLE_R < TALL_BELOW)
+      else if (pitch * 2 * HEX_A < TALL_BELOW)
         tall = Math.min(TALL_MAX,
-          avail / (pitch * (2 * S * VP + 2 * CIRCLE_R)));
+          avail / (pitch * (2 * S * VP + 2 * HEX_V)));
       const vStep = pitch * VP * tall;
-      const spare = avail - (2 * S * vStep + 2 * CIRCLE_R * pitch * tall);
+      const spare = avail - (2 * S * vStep + 2 * HEX_V * pitch * tall);
       const cy = (H - CHIP_H) / 2 + Math.max(0, spare) * COMB_DROP;
       return { pitch, tall, vStep, cx: W / 2, cy };
     }
@@ -602,9 +607,22 @@
       y: g.cy + cell.r * g.vStep,
     });
 
+    /* pointy-top hexagon: `h` is centre→edge midpoint (apothem),
+       `v` is centre→vertex. Traces only — callers fill/stroke/clip. */
+    function hexPath(x, y, h, v) {
+      ctx.beginPath();
+      ctx.moveTo(x, y - v);
+      ctx.lineTo(x + h, y - v / 2);
+      ctx.lineTo(x + h, y + v / 2);
+      ctx.lineTo(x, y + v);
+      ctx.lineTo(x - h, y + v / 2);
+      ctx.lineTo(x - h, y - v / 2);
+      ctx.closePath();
+    }
+
     function cellAt(x, y) {
       const g = geom();
-      let best = null, bd = g.pitch * 0.55;
+      let best = null, bd = g.pitch * 0.58;
       for (const cell of cells) {
         const p = centre(g, cell);
         const d = Math.hypot(x - p.x, (y - p.y) / g.tall);
@@ -764,7 +782,8 @@
     function draw(now) {
       ctx.fillStyle = '#101418';
       ctx.fillRect(0, 0, W, H);
-      const g = geom(), rad = g.pitch * CIRCLE_R, ry = rad * g.tall;
+      const g = geom(), rad = g.pitch * HEX_A,
+                      ry = g.pitch * HEX_V * g.tall;
 
       /* completed runs get their connector first — one object under
          the cells, not separate dots */
@@ -808,12 +827,12 @@
           (now - cell.flashT0) / 1000 < FLASH_S;
         if (flashing) {
           const u = (now - cell.flashT0) / 1000 / FLASH_S;
-          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
+          hexPath(x, y, rad, ry);
           ctx.fillStyle = '#e0a53a';
           ctx.globalAlpha = 0.35 * (1 - u); ctx.fill(); ctx.globalAlpha = 1;
         }
 
-        ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
+        hexPath(x, y, rad, ry);
         if (cell.found) {
           ctx.fillStyle = tableColour(tables[cell.disp ?? cell.ts[0]]);
         } else if (MARK && cell.ts.length) {
@@ -832,18 +851,18 @@
           const order = cell.order.slice(0, cell.shown);
           order.forEach((ti, i) => {
             ctx.save();
-            ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7); ctx.clip();
+            hexPath(x, y, rad, ry); ctx.clip();
             ctx.fillStyle = tableColour(tables[ti]);
             ctx.fillRect(x - rad + i * 2 * rad / order.length,
-              y - rad, 2 * rad / order.length, 2 * rad);
+              y - ry, 2 * rad / order.length, 2 * ry);
             ctx.restore();
           });
           for (let i = 1; i < order.length; i++) {
             const sx = x - rad + i * 2 * rad / order.length;
             ctx.save();
-            ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7); ctx.clip();
+            hexPath(x, y, rad, ry); ctx.clip();
             ctx.beginPath();
-            ctx.moveTo(sx, y - rad); ctx.lineTo(sx, y + rad);
+            ctx.moveTo(sx, y - ry); ctx.lineTo(sx, y + ry);
             ctx.strokeStyle = 'rgba(16,20,24,0.7)';
             ctx.lineWidth = 1.4;
             ctx.stroke();
@@ -859,11 +878,11 @@
         const revK = revT === undefined ? 0
           : Math.min(1, (now - revT) / 1000 / REV_FADE) * la;
         if (revK > 0 && !cell.ts.length) {
-          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
+          hexPath(x, y, rad, ry);
           ctx.fillStyle = 'rgba(224,165,58,' + 0.34 * AMBER * revK + ')';
           ctx.fill();
         } else if (revK > 0) {
-          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
+          hexPath(x, y, rad, ry);
           ctx.fillStyle = 'rgba(240,244,247,' + revK + ')';
           ctx.fill();
           /* a dash of the table's colour in the white */
@@ -873,7 +892,7 @@
           ctx.globalAlpha = 1;
         }
 
-        ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
+        hexPath(x, y, rad, ry);
         ctx.strokeStyle = cell.found
           ? tableColour(tables[cell.disp ?? cell.ts[0]])
           : cell.v === null ? '#1d2832' : '#2c3e50';
@@ -901,7 +920,7 @@
           ctx.globalAlpha = 1;
         }
         if (lift > 0) {
-          ctx.beginPath(); ctx.ellipse(x, y, rad, ry, 0, 0, 7);
+          hexPath(x, y, rad, ry);
           ctx.fillStyle = '#fff';
           ctx.globalAlpha = lift; ctx.fill(); ctx.globalAlpha = 1;
         }
@@ -910,9 +929,8 @@
         if (cell.bloomT) {
           const bu = (now - cell.bloomT) / 800;
           if (bu < 1) {
-            ctx.beginPath();
-            ctx.ellipse(x, y, rad * (1 + bu * 1.6),
-              ry * (1 + bu * 1.6), 0, 0, 7);
+            hexPath(x, y,
+              rad * (1 + bu * 1.6), ry * (1 + bu * 1.6));
             ctx.strokeStyle = 'rgba(255,235,180,' + 0.9 * (1 - bu) + ')';
             ctx.lineWidth = 3;
             ctx.stroke();

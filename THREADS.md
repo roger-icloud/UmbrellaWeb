@@ -1,10 +1,15 @@
 # Threads — status board
 _One line per open thread. Status: TRIAL · DISCUSSING · PARKED · WAITING (on Roger)._
-_Updated: 2026-11-19 ~01:50_
+_Updated: 2026-11-25 ~11:45_
+
+## PUBLISHED (live on anynumberoftimes.com 2026-11-25)
+- mix-demo -> main fast-forward, 111 commits, 43 files — rebrand,
+  renames, hexagon cells, Twist celebration revision, lattice deleted
 
 ## TRIAL (built on mix-demo, test locally)
-- Honeycomb rename + true hexagon cells (was Search Tables) — built 2026-11-25, awaiting iPhone verdict
-- Narrow-phone legibility — side-6/104-cell deal + trimmed reserves (find) + comb drop (search) — on iPhone now
+- Honeycomb rename + true hexagon cells + side-7 restored (crossovers back) + brighter dividers — verified by Roger 2026-11-25
+- Narrow-phone legibility — side-6 reverted to 7 for crossovers; trimmed reserves (Twist) + comb drop (Honeycomb) — verified by Roger
+- Twist celebration revision — one circuit -> plain numeral -> home; shared numeral fade; rail ripple — verified Safari/iPad/iPhone8; DDG-Mac jerky = WKWebView quirk (env, not code)
 - Selection mods — chips everywhere, uncommitted opens, rings/warm/cool edges, opt-in progress record — awaiting your verdict then publish word
 - Tilt-ball encore v1 + 3 racks + speed tax/sloppy pause — built; your feedback: two-phase, whistle-y, 3 racks too long
 
@@ -24,5 +29,6 @@ _Updated: 2026-11-19 ~01:50_
 - Polish batch (hold until page sweep done): mix-patterns demo tail — fold empty phase into a longer hold on the final mix; headings dim during animations, return after — a house rule, every page at once
 
 ## WAITING (on Roger)
-- Publish trial to live — your word
+- Roger's "couple of refinements" — mentioned at publish, to be named
+- Chromebook check — Roger testing, reported outcome pending
 - intro.html privacy line — my draft, yours to reword

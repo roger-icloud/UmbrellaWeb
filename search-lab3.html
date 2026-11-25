@@ -232,11 +232,13 @@
     const qs = new URLSearchParams(location.search);
     const num = (k, d) => qs.has(k) ? parseFloat(qs.get(k)) : d;
     if (qs.get('side')) SIDE = Math.max(4, Math.min(9, +qs.get('side') | 0));
-    /* narrow phones try side 6 (Roger 2026-11-25 — "commit and try
-       four"): one ring fewer but cells ~18% wider, and lines of ten
-       still fit (longest 11). The known cost is tighter crossing
-       arms for three tables — the experiment will judge. */
-    else if (Math.min(window.innerWidth, window.innerHeight) < 430) SIDE = 6;
+    /* side 6 on narrow phones retired same day (Roger 2026-11-25):
+       four iPhone deals, zero crossovers — a side-6 comb has ~12
+       slots for a 10-line where side 7 has ~48, so crossing ambition
+       always exhausted into parallel words. Cells shrink back ~15%
+       but the weave comes home; hexagons soften the loss (inscribed
+       circle still beats the old 0.40 cell circle). */
+
     if (qs.get('members')) MEMBERS = Math.max(4, Math.min(12, +qs.get('members') | 0));
     if (qs.has('ordered')) ORDERED = qs.get('ordered') !== '0';
     if (qs.has('near')) NEAR_P = Math.max(0, Math.min(1, num('near', NEAR_P)));
@@ -893,9 +895,11 @@
         }
 
         hexPath(x, y, rad, ry);
+        /* cell dividers kept plainly visible (Roger 2026-11-25 —
+           the comb's seams should read, sockets included) */
         ctx.strokeStyle = cell.found
           ? tableColour(tables[cell.disp ?? cell.ts[0]])
-          : cell.v === null ? '#1d2832' : '#2c3e50';
+          : cell.v === null ? '#31455a' : '#41587a';
         ctx.lineWidth = 1.2; ctx.stroke();
 
         /* undealt cells draw as sockets only — the grid promises

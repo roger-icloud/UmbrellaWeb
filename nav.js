@@ -7,10 +7,15 @@
   'use strict';
 
   /* launched via "Add to Home Screen" the app already has no browser
-     chrome, so a fullscreen toggle would be a no-op — drop the row */
+     chrome, so a fullscreen toggle would be a no-op — drop the row.
+     iPhone Safari/Chrome can't fullscreen a web page at all (Apple
+     reserves the API for video; iPads and desktops can) — drop the
+     row there too rather than offer a button that does nothing */
   const standalone = window.matchMedia('(display-mode: standalone)').matches
     || window.matchMedia('(display-mode: fullscreen)').matches
     || window.navigator.standalone === true;
+  const fsCapable = !!document.documentElement.requestFullscreen
+    || !!document.documentElement.webkitRequestFullscreen;
 
   /* mirrors the main menu's tile order; housekeeping rows at the bottom */
   const ITEMS = [
@@ -19,7 +24,7 @@
        menu keeps only home + housekeeping, in their existing order */
     { label: 'Home', href: 'index.html' },
     { type: 'sep' },
-    ...(standalone ? [] : [{ label: 'Fullscreen', action: 'fullscreen' }]),
+    ...(standalone || !fsCapable ? [] : [{ label: 'Fullscreen', action: 'fullscreen' }]),
     { label: 'Feedback', href: 'feedback.html' },
     { label: 'Help', href: 'help.html' },
     { label: 'Rationale', href: 'rationale.html' },

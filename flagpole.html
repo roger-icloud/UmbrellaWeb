@@ -136,24 +136,20 @@
     }
 
     ORDER.forEach(id => parts[id] = {
-      x: 0, y: 0, placed: false, dragging: false, retT: 0, retFrom: null
+      x: 0, y: 0, placed: false, dragging: false, retT: 0, retFrom: null,
+      on: true, spin: 0    // fans carry a switch and a blade angle
     });
 
     /* ---------- machine state ---------- */
-    let riseK = 0;            // 0..1 the flag's climb
-    let starK = 0;            // 0..1 the mark's fade-in at the top
+    let loopK = null;         // 0..1 the flag's place on the halyard loop
+    let markK = 0;            // 0..1 the mark's fade-in at the summit
     let millA = 0;            // windmill angle
-    let fanA = 0;             // fan blade angle
     let touchX = 0;
     let flutterT = 0;
+    let diagDone = false;
+    const Q = new URLSearchParams(location.search);
     const running = () =>
       parts.cord.placed && parts.windmill.placed && parts.fanHoist.placed;
-
-    /* ?flag — diagnostic: machine pre-built, flag up and fluttering */
-    if (new URLSearchParams(location.search).has('flag')) {
-      ORDER.forEach(id => parts[id].placed = true);
-      riseK = 1; starK = 1;
-    }
 
     /* ---------- input ---------- */
     let drag = null, touch = false;
@@ -163,6 +159,13 @@
     }
     cv.addEventListener('pointerdown', e => {
       const p = pt(e);
+      /* a placed fan IS its switch — tap to toggle the wind */
+      for (const fid of ['fanHoist', 'fanTop']) {
+        const s = parts[fid];
+        if (!s.placed) continue;
+        const a = anchorOf(fid);
+        if (Math.hypot(p.x - a.x, p.y - a.y) < 42) { s.on = !s.on; return; }
+      }
       for (const id of ORDER.slice().reverse()) {
         const s = parts[id];
         if (s.placed || Math.hypot(p.x - s.x, p.y - s.y) > 34) continue;
@@ -189,6 +192,8 @@
       const d = Math.hypot(p.x - a.x, dy - a.y);
       if (ready && d < SNAP_R) {
         s.placed = true; s.x = a.x; s.y = a.y;
+        /* the flag joins the halyard where it was hung */
+        if (id === 'flag') loopK = (pBot - a.y) / loopLen();
         return;
       }
       /* a near miss on a foreign anchor earns the amber refusal;
@@ -263,13 +268,21 @@
       ctx.restore();
     }
 
-    function drawFan(x, y, a, aimRight) {
+    function drawFan(x, y, a, aimRight, on) {
       ctx.save(); ctx.translate(x, y);
+      ctx.globalAlpha = on === false ? 0.45 : 1;   // switched off greys
       /* stand */
       ctx.beginPath();
       ctx.moveTo(0, 0); ctx.lineTo(0, 26);
       ctx.moveTo(-14, 26); ctx.lineTo(14, 26);
       ctx.strokeStyle = '#4a5f70'; ctx.lineWidth = 3; ctx.stroke();
+      /* the switch: a little rail on the stand, knob right+amber = on */
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.moveTo(-7, 15); ctx.lineTo(7, 15);
+      ctx.strokeStyle = '#4a5f70'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(on === false ? -4 : 4, 15, 4, 0, 7);
+      ctx.fillStyle = on === false ? '#4a5f70' : '#e0a53a'; ctx.fill();
+      ctx.globalAlpha = on === false ? 0.45 : 1;
       ctx.save(); ctx.scale(aimRight ? 1 : -1, 1);
       ctx.beginPath(); ctx.arc(0, -8, 17, 0, 7);
       ctx.fillStyle = '#22303c'; ctx.fill();
@@ -305,50 +318,64 @@
       ctx.restore();
     }
 
+    /* a real halyard is a loop: the flag rides up the left run, over
+       the top pulley, down the right run, under the bottom — so it
+       can only stop where the drive stops (Roger 2026-11-26: the fan
+       needs a switch, else the flag goes round and round) */
+    const loopLen = () => 2 * (pBot - pTop) + 2 * Math.PI * W * CORD_OFF;
     function flagPos() {
-      /* the flag rides the cord's rising run, bottom to top */
-      const y = pBot - (pBot - pTop) * riseK;
-      return { x: cordX, y };
+      const r = W * CORD_OFF, rl = pBot - pTop, al = Math.PI * r;
+      let s = ((loopK === null ? 0 : loopK) % 1 + 1) % 1 * loopLen();
+      if (s < rl) return { x: px - r, y: pBot - s, run: 'up' };
+      s -= rl;
+      if (s < al) {
+        const a = Math.PI * (1 - s / al);
+        return { x: px + r * Math.cos(a), y: pTop - r * Math.sin(a), run: 'top' };
+      }
+      s -= al;
+      if (s < rl) return { x: px + r, y: pTop + s, run: 'down' };
+      s -= rl;
+      const a = Math.PI * s / al;
+      return { x: px - r * Math.cos(a), y: pBot + r * Math.sin(a), run: 'bot' };
     }
-    /* the cloth baked once: gradient, border, the words — then each
-       frame it's drawn in vertical strips, every strip displaced by a
-       wave that travels outward and grows toward the fly end. The
-       words ride the contour because they're IN the cloth — same
-       decal-mapping idea as tilt-ball's rolling numerals, texture
-       strips instead of a tangent plane */
-    let flagTex = null, starTex = null;
+    /* the pennant: a triangle, hoist edge at the cord. The cloth is
+       baked once (transparent outside the point), then drawn each frame
+       in vertical strips, every strip displaced by a wave that travels
+       outward and grows toward the tip. The table's numeral rides its
+       own transparent cloth so it can fade up on its own — same
+       decal-mapping idea as tilt-ball's rolling numerals */
+    const FLAG_T = parseInt(Q.get('t') || '10', 10);
+    const FLAG_HUE = (FLAG_T * 31 + 200) % 360;   // pennant takes the table's colour
+    let flagTex = null, markTex = null;
     function flagTextures() {
       if (flagTex) return;
       const S = 2;                                // supersample, crisp edges
       flagTex = document.createElement('canvas');
       flagTex.width = FLAG_W * S; flagTex.height = FLAG_H * S;
       const c2 = flagTex.getContext('2d'); c2.scale(S, S);
-      const g = c2.createLinearGradient(0, 0, FLAG_W, 0);
-      g.addColorStop(0, '#e0a53a'); g.addColorStop(1, '#c98a2e');
-      c2.fillStyle = g; c2.fillRect(0, 0, FLAG_W, FLAG_H);
-      c2.lineWidth = 1.5; c2.strokeStyle = '#8a5f1d';
-      c2.strokeRect(0.75, 0.75, FLAG_W - 1.5, FLAG_H - 1.5);
-      /* the mark on its own transparent cloth — drawn through the same
-         strips so it rides the wave, but it can fade up on its own.
-         A star for now; the personal mark (initial, avatar) slots in
-         here when users are recorded */
-      starTex = document.createElement('canvas');
-      starTex.width = FLAG_W * S; starTex.height = FLAG_H * S;
-      const c3 = starTex.getContext('2d'); c3.scale(S, S);
-      const cx = FLAG_W * 0.70, cy = FLAG_H * 0.5, R = FLAG_H * 0.36;
-      c3.beginPath();
-      for (let k = 0; k < 10; k++) {
-        const r = k % 2 ? R * 0.42 : R, a = -Math.PI / 2 + k * Math.PI / 5;
-        c3[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r, cy + Math.sin(a) * r);
-      }
-      c3.closePath();
-      c3.fillStyle = '#101418'; c3.fill();
+      c2.beginPath();
+      c2.moveTo(FLAG_W - 1, 1); c2.lineTo(FLAG_W - 1, FLAG_H - 1);
+      c2.lineTo(1, FLAG_H / 2); c2.closePath();
+      const g = c2.createLinearGradient(FLAG_W, 0, 0, 0);
+      g.addColorStop(0, 'hsl(' + FLAG_HUE + ',62%,56%)');
+      g.addColorStop(1, 'hsl(' + FLAG_HUE + ',55%,38%)');
+      c2.fillStyle = g; c2.fill();
+      c2.lineWidth = 1.5; c2.strokeStyle = 'hsl(' + FLAG_HUE + ',50%,30%)';
+      c2.stroke();
+      markTex = document.createElement('canvas');
+      markTex.width = FLAG_W * S; markTex.height = FLAG_H * S;
+      const c3 = markTex.getContext('2d'); c3.scale(S, S);
+      c3.fillStyle = '#fff';
+      c3.font = '700 ' + Math.round(FLAG_H * 0.5) +
+        'px Andika, -apple-system, sans-serif';
+      c3.textAlign = 'center'; c3.textBaseline = 'middle';
+      c3.fillText(String(FLAG_T), FLAG_W * 0.72, FLAG_H * 0.5 + 1);
     }
 
     function drawFlag(x, y, now) {
       /* clipped to the cord, streaming LEFT — away from the top fan
          (Roger: flags blow away from the fan, not into it) */
-      const powered = parts.fanTop.placed;
+      const powered = parts.fanTop.placed && parts.fanTop.on;
       const amp = powered ? FLUTTER : 2;
       const ph0 = powered ? now / 150 : now / 900;
       flagTextures();
@@ -361,21 +388,22 @@
         const dy = Math.sin(ph) * amp * g * g;  // hoist stays pinned
         ctx.drawImage(flagTex, i * sw * S, 0, sw * S, FLAG_H * S,
           i * sw - FLAG_W, dy, sw, FLAG_H);
-        if (starK > 0) {
-          ctx.globalAlpha = starK;
-          ctx.drawImage(starTex, i * sw * S, 0, sw * S, FLAG_H * S,
+        if (markK > 0) {
+          ctx.globalAlpha = markK;
+          ctx.drawImage(markTex, i * sw * S, 0, sw * S, FLAG_H * S,
             i * sw - FLAG_W, dy, sw, FLAG_H);
           ctx.globalAlpha = 1;
         }
-        /* fold shading from the wave's slope — lit face and shadowed
-           back of each ripple, the 3D cue */
+        /* fold shading from the wave's slope, clipped to the pennant's
+           taper so it can't spill off the cloth */
+        const h = FLAG_H * t / FLAG_W;
         const sh = Math.cos(ph) * g * 0.20;
         if (sh > 0.006) {
           ctx.fillStyle = 'rgba(255,255,255,' + sh.toFixed(3) + ')';
-          ctx.fillRect(i * sw - FLAG_W, dy - 2, sw, FLAG_H + 4);
+          ctx.fillRect(i * sw - FLAG_W, dy + (FLAG_H - h) / 2 - 2, sw, h + 4);
         } else if (sh < -0.006) {
           ctx.fillStyle = 'rgba(0,0,0,' + (-sh).toFixed(3) + ')';
-          ctx.fillRect(i * sw - FLAG_W, dy - 2, sw, FLAG_H + 4);
+          ctx.fillRect(i * sw - FLAG_W, dy + (FLAG_H - h) / 2 - 2, sw, h + 4);
         }
       }
       ctx.restore();
@@ -392,12 +420,9 @@
         ctx.moveTo(8, -18); ctx.lineTo(8, 18);
         ctx.strokeStyle = '#8a97a3'; ctx.lineWidth = 3; ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(8, -18);
-        ctx.quadraticCurveTo(-10, -16, -24, -14 + Math.sin(now / 400) * 2);
-        ctx.lineTo(-24, 0 + Math.sin(now / 400 + 1) * 2);
-        ctx.quadraticCurveTo(-10, -2, 8, 0);
+        ctx.moveTo(8, -18); ctx.lineTo(8, -4); ctx.lineTo(-18, -11);
         ctx.closePath();
-        ctx.fillStyle = '#e0a53a'; ctx.fill();
+        ctx.fillStyle = 'hsl(' + FLAG_HUE + ',60%,50%)'; ctx.fill();
       } else if (id === 'windmill') {
         drawWindmill(0, 0, now / 900, 0.9);
       } else {
@@ -427,19 +452,34 @@
       const dt = Math.min(0.05, (now - last) / 1000 || 0); last = now;
       ctx.clearRect(0, 0, W, H);
 
-      /* the running machine */
-      if (parts.fanHoist.placed) fanA += 9 * dt;   // fans are powered
-      if (running() && riseK < 1 && parts.flag.placed) {
-        riseK = Math.min(1, riseK + dt / RISE_SECS);
+      /* ?flag — diagnostic: machine pre-built, flag parked at the top */
+      if (!diagDone && Q.has('flag')) {
+        ORDER.forEach(id => parts[id].placed = true);
+        parts.fanHoist.on = false;                 // parked
+        loopK = (pBot - pTop) / loopLen() - 0.02;
+        markK = 1; diagDone = true;
+      }
+
+      /* the running machine — fans work only while their switch is on */
+      if (parts.fanHoist.placed && parts.fanHoist.on) parts.fanHoist.spin += 9 * dt;
+      if (parts.fanTop.placed && parts.fanTop.on) parts.fanTop.spin += 7.2 * dt;
+      if (running() && parts.fanHoist.on && parts.flag.placed && loopK !== null) {
+        loopK = (loopK + (pBot - pTop) / RISE_SECS * dt / loopLen()) % 1;
         millA += HOIST_SPIN * dt;
-      } else if (parts.fanHoist.placed && parts.windmill.placed) {
+      } else if (parts.fanHoist.placed && parts.fanHoist.on &&
+                 parts.windmill.placed) {
         millA += HOIST_SPIN * dt;   // wind turns the mill, flag or no
       }
-      if (parts.fanTop.placed) flutterT += dt;
+      if (parts.fanTop.placed && parts.fanTop.on) flutterT += dt;
       /* the mark fades up only once everything is assembled AND has
-         worked — the star blooms in the last stretch of the climb */
-      if (ORDER.every(id => parts[id].placed) && riseK > 0.85)
-        starK = Math.min(1, starK + dt / 1.2);
+         worked — the flag parked at the summit, drive switched off.
+         Set it moving again and the mark dims back down */
+      const f0 = parts.flag.placed ? flagPos() : null;
+      const parked = f0 && f0.run === 'up' && f0.y < pTop + 46 &&
+        !parts.fanHoist.on;
+      markK += (ORDER.every(id => parts[id].placed) && parked
+        ? dt / 1.2 : -dt / 0.8);
+      markK = Math.max(0, Math.min(1, markK));
 
       /* sky + ground */
       ctx.fillStyle = '#0d141a';
@@ -466,16 +506,17 @@
       /* fans on their feet */
       if (parts.fanHoist.placed) {
         const a = anchorOf('fanHoist');
-        drawFan(a.x, a.y, fanA, true);
+        drawFan(a.x, a.y, parts.fanHoist.spin, true, parts.fanHoist.on);
         drawWind(a.x + 18, a.y - 10, px - 6, pBot - 10,
-          parts.windmill.placed, now);
+          parts.fanHoist.on && parts.windmill.placed, now);
       }
       if (parts.fanTop.placed) {
         const a = anchorOf('fanTop');
-        drawFan(a.x, a.y, fanA * 0.8, false);
+        drawFan(a.x, a.y, parts.fanTop.spin, false, parts.fanTop.on);
         const f = flagPos();
         drawWind(a.x - 18, a.y - 8, f.x - FLAG_W * 0.6, f.y - 8,
-          parts.flag.placed && riseK > 0.92, now);
+          parts.fanTop.on && parts.flag.placed &&
+          f.run === 'up' && f.y < pTop + 60, now);
       }
 
       /* the flag, if hung and hoisting */

@@ -1,6 +1,6 @@
 # Threads — status board
 _One line per open thread. Status: TRIAL · DISCUSSING · PARKED · WAITING (on Roger)._
-_Updated: 2026-11-25 ~11:45_
+_Updated: 2026-11-26 ~07:00_
 
 ## PUBLISHED (live on anynumberoftimes.com 2026-11-25)
 - mix-demo -> main fast-forward, 111 commits, 43 files — rebrand,
@@ -21,6 +21,10 @@ _Updated: 2026-11-25 ~11:45_
 - Touch ring — formalise as shared house gesture (proved on phone); also: tap-flicker on patterns reveal? watch
 - Recital revisit — earned a tile; straw-bale fail theatre; affirmation not test; needs its own celebration
 - Tilt-ball curriculum — churn (closing/reopening holes), dents, per-stage spec — spec exists in code, features off
+- Flagpole reward machine — pennant + table numeral + fan switches + halyard loop BUILT (mix-demo 9427fb7, HELD unpublished per Roger); pennant-per-table collection, garland arrangement, ghost-panel miniature by snake menu
+- Achievement display rule (agreed 2026-11-26) — earned pieces present, missing pieces merely ABSENT (implied, not enumerated); a wall of unearned silhouettes reads as debt/pressure — steer away
+- Adaptivity + identity — on-device state only (localStorage/uw-settings), nothing transmitted; local profile picker (tap your snake/name, no login); privacy pitch: "adapts to your child and the adaptation never leaves their device"; teacher dashboards deferred (the one real privacy trade-off); QR codes are Roger's preferred route for any export
+- Launch prep — keep under wraps: soft URL-key curtain (?key=…) offered, or Cloudflare Access email-PIN for a real door; sitemap/Search Console pending; publicity = YouTube demo, QR email to groups, maths link directories, teacher/parent forums, local press
 
 ## PARKED
 - Tap-steer assist in tilt games — assist vs challenge decision, noted to return

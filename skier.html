@@ -267,6 +267,7 @@
     const DEBUG = Q.has('debug');
     const dbgN = { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0, te: 0,
                    tap: 0, pan: 0 };
+    let dbgLast = '';          // last tap's verdict for the debug line
 
     const startPt = () => ({ x: W / 2, y: START_Y * H });
     const driftPt = () => ({ x: W / 2, y: SLOPE_H - 150 });
@@ -590,35 +591,43 @@
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top + camY };
     }
-    function nearGate(p) {
-      for (const g of gates)
-        if (Math.abs(p.x - g.x) < GATE_DX + 14 &&
-            Math.abs(p.y - (g.y - POLE_H / 2)) < POLE_H / 2 + 14) return g;
-      return null;
-    }
     /* one tap may arrive down several paths (pointerup, pointercancel,
-       touchend) — whichever lands first wins, the rest dedupe away */
-    function tryTap(p) {
+       touchend) — whichever lands first wins, the rest dedupe away.
+       The hit-test runs in SCREEN space: compare the tap with where
+       the gate *appears* — tap-where-you-see-it by construction */
+    function tryTap(cx, cy) {
       const now = performance.now();
       if (now - lastTapAt < 500) return;
       lastTapAt = now;
       dbgN.tap++;
-      tapFx.push({ x: p.x, y: p.y, t: 1 });   // a ripple wherever heard
+      const r = cv.getBoundingClientRect();
+      const sx = cx - r.left, sy = cy - r.top;
+      tapFx.push({ x: sx, y: sy + camY, t: 1 });   // a ripple wherever heard
       if (stage !== 'plan') return;
       const s = startPt();
       /* launch: tap the skier at the top, or the GO pennant that
          appears at the screen's edge whenever a route exists — the
          skier himself may be scrolled out of sight (Roger 2026-11-27) */
-      const go = { x: W - 46, y: H - 46 + camY };
-      if (plan.length && (Math.hypot(p.x - s.x, p.y - s.y) < 50 ||
-          Math.hypot(p.x - go.x, p.y - go.y) < 42)) { startRun(); return; }
-      const g = nearGate(p);
-      if (g) {
-        const oi = plan.indexOf(g);
-        if (oi === plan.length - 1) plan.pop();          // undo last
-        else if (oi >= 0) g.wobble = 0.5;                // mid-plan: refuse
-        else { plan.push(g); g.pop = 1; }
+      const go = { x: W - 46, y: H - 46 };
+      if (plan.length && (Math.hypot(sx - s.x, sy - (s.y - camY)) < 50 ||
+          Math.hypot(sx - go.x, sy - go.y) < 42)) { startRun(); return; }
+      let bd = 1e9, bg = null;
+      for (const g of gates) {
+        const gy = g.y - camY;
+        const d = Math.hypot(sx - g.x, sy - (gy - POLE_H / 2));
+        if (d < bd) { bd = d; bg = g; }
+        if (Math.abs(sx - g.x) < GATE_DX + 14 &&
+            Math.abs(sy - (gy - POLE_H / 2)) < POLE_H / 2 + 14) {
+          const oi = plan.indexOf(g);
+          if (oi === plan.length - 1) plan.pop();        // undo last
+          else if (oi >= 0) g.wobble = 0.5;              // mid-plan: refuse
+          else { plan.push(g); g.pop = 1; }
+          dbgLast = 'hit ' + g.v;
+          return;
+        }
       }
+      if (bg) dbgLast = '(' + Math.round(sx) + ',' + Math.round(sy) +
+        ') miss, nearest ' + bg.v + ' d=' + Math.round(bd);
     }
     cv.addEventListener('pointerdown', e => {
       dbgN.pd++;
@@ -676,7 +685,7 @@
                            tx: home.x, ty: home.y, t: 0 });
         }
         carried = null;
-      } else if (quick && !pan) tryTap(p);
+      } else if (quick && !pan) tryTap(e.clientX, e.clientY);
       else if (stage === 'plan' && pan) camY = camTarget;
       down = null; pan = null;
     });
@@ -713,7 +722,8 @@
       const t = e.changedTouches[0], r = cv.getBoundingClientRect();
       const p = { x: t.clientX - r.left, y: t.clientY - r.top + camY };
       if (!pan && performance.now() - down.t < TAP_MS &&
-          Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE) tryTap(p);
+          Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE)
+        tryTap(t.clientX, t.clientY);
       down = null; pan = null;
     }, { passive: true });
     cv.addEventListener('pointercancel', e => {
@@ -723,7 +733,8 @@
       if (down && stage === 'plan' && !pan) {
         const p = toWorld(e);
         if (performance.now() - down.t < TAP_MS &&
-            Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE) tryTap(p);
+            Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE)
+          tryTap(e.clientX, e.clientY);
       }
       if (carried) {
         const home = itemHome(carried.k);
@@ -892,6 +903,7 @@
             ' ts' + dbgN.ts + ' tm' + dbgN.tm + ' te' + dbgN.te +
             ' tap' + dbgN.tap + ' pan' + dbgN.pan +
             ' cam' + Math.round(camY), 10, 52);
+          ctx.fillText(dbgLast, 10, 68);
         }
       } catch (err) { /* a bad frame must not kill the loop */ }
       requestAnimationFrame(frame);

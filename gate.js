@@ -4,9 +4,9 @@
    source reveals the mechanism, which is fine at this stage.
 
    Admit a device:  anynumberoftimes.com/?key=mika   (or just  ?mika)
-   — the word plants a flag in localStorage, is stripped from the
-   address bar, and the device stays admitted (diagnostics like
-   ?flag are preserved when stripping).
+   — the word plants a flag in localStorage and the device stays
+   admitted. ?key=mika stays visible in the address bar (so saved
+   shortcuts carry it); the bare ?mika and gate= words are stripped.
    Re-curtain a device:  ?gate=bye  — lets Roger see what strangers
    see, or retire a test device.
 
@@ -25,8 +25,11 @@
     } else if (keyed && store) {
       store.setItem('uw-gate', KEY);
     }
-    /* strip the key words from the address bar, keep any diagnostics */
-    params.delete('key'); params.delete('gate'); params.delete(KEY);
+    /* strip the magic-word and gate params, but KEEP key= visible in
+       the address bar: a shortcut saved from a keyed page bakes the key
+       into itself and standalone web apps (separate storage) can then
+       re-admit themselves on every launch — desktop/dock shortcut fix */
+    params.delete('gate'); params.delete(KEY);
     var rest = params.toString();
     if ((location.search || '') !== (rest ? '?' + rest : '')) {
       try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash); } catch (e) {}

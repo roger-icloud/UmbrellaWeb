@@ -63,7 +63,7 @@
     const DRESS_SCALE = 3.1;    // dressing-room figure size
     const SNAP_R = 64;          // clothing zone acceptance radius
     const REFUSE_R = 46;        // near-enough-to-mean-it radius
-    const TAP_MS = 450, TAP_MOVE = 12;
+    const TAP_MS = 700, TAP_MOVE = 16;
     const PULSE_S = 1.6;        // zone / skier glow cycle
 
     const Q = new URLSearchParams(location.search);
@@ -260,8 +260,13 @@
     let holdT = 0, holdOK = false;
     let bestY = 0;             // deepest correct point so far (world y)
     let spray = [], poof = [];
+    let tapFx = [];            // {x,y,t} — every tap leaves a ripple
+    let lastTapAt = 0;         // dedupe across pointer/touch paths
     let glowT = 0;
     let booted = false;        // ?-param bootstrap runs once
+    const DEBUG = Q.has('debug');
+    const dbgN = { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0, te: 0,
+                   tap: 0, pan: 0 };
 
     const startPt = () => ({ x: W / 2, y: START_Y * H });
     const driftPt = () => ({ x: W / 2, y: SLOPE_H - 150 });
@@ -591,7 +596,27 @@
             Math.abs(p.y - (g.y - POLE_H / 2)) < POLE_H / 2 + 14) return g;
       return null;
     }
+    /* one tap may arrive down several paths (pointerup, pointercancel,
+       touchend) — whichever lands first wins, the rest dedupe away */
+    function tryTap(p) {
+      const now = performance.now();
+      if (now - lastTapAt < 500) return;
+      lastTapAt = now;
+      dbgN.tap++;
+      tapFx.push({ x: p.x, y: p.y, t: 1 });   // a ripple wherever heard
+      if (stage !== 'plan') return;
+      const s = startPt();
+      if (plan.length && Math.hypot(p.x - s.x, p.y - s.y) < 50) { startRun(); return; }
+      const g = nearGate(p);
+      if (g) {
+        const oi = plan.indexOf(g);
+        if (oi === plan.length - 1) plan.pop();          // undo last
+        else if (oi >= 0) g.wobble = 0.5;                // mid-plan: refuse
+        else { plan.push(g); g.pop = 1; }
+      }
+    }
     cv.addEventListener('pointerdown', e => {
+      dbgN.pd++;
       const p = toWorld(e);
       down = { x: p.x, y: p.y, t: performance.now() };
       pan = null;
@@ -608,16 +633,21 @@
       }
     });
     cv.addEventListener('pointermove', e => {
+      dbgN.pm++;
       if (!down) return;
       const p = toWorld(e);
       if (carried) { carried.x = p.x; carried.y = p.y - camY; return; }
       if (stage === 'plan') {
         const dy = p.y - down.y;
-        if (!pan && Math.abs(dy) + Math.abs(p.x - down.x) > TAP_MOVE) pan = true;
+        if (!pan && Math.abs(dy) + Math.abs(p.x - down.x) > TAP_MOVE) {
+          pan = true; dbgN.pan++;
+        }
         if (pan) camTarget = Math.min(SLOPE_H - H, Math.max(0, camY - (p.y - down.y)));
       }
     });
     cv.addEventListener('pointerup', e => {
+      dbgN.pu++;
+      if (!down) return;
       const p = toWorld(e);
       const quick = performance.now() - down.t < TAP_MS &&
                     Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE;
@@ -641,21 +671,8 @@
                            tx: home.x, ty: home.y, t: 0 });
         }
         carried = null;
-      } else if (stage === 'plan' && quick && !pan) {
-        const s = startPt();
-        if (plan.length && Math.hypot(p.x - s.x, p.y - s.y) < 50) { startRun(); }
-        else {
-          const g = nearGate(p);
-          if (g) {
-            const oi = plan.indexOf(g);
-            if (oi === plan.length - 1) plan.pop();          // undo last
-            else if (oi >= 0) g.wobble = 0.5;                // mid-plan: refuse
-            else { plan.push(g); g.pop = 1; }
-          }
-        }
-      } else if (stage === 'plan' && pan) {
-        camY = camTarget;
-      }
+      } else if (quick && !pan) tryTap(p);
+      else if (stage === 'plan' && pan) camY = camTarget;
       down = null; pan = null;
     });
     /* desktop scrolls with wheel/trackpad, not drag (Roger 2026-11-27) */
@@ -667,23 +684,42 @@
     /* iPad belt & braces: if pointer events don't stream on this iOS,
        pan from raw touch events instead (Roger's field report 2026-11-27) */
     cv.addEventListener('touchstart', e => {
+      dbgN.ts++;
       if (down) return;
       const t = e.touches[0], r = cv.getBoundingClientRect();
       down = { x: t.clientX - r.left, y: t.clientY - r.top + camY,
                t: performance.now() };
     }, { passive: true });
     cv.addEventListener('touchmove', e => {
+      dbgN.tm++;
       if (stage !== 'plan' || !down) return;
       const t = e.touches[0], r = cv.getBoundingClientRect();
       const p = { x: t.clientX - r.left, y: t.clientY - r.top + camY };
       /* a tap jitters a pixel or two — only a real drag becomes a pan,
          else every tap was being thrown away (Roger's field report) */
       if (!pan && Math.abs(p.y - down.y) + Math.abs(p.x - down.x) <= TAP_MOVE) return;
-      pan = true;
+      pan = true; dbgN.pan++;
       e.preventDefault();
       camTarget = Math.min(SLOPE_H - H, Math.max(0, camY - (p.y - down.y)));
     }, { passive: false });
-    cv.addEventListener('pointercancel', () => {
+    cv.addEventListener('touchend', e => {
+      dbgN.te++;
+      if (!down) return;
+      const t = e.changedTouches[0], r = cv.getBoundingClientRect();
+      const p = { x: t.clientX - r.left, y: t.clientY - r.top + camY };
+      if (!pan && performance.now() - down.t < TAP_MS &&
+          Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE) tryTap(p);
+      down = null; pan = null;
+    }, { passive: true });
+    cv.addEventListener('pointercancel', e => {
+      dbgN.pc++;
+      /* a cancelled gesture that was really a tap still counts —
+         iOS cancels pointers mid-gesture on a whim */
+      if (down && stage === 'plan' && !pan) {
+        const p = toWorld(e);
+        if (performance.now() - down.t < TAP_MS &&
+            Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE) tryTap(p);
+      }
       if (carried) {
         const home = itemHome(carried.k);
         returning.push({ k: carried.k, x: carried.x, y: carried.y,
@@ -767,6 +803,8 @@
         spray = spray.filter(p => p.a > 0);
         for (const p of poof) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 60 * dt; p.a -= dt * 0.7; }
         poof = poof.filter(p => p.a > 0);
+        for (const f of tapFx) f.t -= dt / 0.5;
+        tapFx = tapFx.filter(f => f.t > 0);
 
         camY += (camTarget - camY) * Math.min(1, 5 * dt);
 
@@ -815,6 +853,23 @@
                 lean: run.lean, skiA: Math.atan2(run.heading.y, run.heading.x) });
             drawChip();
           }
+        }
+        /* tap ripples + debug readout ride on top of every stage */
+        for (const f of tapFx) {
+          ctx.strokeStyle = 'rgba(224,165,58,' + Math.max(0, f.t) + ')';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y - camY, 10 + (1 - f.t) * 26, 0, 7); ctx.stroke();
+        }
+        if (DEBUG) {
+          ctx.fillStyle = 'rgba(207,216,228,.9)';
+          ctx.font = '11px monospace';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.fillText(stage +
+            ' d' + dbgN.pd + ' m' + dbgN.pm + ' u' + dbgN.pu + ' c' + dbgN.pc +
+            ' ts' + dbgN.ts + ' tm' + dbgN.tm + ' te' + dbgN.te +
+            ' tap' + dbgN.tap + ' pan' + dbgN.pan +
+            ' cam' + Math.round(camY), 10, 52);
         }
       } catch (err) { /* a bad frame must not kill the loop */ }
       requestAnimationFrame(frame);

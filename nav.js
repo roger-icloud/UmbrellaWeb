@@ -79,13 +79,13 @@
       /* the pilot-assist rectangle (Roger 2026-11-27): starts at the
          icon's bounds, floats to a centred frame — geometry animated,
          so the border is real and visible throughout */
-      border: 1px solid #3a4a58;
+      border: 2px solid #3a4a58;
       border-radius: 8px;
       box-sizing: border-box;
-      transition: left .55s cubic-bezier(.4, 0, .2, 1),
-                  top .55s cubic-bezier(.4, 0, .2, 1),
-                  width .55s cubic-bezier(.4, 0, .2, 1),
-                  height .55s cubic-bezier(.4, 0, .2, 1);
+      transition: left 1.1s cubic-bezier(.4, 0, .2, 1),
+                  top 1.1s cubic-bezier(.4, 0, .2, 1),
+                  width 1.1s cubic-bezier(.4, 0, .2, 1),
+                  height 1.1s cubic-bezier(.4, 0, .2, 1);
     }
     #pennantWin.open { display: block; }
     #pennantWin iframe {
@@ -199,11 +199,11 @@
         /* fade the flagpole up once it has loaded AND the rectangle
            has had time to cover the screen */
         pennantFrame.addEventListener('load',
-          () => setTimeout(() => win.classList.add('shown'), 500));
-        setTimeout(() => win.classList.add('shown'), 2500);   // fallback
+          () => setTimeout(() => win.classList.add('shown'), 1050));
+        setTimeout(() => win.classList.add('shown'), 3000);   // fallback
         win.appendChild(pennantFrame);
       } else {
-        setTimeout(() => win.classList.add('shown'), 500);
+        setTimeout(() => win.classList.add('shown'), 1050);
       }
       Object.assign(win.style, pennantHome());   // start at the icon
       win.classList.add('open');
@@ -215,7 +215,7 @@
       win.classList.remove('shown');
       Object.assign(win.style, pennantHome());   // float back to the icon
       pennantBtn.classList.remove('open');
-      setTimeout(() => win.classList.remove('open'), 580);
+      setTimeout(() => win.classList.remove('open'), 1150);
     }
   }
   /* keep the centred frame fitted if the window resizes while open */

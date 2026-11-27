@@ -74,3 +74,22 @@ lesson).
   second law end to end).
 - Open: does a clean run get the drift or a different finish; does a
   mastered slope couple to the pennant strand.
+
+## Scenario sketches + the variety principle (Roger, 2026-11-27)
+
+- **Hen pecking numbers** — a hen works the field, pecking up the
+  right numerals. Collect mechanic, warm register.
+- **Ghost passing** — a ghost drifts across making numbers invisible
+  as it passes. Occlusion → memory; a soft interference mechanic.
+- **Variety as pedagogy (Roger's principle)**: different dressing for
+  the same grammar guards against overfamiliarity and complacency —
+  the aim isn't a well-travelled path but the acceptance of variety.
+  Same spine, many costumes.
+- **Motorist, peak to peak**: 2-D driving over a range of peaks
+  (numbers). A too-steep jump can't be climbed — only the correct
+  next-in-sequence peak offers a driveable gradient. Wrongness made
+  physical: steepness as refusal.
+- **Skier lift-return (logged, not coded)**: after a failed run the
+  skier walks back to the lift and rides up again — the time cost of
+  repetition is itself part of the learning. A gentle consequence
+  and a moment of reflection, not a punishment.

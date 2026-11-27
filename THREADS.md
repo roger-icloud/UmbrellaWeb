@@ -44,3 +44,33 @@ _Updated: 2026-11-26 ~07:00_
 - Roger's "couple of refinements" — mentioned at publish, to be named
 - Chromebook check — Roger testing, reported outcome pending
 - intro.html privacy line — my draft, yours to reword
+
+## The assemble–predict–test grammar (Roger, 2026-11-27)
+
+The shared spine across scenarios, named by Roger: **assemble → predict
+→ test**. Flagpole: place parts, guess behaviour, switch on. Skier:
+dress, tap gates in table order, run. TIM's play mode is the same
+shape. Scenarios are costumes on one skeleton — a reskinning
+opportunity, with the one-snake caution: write the spine once and
+costumes ride on it; two copies drift (the Swift departure-engines
+lesson).
+
+### Skier design (settled by Roger, 2026-11-27 — discussion, not yet code)
+
+- **Dressing full-screen**: skier at portrait scale, hat/goggles/skis
+  dragged on; the dressed figure then **shrinks into the slalom
+  landscape** — scale as scene-change, same move as the pennant window.
+- **Gates carry numerals** of a table; learner taps gates in sequence
+  to plan the line (recital mode confirmed — planning before motion).
+- **The run is faithful**: the skier skis the tapped line, wrong or
+  right — the test never cheats.
+- **Failure economy (Roger's rule): failure must not be more amusing
+  than success.** Wrong line → off-piste into deep snow, quietly:
+  slows, sinks, sits. No tumble gag. The snowdrift keeps all the
+  comedy because the run earned it.
+- Whole slope visible during planning → no scrolling; compressed slope.
+- Ski lift = return/reset mechanism + the charging phase (gravity as
+  energy source: lift stores, descent spends, drift absorbs — the
+  second law end to end).
+- Open: does a clean run get the drift or a different finish; does a
+  mastered slope couple to the pennant strand.

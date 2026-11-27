@@ -56,7 +56,7 @@
     const POLE_BOT = 0.80;     // lower pulley height
     const GROUND = 0.92;
     const PULLEY_R = 16;       // pulley radius, css px
-    const CORD_OFF = 0.035;    // cord loop half-width (fraction of W)
+    const CORD_R = PULLEY_R + 1;  // halyard loop radius — tight on the rims
     const FLAG_W = 104, FLAG_H = 68;
     const RISE_SECS = 7;       // flag's climb once driven
     const TRAY_H = 96;         // parts shelf at the bottom
@@ -125,7 +125,7 @@
       pTop = H * POLE_TOP;
       pBot = H * POLE_BOT;
       gy = H * GROUND;
-      cordX = px - W * CORD_OFF;
+      cordX = px - CORD_R;
       /* tray slots, five parts left to right */
       const n = ORDER.length, gap = Math.min(120, (W - 60) / n);
       ORDER.forEach((id, i) => {
@@ -241,7 +241,7 @@
     function drawCord(tension) {
       /* a thin loop: down one side of both pulleys and back up the
          other — the left run is the flag's rising side */
-      const r = W * CORD_OFF;
+      const r = CORD_R;
       ctx.beginPath();
       ctx.moveTo(px - r, pTop);
       ctx.arc(px, pTop, r, Math.PI, 0, false);
@@ -325,9 +325,9 @@
        the top pulley, down the right run, under the bottom — so it
        can only stop where the drive stops (Roger 2026-11-26: the fan
        needs a switch, else the flag goes round and round) */
-    const loopLen = () => 2 * (pBot - pTop) + 2 * Math.PI * W * CORD_OFF;
+    const loopLen = () => 2 * (pBot - pTop) + 2 * Math.PI * CORD_R;
     function flagPos() {
-      const r = W * CORD_OFF, rl = pBot - pTop, al = Math.PI * r;
+      const r = CORD_R, rl = pBot - pTop, al = Math.PI * r;
       let s = ((loopK === null ? 0 : loopK) % 1 + 1) % 1 * loopLen();
       if (s < rl) return { x: px - r, y: pBot - s, run: 'up' };
       s -= rl;

@@ -53,6 +53,34 @@
     #navBurger svg {
       width: 18px; height: 18px;
     }
+    /* the pennant: milestones quietly — a window onto the flagpole that
+       opens over any page and lifts again on tap (Roger 2026-11-27) */
+    #navPennant {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 24px);
+      right: 56px;
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      border: 1px solid #3a4a58;
+      background: rgba(20, 28, 36, .65);
+      z-index: 40;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #navPennant svg { width: 20px; height: 20px; }
+    #navPennant.open { border-color: #35c795; }
+    #pennantWin {
+      position: fixed; inset: 0;
+      z-index: 38;
+      background: #101418;
+      display: none;
+    }
+    #pennantWin.open { display: block; }
+    #pennantWin iframe {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%; border: none;
+    }
     #navPanel {
       position: fixed;
       top: calc(env(safe-area-inset-top, 0px) + 70px);
@@ -108,9 +136,45 @@
     '<path d="M22 5 l1.7-0.8 M22 5 l1.7 0.6" stroke="#e0a53a" stroke-width="1"/>' +
     '</svg>';
 
+  /* the pennant window: which flagpole page the overlay carries.
+     flagpole.html exists on main today; point at flagpole-1.html or a
+     dedicated strand view when the machine settles */
+  const PENNANT_URL = 'flagpole.html';
+
   const panel = document.createElement('nav');
   panel.id = 'navPanel';
   panel.className = 'hidden';
+
+  const pennantBtn = document.createElement('button');
+  pennantBtn.id = 'navPennant';
+  pennantBtn.setAttribute('aria-label', 'Your pennants');
+  pennantBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round">' +
+    '<path d="M15 3.5v17" stroke="#7a8fa0" stroke-width="2.4"/>' +
+    '<path d="M15 5.5 L4.5 9.5 L15 13.5 Z" fill="hsl(150,62%,50%)" ' +
+    'stroke="hsl(150,45%,35%)" stroke-width="1"/></svg>';
+
+  /* overlay created up front (cheap div); the flagpole page itself is
+     fetched lazily — only if the pennant is ever tapped */
+  const win = document.createElement('div');
+  win.id = 'pennantWin';
+  let pennantFrame = null;
+  function togglePennant() {
+    const open = win.classList.toggle('open');
+    pennantBtn.classList.toggle('open', open);
+    if (open && !pennantFrame) {
+      pennantFrame = document.createElement('iframe');
+      pennantFrame.src = PENNANT_URL;
+      win.appendChild(pennantFrame);
+    }
+  }
+  pennantBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePennant();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && win.classList.contains('open')) togglePennant();
+  });
 
   /* fullscreen is per-page: navigation drops it, so remember the intent
      and re-request on the next page — immediately where the browser
@@ -201,5 +265,7 @@
   });
 
   document.body.appendChild(burger);
+  document.body.appendChild(pennantBtn);
   document.body.appendChild(panel);
+  document.body.appendChild(win);
 })();

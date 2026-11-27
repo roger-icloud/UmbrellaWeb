@@ -78,7 +78,10 @@
     #pennantWin {
       position: fixed;
       z-index: 38;
-      background: #101418;
+      /* midnight blue from the first pixel of the grow — the window
+         already wears the flagpole's sky while it floats out
+         (Roger 2026-11-27) */
+      background: #0f1a3e;
       display: none;
       overflow: hidden;
       /* the pilot-assist rectangle (Roger 2026-11-27): starts at the

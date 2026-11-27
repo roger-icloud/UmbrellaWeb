@@ -71,18 +71,21 @@
     #navPennant svg { width: 20px; height: 20px; }
     #navPennant.open { border-color: #35c795; }
     #pennantWin {
-      position: fixed; inset: 0;
+      position: fixed;
       z-index: 38;
       background: #101418;
       display: none;
-      /* border + radius make the growing rectangle legible against the
-         page's own dark (Roger 2026-11-27) */
+      overflow: hidden;
+      /* the pilot-assist rectangle (Roger 2026-11-27): starts at the
+         icon's bounds, floats to a centred frame — geometry animated,
+         so the border is real and visible throughout */
       border: 1px solid #3a4a58;
       border-radius: 8px;
       box-sizing: border-box;
-      /* the window is a rectangle that grows out of the icon's spot;
-         clip-path starts at the icon's bounds, opens to inset(0) */
-      transition: clip-path .48s cubic-bezier(.4, 0, .2, 1);
+      transition: left .55s cubic-bezier(.4, 0, .2, 1),
+                  top .55s cubic-bezier(.4, 0, .2, 1),
+                  width .55s cubic-bezier(.4, 0, .2, 1),
+                  height .55s cubic-bezier(.4, 0, .2, 1);
     }
     #pennantWin.open { display: block; }
     #pennantWin iframe {
@@ -175,10 +178,16 @@
   const win = document.createElement('div');
   win.id = 'pennantWin';
   let pennantFrame = null;
-  function pennantRect() {
+  const PENNANT_MARGIN = 12;   // centred frame sits this far off the edges
+  function pennantHome() {
     const r = pennantBtn.getBoundingClientRect();
-    return 'inset(' + r.top + 'px ' + (innerWidth - r.right) + 'px ' +
-      (innerHeight - r.bottom) + 'px ' + r.left + 'px)';
+    return { left: r.left + 'px', top: r.top + 'px',
+      width: r.width + 'px', height: r.height + 'px' };
+  }
+  function pennantFull() {
+    return { left: PENNANT_MARGIN + 'px', top: PENNANT_MARGIN + 'px',
+      width: (innerWidth - PENNANT_MARGIN * 2) + 'px',
+      height: (innerHeight - PENNANT_MARGIN * 2) + 'px' };
   }
   function togglePennant(open) {
     if (open === undefined) open = !win.classList.contains('open');
@@ -190,25 +199,29 @@
         /* fade the flagpole up once it has loaded AND the rectangle
            has had time to cover the screen */
         pennantFrame.addEventListener('load',
-          () => setTimeout(() => win.classList.add('shown'), 480));
+          () => setTimeout(() => win.classList.add('shown'), 500));
         setTimeout(() => win.classList.add('shown'), 2500);   // fallback
         win.appendChild(pennantFrame);
       } else {
-        setTimeout(() => win.classList.add('shown'), 480);
+        setTimeout(() => win.classList.add('shown'), 500);
       }
-      win.style.clipPath = pennantRect();      // start at the icon
+      Object.assign(win.style, pennantHome());   // start at the icon
       win.classList.add('open');
       pennantBtn.classList.add('open');
       requestAnimationFrame(() => requestAnimationFrame(() => {
-        win.style.clipPath = 'inset(0px 0px 0px 0px)';   // grow to cover
+        Object.assign(win.style, pennantFull());   // float to centre
       }));
     } else {
       win.classList.remove('shown');
-      win.style.clipPath = pennantRect();      // shrink back to the icon
+      Object.assign(win.style, pennantHome());   // float back to the icon
       pennantBtn.classList.remove('open');
-      setTimeout(() => win.classList.remove('open'), 500);
+      setTimeout(() => win.classList.remove('open'), 580);
     }
   }
+  /* keep the centred frame fitted if the window resizes while open */
+  window.addEventListener('resize', () => {
+    if (win.classList.contains('open')) Object.assign(win.style, pennantFull());
+  });
   /* the window can be summoned from outside — a milestone can open it
      outright (uwPennant.open()) or just ping the icon (uw-pennant event) */
   window.uwPennant = {

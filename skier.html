@@ -175,7 +175,7 @@
       if (!buried) {
         // skis
         if (o.skis) {
-          ctx.strokeStyle = AMBER; ctx.lineWidth = 4; ctx.lineCap = 'round';
+          ctx.strokeStyle = o.skiCol || AMBER; ctx.lineWidth = 4; ctx.lineCap = 'round';
           ctx.save(); ctx.rotate(o.skiA || 0);
           ctx.beginPath(); ctx.moveTo(-26, -1); ctx.quadraticCurveTo(0, -4, 28, -1); ctx.stroke();
           ctx.beginPath(); ctx.moveTo(-26, 3); ctx.quadraticCurveTo(0, 0, 28, 3); ctx.stroke();
@@ -258,6 +258,7 @@
     let down = null;           // {x,y,t}
     let run = null;            // run state
     let holdT = 0, holdOK = false;
+    let skierRefuse = 0;       // tapped before a route exists — shake
     let bestY = 0;             // deepest correct point so far (world y)
     let spray = [], poof = [];
     let tapFx = [];            // {x,y,t} — every tap leaves a ripple
@@ -406,21 +407,20 @@
       ctx.lineTo(g.x - GATE_DX + wob, y - POLE_H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(g.x + GATE_DX + wob, y);
       ctx.lineTo(g.x + GATE_DX + wob, y - POLE_H); ctx.stroke();
-      // flag panel with the numeral
+      // flag panel with the numeral — green once tapped into the plan
+      const inPlan = plan.indexOf(g) >= 0;
       const fy = y - POLE_H;
-      ctx.fillStyle = g.bloom > 0 ? TCOL : '#22303c';
-      ctx.globalAlpha = g.bloom > 0 ? 0.5 + 0.5 * g.bloom : 1;
+      ctx.fillStyle = inPlan ? '#35c795' : (g.bloom > 0 ? TCOL : '#22303c');
+      ctx.globalAlpha = !inPlan && g.bloom > 0 ? 0.5 + 0.5 * g.bloom : 1;
       ctx.fillRect(g.x - GATE_DX, fy + 2 + wob * 0.5, GATE_DX * 2, 18);
       ctx.globalAlpha = 1;
-      ctx.fillStyle = g.bloom > 0 ? '#0d141a' : '#cfd8e4';
+      ctx.fillStyle = (inPlan || g.bloom > 0) ? '#0d141a' : '#cfd8e4';
       ctx.font = '700 14px Andika, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(g.v, g.x, fy + 11 + wob * 0.5);
-      // plan marks: amber banner border + order dot — "you tapped me"
+      // order dot — the sequence position in amber
       const oi = plan.indexOf(g);
       if (oi >= 0) {
-        ctx.strokeStyle = AMBER; ctx.lineWidth = 2;
-        ctx.strokeRect(g.x - GATE_DX - 2, fy + wob * 0.5, GATE_DX * 2 + 4, 22);
         ctx.fillStyle = AMBER;
         ctx.beginPath(); ctx.arc(g.x, fy - 7, 8, 0, 7); ctx.fill();
         ctx.fillStyle = '#0d141a';
@@ -609,8 +609,10 @@
          appears at the screen's edge whenever a route exists — the
          skier himself may be scrolled out of sight (Roger 2026-11-27) */
       const go = { x: W - 46, y: H - 46 };
-      if (plan.length && (Math.hypot(sx - s.x, sy - (s.y - camY)) < 62 ||
+      const nearSkier = Math.hypot(sx - s.x, sy - (s.y - camY)) < 62;
+      if (plan.length && (nearSkier ||
           Math.hypot(sx - go.x, sy - go.y) < 48)) { startRun(); return; }
+      if (nearSkier) skierRefuse = 0.6;   // tapped too soon — "not yet"
       let bd = 1e9, bg = null;
       for (const g of gates) {
         const gy = g.y - camY;
@@ -845,10 +847,14 @@
               ctx.beginPath(); ctx.arc(s.x, s.y - camY - 26, 40, 0, 7); ctx.stroke();
               ctx.setLineDash([]);
             }
-            /* once a route exists he bounces — "I'm ready, tap me" */
+            /* once a route exists he bounces, skis gone green —
+               "I'm ready, tap me"; tapped too soon he shakes "not yet" */
+            if (skierRefuse > 0) skierRefuse = Math.max(0, skierRefuse - dt / 0.6);
+            const shk = skierRefuse > 0 ? Math.sin(glowT * 40) * 4 * skierRefuse : 0;
             const hop = plan.length ? Math.max(0, Math.sin(glowT * 7)) * 5 : 0;
-            drawSkier(s.x, s.y - camY - hop, 1,
-              { pose: 'ski', hat: true, goggles: true, skis: true, lean: 0 });
+            drawSkier(s.x + shk, s.y - camY - hop, 1,
+              { pose: 'ski', hat: true, goggles: true, skis: true, lean: 0,
+                skiCol: plan.length ? '#35c795' : AMBER });
             /* the GO pennant — rides the screen edge, always visible
                once a route exists, wherever the camera is */
             if (plan.length) {
@@ -861,7 +867,7 @@
               ctx.strokeStyle = '#cfd8e4'; ctx.lineWidth = 2.5;
               ctx.beginPath(); ctx.moveTo(gb.x - 8, gb.y + 12);
               ctx.lineTo(gb.x - 8, gb.y - 14); ctx.stroke();
-              ctx.fillStyle = TCOL;
+              ctx.fillStyle = '#35c795';
               ctx.beginPath(); ctx.moveTo(gb.x - 8, gb.y - 14);
               ctx.lineTo(gb.x + 13, gb.y - 8);
               ctx.lineTo(gb.x - 8, gb.y - 2); ctx.fill();

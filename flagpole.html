@@ -10,7 +10,7 @@
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#101418">
+  <meta name="theme-color" content="#0f1a3e">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title>Flagpole — Any Number of Times</title>
@@ -20,7 +20,7 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      background: #101418;
+      background: #0f1a3e;
       overflow: hidden;
       touch-action: none;
       user-select: none;
@@ -445,7 +445,7 @@
         starK = Math.min(1, starK + dt / 1.2);
 
       /* sky + ground */
-      ctx.fillStyle = '#0d141a';
+      ctx.fillStyle = '#0f1a3e';
       ctx.fillRect(0, 0, W, gy);
       ctx.fillStyle = '#16211c';
       ctx.fillRect(0, gy, W, H - gy);
@@ -533,7 +533,7 @@
     requestAnimationFrame(draw);
   </script>
 
-  <script src="nav.js?v=25"></script>
+  <script src="nav.js?v=26"></script>
 </body>
 
 </html>

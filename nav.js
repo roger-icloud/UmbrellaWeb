@@ -6,6 +6,11 @@
 (function () {
   'use strict';
 
+  /* inside the pennant window (or any iframe) the page keeps its
+     content but draws no chrome — one set of icons lives on the host,
+     else the two layers superimpose out of register (Roger 2026-11-27) */
+  if (window.top !== window.self) return;
+
   /* launched via "Add to Home Screen" the app already has no browser
      chrome, so a fullscreen toggle would be a no-op — drop the row.
      iPhone Safari/Chrome can't fullscreen a web page at all (Apple

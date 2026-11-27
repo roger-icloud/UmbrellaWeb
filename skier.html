@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <script src="gate.js?v=2"></script>
+  <link rel="icon" type="image/svg+xml" href="icons/icon-coil.svg">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <meta charset="utf-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f1a3e">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <title>Skier — Any Number of Times</title>
+  <meta name="description" content="Dress for the slope, plan the line, run it.">
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      background: #0f1a3e; touch-action: none;
+      -webkit-user-select: none; user-select: none;
+      font-family: Andika, -apple-system, ui-monospace, Menlo, monospace;
+    }
+    canvas { display: block; position: fixed; inset: 0; }
+  </style>
+  <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/andika.css">
+</head>
+
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    'use strict';
+    /* skier — draft of the assemble→predict→test spine (Roger 2026-11-27).
+       assemble: dress the skier (hat, goggles, skis dragged onto the
+       body — clothes are separate parts). The dressed figure shrinks
+       into the slalom landscape. predict: tap numbered gates in table
+       order to plan the line; the slope is a real-scale world taller
+       than the screen — drag the snow to look down the mountain.
+       test: tap the skier; he runs the tapped line faithfully — the
+       run never cheats. A wrong plan ends off-piste in deep snow,
+       quietly; a true line earns the drift at the bottom. The scroll
+       itself is the score: the mountain you see is the mountain you
+       earned. Diagnostics: ?t=N ?dressed ?plan[=wrong] ?run[=wrong]
+       ?hold[=bad] (jumps to a frozen end pose) */
+
+    /* ---------- tunables ---------- */
+    const SLOPE_LEN = 4;        // world height = SLOPE_LEN × screen H
+    const N_DISTRACT = 9;       // non-member gates on the hill
+    const START_Y = 0.55;       // skier waits here (× H, world coords)
+    const FIRST_GATE = 0.95;    // first member gate (× H)
+    const RUNOUT = 380;         // flat at the bottom for the drift
+    const GATE_DX = 27;         // half-gap between a gate's poles
+    const POLE_H = 42;          // pole height
+    const ZIG = 0.20;           // slalom sway half-amplitude (× W)
+    const SKI_SPEED = 250;      // px/s along the plan
+    const LOOKAHEAD = 52;       // steering lookahead along the path
+    const HOLD_OK = 2.8;        // linger in the drift (s)
+    const HOLD_BAD = 1.9;       // sit in deep snow (s)
+    const TRAY_H = 96;          // dressing shelf
+    const DRESS_SCALE = 3.1;    // dressing-room figure size
+    const SNAP_R = 64;          // clothing zone acceptance radius
+    const REFUSE_R = 46;        // near-enough-to-mean-it radius
+    const TAP_MS = 350, TAP_MOVE = 9;
+    const PULSE_S = 1.6;        // zone / skier glow cycle
+
+    const Q = new URLSearchParams(location.search);
+    const TABLE = Math.min(12, Math.max(2, +Q.get('t') || 7));
+    const HUE = (TABLE * 31 + 200) % 360;
+    const TCOL = 'hsl(' + HUE + ',60%,50%)';
+    const SKY = '#0f1a3e', SNOW = '#dde7f2', SNOW_SH = '#b8c8dc';
+    const DARK = '#101418', AMBER = '#e0a53a';
+
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, DPR = 1, SLOPE_H = 0;
+
+    /* ---------- seeded rng (layout is stable per table) ---------- */
+    function mulberry(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    /* ---------- the mountain ---------- */
+    let gates = [];   // {x,y,v,member,bloom,wobble,tapped-order}
+    let trees = [];   // {x,y,s}
+    const members = [];
+
+    function buildSlope() {
+      const rnd = mulberry(7919 + TABLE);   // reseeded → identical layout on rebuild
+      gates = []; trees = []; members.length = 0;
+      const y0 = FIRST_GATE * H, y1 = SLOPE_H - RUNOUT - 60;
+      for (let i = 1; i <= 12; i++) {
+        const y = y0 + (y1 - y0) * (i - 1) / 11;
+        const side = i % 2 ? -1 : 1;
+        const x = W / 2 + side * ZIG * W * (0.7 + 0.55 * rnd());
+        const g = { x: Math.min(W - 60, Math.max(60, x)), y,
+                    v: TABLE * i, member: true, bloom: 0, wobble: 0 };
+        members.push(g); gates.push(g);
+      }
+      const used = new Set(members.map(g => g.v));
+      let tries = 0;
+      while (gates.length < 12 + N_DISTRACT && tries++ < 300) {
+        const k = 1 + Math.floor(rnd() * 12);
+        let v = TABLE * k + (rnd() < 0.5 ? -1 : 1) * (1 + Math.floor(rnd() * 2));
+        if (v < 2 || v > 150 || used.has(v)) continue;
+        const yi = 1 + Math.floor(rnd() * 11);
+        const y = y0 + (y1 - y0) * (yi - 1 + 0.35 + 0.3 * rnd()) / 11;
+        const side = rnd() < 0.5 ? -1 : 1;
+        const x = W / 2 + side * ZIG * W * (1.5 + 0.7 * rnd());
+        used.add(v);
+        gates.push({ x: Math.min(W - 55, Math.max(55, x)), y,
+                     v, member: false, bloom: 0, wobble: 0 });
+      }
+      for (let i = 0; i < 26; i++) {
+        const side = rnd() < 0.5 ? -1 : 1;
+        trees.push({
+          x: W / 2 + side * (W * (0.34 + 0.14 * rnd())),
+          y: 0.5 * H + rnd() * (SLOPE_H - H),
+          s: 0.6 + rnd() * 0.9
+        });
+      }
+    }
+
+    /* ---------- the skier ---------- */
+    /* local space: origin at the feet, ~64 px tall at s=1 */
+    function drawSkier(x, y, s, o) {
+      // o: {lean, pose:'stand'|'ski'|'sit'|'buried', hat,goggles,skis}
+      ctx.save();
+      ctx.translate(x, y); ctx.scale(s, s);
+      const lean = (o.lean || 0);
+      if (o.pose === 'buried') {
+        ctx.fillStyle = SNOW; ctx.strokeStyle = SNOW_SH; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(0, 0, 46, 13, 0, 0, 7); ctx.fill(); ctx.stroke();
+      }
+      if (o.pose === 'sit') {
+        ctx.rotate(lean * 0.4);
+        ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-4, -14); ctx.lineTo(-16, -4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(4, -14); ctx.lineTo(18, -6); ctx.stroke();
+        ctx.fillStyle = '#3a7ca5';
+        ctx.beginPath(); ctx.ellipse(0, -22, 10, 13, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = SNOW;
+        ctx.beginPath(); ctx.ellipse(0, -2, 30, 9, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = '#e8ccab';
+        ctx.beginPath(); ctx.arc(0, -42, 8.5, 0, 7); ctx.fill();
+        if (o.goggles) {
+          ctx.fillStyle = '#22303c';
+          ctx.fillRect(-8, -46, 16, 5.5);
+          ctx.fillStyle = 'rgba(255,255,255,.5)';
+          ctx.fillRect(-5, -44.5, 3.5, 2); ctx.fillRect(2, -44.5, 3.5, 2);
+        }
+        if (o.hat) {
+          ctx.fillStyle = TCOL;
+          ctx.beginPath(); ctx.arc(0, -48, 8, Math.PI, 0); ctx.fill();
+          ctx.fillRect(-8, -49.5, 16, 3);
+          ctx.beginPath(); ctx.arc(0, -57, 3.5, 0, 7); ctx.fill();
+        }
+        ctx.restore(); return;
+      }
+      const buried = o.pose === 'buried';
+      ctx.rotate(lean * 0.55);
+      const hipY = buried ? 6 : -22, shY = buried ? -8 : -44;
+      if (!buried) {
+        // skis
+        if (o.skis) {
+          ctx.strokeStyle = AMBER; ctx.lineWidth = 4; ctx.lineCap = 'round';
+          ctx.save(); ctx.rotate(o.skiA || 0);
+          ctx.beginPath(); ctx.moveTo(-26, -1); ctx.quadraticCurveTo(0, -4, 28, -1); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(-26, 3); ctx.quadraticCurveTo(0, 0, 28, 3); ctx.stroke();
+          ctx.restore();
+        }
+        // legs
+        ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-3, hipY); ctx.lineTo(-7, -3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(3, hipY); ctx.lineTo(8, -3); ctx.stroke();
+      }
+      // torso
+      ctx.strokeStyle = '#3a7ca5'; ctx.lineWidth = 13; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(0, hipY); ctx.lineTo(0, shY); ctx.stroke();
+      // arms out a touch
+      ctx.lineWidth = 5.5;
+      ctx.beginPath(); ctx.moveTo(-2, shY + 6); ctx.lineTo(-14, shY + 15); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(2, shY + 6); ctx.lineTo(14, shY + 15); ctx.stroke();
+      // head
+      ctx.fillStyle = '#e8ccab';
+      ctx.beginPath(); ctx.arc(0, shY - 13, 8.5, 0, 7); ctx.fill();
+      if (o.goggles) {
+        ctx.fillStyle = '#22303c'; ctx.fillRect(-8, shY - 17, 16, 5.5);
+        ctx.fillStyle = 'rgba(255,255,255,.5)';
+        ctx.fillRect(-5, shY - 15.5, 3.5, 2); ctx.fillRect(2, shY - 15.5, 3.5, 2);
+      }
+      if (o.hat) {
+        ctx.fillStyle = TCOL;
+        ctx.beginPath(); ctx.arc(0, shY - 19, 8, Math.PI, 0); ctx.fill();
+        ctx.fillRect(-8, shY - 20.5, 16, 3);
+        ctx.beginPath(); ctx.arc(0, shY - 28, 3.5, 0, 7); ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    /* ---------- clothing items (the tray) ---------- */
+    const ITEMS = [
+      { k: 'hat', zone: 'head', label: 'hat' },
+      { k: 'goggles', zone: 'face', label: 'goggles' },
+      { k: 'skis', zone: 'feet', label: 'skis' }
+    ];
+    // dressing-room figure geometry (recomputed on resize)
+    let dress = { x: 0, feetY: 0, zones: {} };
+    function dressZones() {
+      const f = dress.feetY, s = DRESS_SCALE;
+      dress.zones = {
+        head: { x: dress.x, y: f - 68 * s, r: 44 },   // above the head, where a hat lands
+        face: { x: dress.x, y: f - 55 * s, r: 34 },   // over the eyes
+        feet: { x: dress.x, y: f - 4, r: 52 }
+      };
+    }
+    function drawItem(k, x, y, s) {
+      ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+      if (k === 'hat') {
+        ctx.fillStyle = TCOL;
+        ctx.beginPath(); ctx.arc(0, 0, 12, Math.PI, 0); ctx.fill();
+        ctx.fillRect(-12, -2, 24, 4);
+        ctx.beginPath(); ctx.arc(0, -14, 4.5, 0, 7); ctx.fill();
+      } else if (k === 'goggles') {
+        ctx.fillStyle = '#22303c';
+        ctx.beginPath(); ctx.roundRect(-14, -5, 28, 10, 5); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,.5)';
+        ctx.fillRect(-8, -2.5, 5, 3); ctx.fillRect(3, -2.5, 5, 3);
+      } else {
+        ctx.strokeStyle = AMBER; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-24, -3); ctx.quadraticCurveTo(0, -7, 26, -3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-24, 4); ctx.quadraticCurveTo(0, 0, 26, 4); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    /* ---------- state ---------- */
+    let stage = 'dress';       // dress | enter | plan | run | hold
+    let worn = { hat: false, goggles: false, skis: false };
+    let carried = null;        // {k,x,y} item being dragged
+    let refuse = { zone: null, until: 0 };
+    let enterT = 0;            // 0..1 shrink transition
+    let camY = 0, camTarget = 0;
+    let plan = [];             // ordered gates the learner tapped
+    let pan = null;            // {y0, cam0, moved}
+    let down = null;           // {x,y,t}
+    let run = null;            // run state
+    let holdT = 0, holdOK = false;
+    let bestY = 0;             // deepest correct point so far (world y)
+    let spray = [], poof = [];
+    let glowT = 0;
+    let booted = false;        // ?-param bootstrap runs once
+
+    const startPt = () => ({ x: W / 2, y: START_Y * H });
+    const driftPt = () => ({ x: W / 2, y: SLOPE_H - 150 });
+
+    /* ---------- the plan ---------- */
+    function planPts() {
+      const p = [startPt()];
+      for (const g of plan) p.push({ x: g.x, y: g.y });
+      return p;
+    }
+
+    /* how the tapped plan ends. The run is faithful: the skier skis
+       through plan[0..wrongAt] — the wrong gate included — then veers
+       off-piste; a perfect twelve earn the drift. {pts, end, through} */
+    function planOutcome() {
+      let wrongAt = -1;
+      for (let i = 0; i < plan.length; i++)
+        if (plan[i].v !== TABLE * (i + 1)) { wrongAt = i; break; }
+      const through = wrongAt === -1 ? plan.length : wrongAt + 1;
+      const pts = [startPt()];
+      for (let i = 0; i < through; i++) pts.push({ x: plan[i].x, y: plan[i].y });
+      if (wrongAt === -1 && plan.length === 12) {
+        pts.push(driftPt());
+        return { pts, end: 'drift', through };
+      }
+      const last = plan[through - 1];
+      const dir = last.x < W / 2 ? -1 : 1;
+      pts.push({ x: Math.min(W - 44, Math.max(44, last.x + dir * (W * 0.30))),
+                 y: last.y + 340 });
+      return { pts, end: 'snow', through };
+    }
+
+    /* ---------- path following ---------- */
+    function segLens(pts) {
+      const L = [0];
+      for (let i = 1; i < pts.length; i++)
+        L.push(L[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      return L;
+    }
+    function pointAt(pts, L, d) {
+      if (d <= 0) return pts[0];
+      if (d >= L[L.length - 1]) return pts[pts.length - 1];
+      let i = 1;
+      while (L[i] < d) i++;
+      const t = (d - L[i - 1]) / (L[i] - L[i - 1]);
+      return { x: pts[i - 1].x + (pts[i].x - pts[i].x) * t,
+               y: pts[i - 1].y + (pts[i].y - pts[i].y) * t };
+    }
+    function project(pts, p) {   // approx arclength of nearest point
+      let best = 0, bd = 1e9, acc = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i];
+        const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+        let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2;
+        t = Math.max(0, Math.min(1, t));
+        const qx = a.x + dx * t, qy = a.y + dy * t;
+        const d = (p.x - qx) ** 2 + (p.y - qy) ** 2;
+        if (d < bd) { bd = d; best = acc + Math.sqrt(l2) * t; }
+        acc += Math.sqrt(l2);
+      }
+      return best;
+    }
+
+    /* ---------- run ---------- */
+    function startRun() {
+      const oc = planOutcome();
+      run = {
+        pts: oc.pts, L: segLens(oc.pts), end: oc.end,
+        through: plan.slice(0, oc.through),
+        pos: { ...oc.pts[0] }, d: 0, speed: 0,
+        heading: { x: 0, y: 1 }, lean: 0, done: false
+      };
+      stage = 'run';
+      gates.forEach(g => g.bloom = 0);
+    }
+    function stepRun(dt) {
+      const r = run;
+      const total = r.L[r.L.length - 1];
+      const nearEnd = total - r.d < 120;
+      r.speed = nearEnd && r.end === 'snow' ? Math.max(0, r.speed - dt * 260)
+                                          : Math.min(SKI_SPEED, r.speed + dt * 300);
+      // steer toward a lookahead point on the path
+      const look = pointAt(r.pts, r.L, r.d + LOOKAHEAD);
+      const dx = look.x - r.pos.x, dy = look.y - r.pos.y;
+      const dl = Math.hypot(dx, dy) || 1;
+      const want = { x: dx / dl, y: dy / dl };
+      const turn = 6 * dt;
+      r.heading.x += (want.x - r.heading.x) * Math.min(1, turn);
+      r.heading.y += (want.y - r.heading.y) * Math.min(1, turn);
+      const hl = Math.hypot(r.heading.x, r.heading.y) || 1;
+      r.heading.x /= hl; r.heading.y /= hl;
+      const prevLean = r.lean;
+      r.lean += (r.heading.x * 1.2 - r.lean) * Math.min(1, 5 * dt);
+      r.pos.x += r.heading.x * r.speed * dt;
+      r.pos.y += r.heading.y * r.speed * dt;
+      r.d = Math.max(r.d, project(r.pts, r.pos));
+      // carve spray
+      if (r.speed > 60 && Math.random() < 0.5)
+        spray.push({ x: r.pos.x - r.heading.x * 12, y: r.pos.y,
+                     vx: -r.lean * 30 + (Math.random() - .5) * 20,
+                     vy: -20 - Math.random() * 30, a: 0.55, r: 2 + Math.random() * 3 });
+      // gate passes — only the gates the line actually visits
+      for (const g of r.through) {
+        const gd = project(r.pts, g);
+        if (!g.passed && r.d > gd - 6) { g.passed = true; g.bloom = 1; }
+      }
+      if (r.d >= total - 4) {
+        if (r.end === 'drift') {
+          for (let i = 0; i < 26; i++)
+            poof.push({ x: r.pos.x + (Math.random() - .5) * 40,
+                        y: r.pos.y + (Math.random() - .5) * 10,
+                        vx: (Math.random() - .5) * 90, vy: -30 - Math.random() * 70,
+                        a: 0.9, r: 3 + Math.random() * 7 });
+          finish(true);
+        } else if (r.speed <= 2 || r.d >= total - 4) {
+          finish(false);
+        }
+      }
+      camTarget = Math.min(SLOPE_H - H, Math.max(0, r.pos.y - H * 0.38));
+    }
+    function finish(ok) {
+      stage = 'hold'; holdOK = ok; holdT = 0;
+      if (ok) bestY = 0;
+      else bestY = Math.max(bestY, run.pos.y);
+      run.pose = ok ? 'buried' : 'sit';
+      gates.forEach(g => g.passed = false);
+    }
+
+    /* ---------- drawing ---------- */
+    function drawGate(g) {
+      const y = g.y - camY;
+      if (y < -60 || y > H + 60) return;
+      const wob = g.wobble > 0 ? Math.sin(g.wobble * 30) * g.wobble * 5 : 0;
+      ctx.strokeStyle = '#7fb2a5'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(g.x - GATE_DX + wob, g.y);
+      ctx.lineTo(g.x - GATE_DX + wob, g.y - POLE_H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(g.x + GATE_DX + wob, g.y);
+      ctx.lineTo(g.x + GATE_DX + wob, g.y - POLE_H); ctx.stroke();
+      // flag panel with the numeral
+      const fy = g.y - POLE_H;
+      ctx.fillStyle = g.bloom > 0 ? TCOL : '#22303c';
+      ctx.globalAlpha = g.bloom > 0 ? 0.5 + 0.5 * g.bloom : 1;
+      ctx.fillRect(g.x - GATE_DX, fy + 2 + wob * 0.5, GATE_DX * 2, 18);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = g.bloom > 0 ? '#0d141a' : '#cfd8e4';
+      ctx.font = '700 14px Andika, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(g.v, g.x, fy + 11 + wob * 0.5);
+      // plan order dot
+      const oi = plan.indexOf(g);
+      if (oi >= 0) {
+        ctx.fillStyle = AMBER;
+        ctx.beginPath(); ctx.arc(g.x, fy - 7, 8, 0, 7); ctx.fill();
+        ctx.fillStyle = '#0d141a';
+        ctx.font = '700 11px Andika, monospace';
+        ctx.fillText(oi + 1, g.x, fy - 7);
+      }
+      ctx.fillStyle = SNOW;
+      ctx.beginPath(); ctx.ellipse(g.x - GATE_DX, g.y, 6, 2.5, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(g.x + GATE_DX, g.y, 6, 2.5, 0, 0, 7); ctx.fill();
+    }
+    function drawWorld(dt) {
+      // sky
+      ctx.fillStyle = SKY; ctx.fillRect(0, 0, W, H);
+      // snow field
+      ctx.fillStyle = SNOW;
+      ctx.beginPath();
+      ctx.moveTo(0, -camY);
+      ctx.quadraticCurveTo(W / 2, 40 - camY, W, -camY);
+      ctx.lineTo(W, SLOPE_H - camY); ctx.lineTo(0, SLOPE_H - camY);
+      ctx.fill();
+      // soft contours
+      ctx.strokeStyle = 'rgba(184,200,220,.35)'; ctx.lineWidth = 2;
+      for (let i = 1; i < SLOPE_LEN * 4; i++) {
+        const y = i * H * 0.25 - camY;
+        if (y < -20 || y > H + 20) continue;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.bezierCurveTo(W * .3, y - 14, W * .7, y + 14, W, y);
+        ctx.stroke();
+      }
+      // trees
+      for (const t of trees) {
+        const y = t.y - camY;
+        if (y < -40 || y > H + 40) continue;
+        ctx.fillStyle = '#22303c';
+        ctx.beginPath();
+        ctx.moveTo(t.x, y - 26 * t.s);
+        ctx.lineTo(t.x - 11 * t.s, y); ctx.lineTo(t.x + 11 * t.s, y);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(221,231,242,.8)';
+        ctx.beginPath();
+        ctx.moveTo(t.x, y - 26 * t.s);
+        ctx.lineTo(t.x - 6 * t.s, y - 12 * t.s); ctx.lineTo(t.x + 6 * t.s, y - 12 * t.s);
+        ctx.fill();
+      }
+      // drift mound at the bottom
+      const dy = SLOPE_H - camY;
+      if (dy > -80 && dy < H + 80) {
+        ctx.fillStyle = '#eef4fa';
+        ctx.beginPath(); ctx.ellipse(W / 2, dy - 120, W * 0.3, 46, 0, Math.PI, 0); ctx.fill();
+      }
+      // best-so-far pennant marker
+      if (bestY) {
+        const y = bestY - camY;
+        if (y > -30 && y < H + 30) {
+          ctx.strokeStyle = '#8fa8b8'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(W - 26, y); ctx.lineTo(W - 26, y - 26); ctx.stroke();
+          ctx.fillStyle = TCOL;
+          ctx.beginPath(); ctx.moveTo(W - 26, y - 26);
+          ctx.lineTo(W - 8, y - 20); ctx.lineTo(W - 26, y - 14); ctx.fill();
+        }
+      }
+      // planned route
+      if (plan.length && stage === 'plan') {
+        const pts = planPts();
+        ctx.strokeStyle = 'rgba(34,48,60,.5)'; ctx.lineWidth = 2;
+        ctx.setLineDash([7, 7]);
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y - camY);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y - camY);
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      gates.forEach(drawGate);
+      // spray + poof particles
+      for (const p of spray) {
+        ctx.fillStyle = 'rgba(255,255,255,' + p.a + ')';
+        ctx.beginPath(); ctx.arc(p.x, p.y - camY, p.r, 0, 7); ctx.fill();
+      }
+      for (const p of poof) {
+        ctx.fillStyle = 'rgba(238,244,250,' + p.a + ')';
+        ctx.beginPath(); ctx.arc(p.x, p.y - camY, p.r, 0, 7); ctx.fill();
+      }
+      // start plateau mark
+      const sy = startPt().y - camY;
+      if (sy > -20 && sy < H + 20) {
+        ctx.strokeStyle = SNOW_SH; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(W * 0.3, sy); ctx.lineTo(W * 0.7, sy); ctx.stroke();
+      }
+    }
+    function drawChip() {
+      ctx.font = '700 15px Andika, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const t = '×' + TABLE, tw = ctx.measureText(t).width + 22;
+      ctx.fillStyle = 'rgba(16,20,24,.6)';
+      ctx.beginPath(); ctx.roundRect(10, 10, tw, 26, 13); ctx.fill();
+      ctx.fillStyle = TCOL; ctx.fillText(t, 21, 24);
+    }
+
+    /* ---------- stages ---------- */
+    let returning = [];   // items gliding home {k,x,y,tx,ty,t}
+    function itemHome(k) {
+      const i = ITEMS.findIndex(e => e.k === k);
+      const cw = W / ITEMS.length;
+      return { x: cw * i + cw / 2, y: H - TRAY_H / 2 };
+    }
+    function drawTray() {
+      ctx.fillStyle = 'rgba(16,20,24,.55)';
+      ctx.fillRect(0, H - TRAY_H, W, TRAY_H);
+      ctx.strokeStyle = 'rgba(127,178,165,.25)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, H - TRAY_H); ctx.lineTo(W, H - TRAY_H); ctx.stroke();
+      for (const it of ITEMS) {
+        const home = itemHome(it.k);
+        ctx.fillStyle = '#1c2732';
+        ctx.beginPath(); ctx.roundRect(home.x - 34, home.y - 34, 68, 68, 12); ctx.fill();
+        ctx.strokeStyle = 'rgba(127,178,165,.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+        if (worn[it.k] || (carried && carried.k === it.k) ||
+            returning.some(r => r.k === it.k)) continue;
+        drawItem(it.k, home.x, home.y, 1.4);
+      }
+      for (const r of returning) drawItem(r.k, r.x, r.y, 1.4);
+      if (carried) drawItem(carried.k, carried.x, carried.y, 1.7);
+      // zone pulse while carrying
+      if (carried) {
+        const z = dress.zones[carried.zone];
+        const pl = 0.5 + 0.5 * Math.sin(glowT * 2 * Math.PI / PULSE_S);
+        ctx.strokeStyle = 'rgba(224,165,58,' + (0.35 + 0.45 * pl) + ')';
+        ctx.lineWidth = 2.5; ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (refuse.until > performance.now()) {
+        const z = dress.zones[refuse.zone];
+        const a = (refuse.until - performance.now()) / 500;
+        ctx.strokeStyle = 'rgba(224,165,58,' + a + ')';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(z.x, z.y, z.r + 4, 0, 7); ctx.stroke();
+      }
+    }
+    function drawDress() {
+      ctx.fillStyle = DARK; ctx.fillRect(0, 0, W, H);
+      drawSkier(dress.x, dress.feetY, DRESS_SCALE,
+        { pose: 'stand', hat: worn.hat, goggles: worn.goggles, skis: worn.skis, lean: 0 });
+      drawTray();
+    }
+    function drawEnter() {
+      ctx.globalAlpha = Math.min(1, enterT * 1.6);   // the landscape fades up
+      drawWorld(0);
+      ctx.globalAlpha = 1;
+      const t = Math.min(1, enterT);
+      const e = t * t * (3 - 2 * t);
+      const s = startPt();
+      const x = dress.x + (s.x - dress.x) * e;
+      const y = dress.feetY + (s.y - dress.feetY) * e;
+      const sc = DRESS_SCALE + (1 - DRESS_SCALE) * e;
+      drawSkier(x, y, sc, { pose: 'ski', hat: true, goggles: true, skis: true, lean: 0 });
+      drawChip();
+    }
+
+    /* ---------- pointer ---------- */
+    function toWorld(e) {
+      const r = cv.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top + camY };
+    }
+    function nearGate(p) {
+      for (const g of gates)
+        if (Math.abs(p.x - g.x) < GATE_DX + 14 &&
+            Math.abs(p.y - (g.y - POLE_H / 2)) < POLE_H / 2 + 14) return g;
+      return null;
+    }
+    cv.addEventListener('pointerdown', e => {
+      const p = toWorld(e);
+      down = { x: p.x, y: p.y, t: performance.now() };
+      pan = null;
+      if (stage === 'dress') {
+        const i = ITEMS.findIndex(it => {
+          const home = itemHome(it.k);
+          return !worn[it.k] && !returning.some(r => r.k === it.k) &&
+                 Math.hypot(p.x - home.x, p.y - (home.y + camY)) < 40;
+        });
+        if (i >= 0) carried = { k: ITEMS[i].k, x: p.x, y: p.y - camY, zone: ITEMS[i].zone };
+      } else if (stage === 'hold') {
+        // tap to skip the linger
+        plan = []; stage = 'plan'; camTarget = 0; run = null;
+      }
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!down) return;
+      const p = toWorld(e);
+      if (carried) { carried.x = p.x; carried.y = p.y - camY; return; }
+      if (stage === 'plan') {
+        const dy = p.y - down.y;
+        if (!pan && Math.abs(dy) + Math.abs(p.x - down.x) > TAP_MOVE) pan = true;
+        if (pan) camTarget = Math.min(SLOPE_H - H, Math.max(0, camY - (p.y - down.y)));
+      }
+    });
+    cv.addEventListener('pointerup', e => {
+      const p = toWorld(e);
+      const quick = performance.now() - down.t < TAP_MS &&
+                    Math.hypot(p.x - down.x, p.y - down.y) < TAP_MOVE;
+      if (carried) {
+        const z = dress.zones[carried.zone];
+        if (Math.hypot(p.x - z.x, p.y - camY - z.y) < SNAP_R) {
+          worn[carried.k] = true;
+          if (worn.hat && worn.goggles && worn.skis) {
+            stage = 'enter'; enterT = 0;
+          }
+        } else {
+          let hit = null;
+          for (const k in dress.zones) {
+            const zz = dress.zones[k];
+            if (Math.hypot(p.x - zz.x, p.y - camY - zz.y) < REFUSE_R) hit = k;
+          }
+          if (hit && hit !== carried.zone)
+            refuse = { zone: hit, until: performance.now() + 500 };
+          const home = itemHome(carried.k);
+          returning.push({ k: carried.k, x: p.x, y: p.y - camY,
+                           tx: home.x, ty: home.y, t: 0 });
+        }
+        carried = null;
+      } else if (stage === 'plan' && quick && !pan) {
+        const s = startPt();
+        if (plan.length && Math.hypot(p.x - s.x, p.y - s.y) < 50) { startRun(); }
+        else {
+          const g = nearGate(p);
+          if (g) {
+            const oi = plan.indexOf(g);
+            if (oi === plan.length - 1) plan.pop();          // undo last
+            else if (oi >= 0) g.wobble = 0.5;                // mid-plan: refuse
+            else plan.push(g);
+          }
+        }
+      } else if (stage === 'plan' && pan) {
+        camY = camTarget;
+      }
+      down = null; pan = null;
+    });
+    cv.addEventListener('pointercancel', () => {
+      if (carried) {
+        const home = itemHome(carried.k);
+        returning.push({ k: carried.k, x: carried.x, y: carried.y,
+                         tx: home.x, ty: home.y, t: 0 });
+        carried = null;
+      }
+      down = null; pan = null;
+    });
+
+    /* ---------- resize ---------- */
+    function resize() {
+      const vv = window.visualViewport;
+      const w = vv ? vv.width : innerWidth, h = vv ? vv.height : innerHeight;
+      if (w < 60 || h < 60) return;
+      DPR = Math.min(3, devicePixelRatio || 1);
+      cv.width = Math.round(w * DPR); cv.height = Math.round(h * DPR);
+      cv.style.width = w + 'px'; cv.style.height = h + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      W = w; H = h; SLOPE_H = SLOPE_LEN * H;
+      dress = { x: W / 2, feetY: Math.min(H * 0.68, H - TRAY_H - 30), zones: {} };
+      dressZones();
+      buildSlope();
+      if (!booted) {
+        booted = true;
+        if (Q.has('dressed') || Q.has('plan') || Q.has('run')) {
+          worn = { hat: true, goggles: true, skis: true };
+          stage = 'plan';
+        }
+        if (Q.has('plan') || Q.has('run')) {
+          plan = members.slice();
+          if (Q.get('plan') === 'wrong' || Q.get('run') === 'wrong') {
+            const g = plan[2]; plan[2] = plan[3]; plan[3] = g;
+          }
+          if (Q.has('run')) setTimeout(startRun, 400);
+        }
+        if (Q.has('hold')) {           // jump straight to an end pose
+          worn = { hat: true, goggles: true, skis: true };
+          plan = members.slice();
+          const ok = Q.get('hold') !== 'bad';
+          if (!ok) { const g = plan[2]; plan[2] = plan[3]; plan[3] = g; }
+          const oc = planOutcome();
+          const L = segLens(oc.pts), total = L[L.length - 1];
+          run = { pts: oc.pts, L, end: oc.end,
+                  through: plan.slice(0, oc.through),
+                  pos: ok ? driftPt()
+                          : { x: oc.pts[oc.pts.length - 1].x,
+                              y: oc.pts[oc.pts.length - 1].y },
+                  d: total, speed: 0, heading: { x: 0, y: 1 },
+                  lean: 0, pose: ok ? 'buried' : 'sit' };
+          holdOK = ok; stage = 'hold'; holdT = -9e9;   // frozen for the shot
+          camY = camTarget = Math.min(SLOPE_H - H,
+            Math.max(0, run.pos.y - H * 0.38));
+        }
+      }
+    }
+    window.addEventListener('resize', resize);
+    if (window.visualViewport) visualViewport.addEventListener('resize', resize);
+    resize();
+
+    /* ---------- loop ---------- */
+    let last = performance.now();
+    function frame(now) {
+      try {
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        glowT += dt;
+        // returning items
+        for (const r of returning) {
+          r.t += dt / 0.6;
+          const e = Math.min(1, r.t), ee = e * e * (3 - 2 * e);
+          r.x = r.x + (r.tx - r.x) * ee; r.y = r.y + (r.ty - r.y) * ee;
+          if (e >= 1) returning.splice(returning.indexOf(r), 1);
+        }
+        for (const g of gates) {
+          if (g.bloom > 0) g.bloom = Math.max(0, g.bloom - dt / 1.4);
+          if (g.wobble > 0) g.wobble = Math.max(0, g.wobble - dt);
+        }
+        for (const p of spray) { p.x += p.vx * dt; p.y += p.vy * dt; p.a -= dt * 0.9; }
+        spray = spray.filter(p => p.a > 0);
+        for (const p of poof) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 60 * dt; p.a -= dt * 0.7; }
+        poof = poof.filter(p => p.a > 0);
+
+        camY += (camTarget - camY) * Math.min(1, 5 * dt);
+
+        if (stage === 'dress') drawDress();
+        else if (stage === 'enter') {
+          enterT += dt / 1.1;
+          if (enterT >= 1) { stage = 'plan'; camY = camTarget = 0; }
+          drawEnter();
+        } else {
+          drawWorld(dt);
+          if (stage === 'plan') {
+            const s = startPt();
+            // the waiting skier pulses gently once a plan exists
+            const pl = plan.length
+              ? 0.5 + 0.5 * Math.sin(glowT * 2 * Math.PI / PULSE_S) : 0;
+            if (pl) {
+              ctx.strokeStyle = 'rgba(224,165,58,' + (0.25 + 0.4 * pl) + ')';
+              ctx.lineWidth = 2.5; ctx.setLineDash([5, 5]);
+              ctx.beginPath(); ctx.arc(s.x, s.y - camY - 26, 40, 0, 7); ctx.stroke();
+              ctx.setLineDash([]);
+            }
+            drawSkier(s.x, s.y - camY, 1,
+              { pose: 'ski', hat: true, goggles: true, skis: true, lean: 0 });
+            drawChip();
+          } else if (stage === 'run' || stage === 'hold') {
+            if (stage === 'run') stepRun(dt);
+            else {
+              holdT += dt;
+              if (holdT > (holdOK ? HOLD_OK : HOLD_BAD)) {
+                plan = []; stage = 'plan'; camTarget = 0; run = null;
+              }
+            }
+            if (run) drawSkier(run.pos.x, run.pos.y - camY, 1,
+              { pose: run.pose || 'ski', hat: true, goggles: true, skis: true,
+                lean: run.lean, skiA: Math.atan2(run.heading.y, run.heading.x) });
+            drawChip();
+          }
+        }
+      } catch (err) { /* a bad frame must not kill the loop */ }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+
+</html>

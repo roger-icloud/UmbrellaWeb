@@ -609,8 +609,8 @@
          appears at the screen's edge whenever a route exists — the
          skier himself may be scrolled out of sight (Roger 2026-11-27) */
       const go = { x: W - 46, y: H - 46 };
-      if (plan.length && (Math.hypot(sx - s.x, sy - (s.y - camY)) < 50 ||
-          Math.hypot(sx - go.x, sy - go.y) < 42)) { startRun(); return; }
+      if (plan.length && (Math.hypot(sx - s.x, sy - (s.y - camY)) < 62 ||
+          Math.hypot(sx - go.x, sy - go.y) < 48)) { startRun(); return; }
       let bd = 1e9, bg = null;
       for (const g of gates) {
         const gy = g.y - camY;
@@ -627,7 +627,10 @@
         }
       }
       if (bg) dbgLast = '(' + Math.round(sx) + ',' + Math.round(sy) +
-        ') miss, nearest ' + bg.v + ' d=' + Math.round(bd);
+        ') miss n' + plan.length +
+        ' sk@(' + Math.round(s.x) + ',' + Math.round(s.y - camY) + ')' +
+        ' go@(' + Math.round(go.x) + ',' + Math.round(go.y) + ')' +
+        ' near' + bg.v + ' d' + Math.round(bd);
     }
     cv.addEventListener('pointerdown', e => {
       dbgN.pd++;

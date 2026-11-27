@@ -643,6 +643,12 @@
       }
       down = null; pan = null;
     });
+    /* desktop scrolls with wheel/trackpad, not drag (Roger 2026-11-27) */
+    cv.addEventListener('wheel', e => {
+      if (stage !== 'plan') return;
+      e.preventDefault();
+      camTarget = Math.min(SLOPE_H - H, Math.max(0, camTarget + e.deltaY));
+    }, { passive: false });
     cv.addEventListener('pointercancel', () => {
       if (carried) {
         const home = itemHome(carried.k);
@@ -747,6 +753,15 @@
             }
             drawSkier(s.x, s.y - camY, 1,
               { pose: 'ski', hat: true, goggles: true, skis: true, lean: 0 });
+            /* the slope continues below — a soft chevron says so */
+            if (camY < SLOPE_H - H - 10) {
+              const a = 0.3 + 0.25 * Math.sin(glowT * 3);
+              ctx.strokeStyle = 'rgba(34,48,60,' + a + ')';
+              ctx.lineWidth = 4; ctx.lineCap = 'round';
+              ctx.beginPath();
+              ctx.moveTo(W / 2 - 14, H - 34); ctx.lineTo(W / 2, H - 22);
+              ctx.lineTo(W / 2 + 14, H - 34); ctx.stroke();
+            }
             drawChip();
           } else if (stage === 'run' || stage === 'hold') {
             if (stage === 'run') stepRun(dt);

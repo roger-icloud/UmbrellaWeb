@@ -22,7 +22,7 @@
       -webkit-user-select: none; user-select: none;
       font-family: Andika, -apple-system, ui-monospace, Menlo, monospace;
     }
-    canvas { display: block; position: fixed; inset: 0; }
+    canvas { display: block; position: fixed; inset: 0; touch-action: none; }
   </style>
   <link rel="preload" href="fonts/andika-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/andika-700.woff2" as="font" type="font/woff2" crossorigin>
@@ -117,6 +117,12 @@
         gates.push({ x: Math.min(W - 55, Math.max(55, x)), y,
                      v, member: false, bloom: 0, wobble: 0 });
       }
+      /* no two gates may overlap — nudge colliders down the fall line */
+      for (let i = 1; i < gates.length; i++)
+        for (let j = 0; j < i; j++)
+          if (Math.abs(gates[i].x - gates[j].x) < 95 &&
+              Math.abs(gates[i].y - gates[j].y) < 75)
+            gates[i].y = gates[j].y + 78;
       for (let i = 0; i < 26; i++) {
         const side = rnd() < 0.5 ? -1 : 1;
         trees.push({
@@ -386,16 +392,16 @@
 
     /* ---------- drawing ---------- */
     function drawGate(g) {
-      const y = g.y - camY;
+      const y = g.y - camY;                 // screen space, not world
       if (y < -60 || y > H + 60) return;
       const wob = g.wobble > 0 ? Math.sin(g.wobble * 30) * g.wobble * 5 : 0;
       ctx.strokeStyle = '#7fb2a5'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(g.x - GATE_DX + wob, g.y);
-      ctx.lineTo(g.x - GATE_DX + wob, g.y - POLE_H); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(g.x + GATE_DX + wob, g.y);
-      ctx.lineTo(g.x + GATE_DX + wob, g.y - POLE_H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(g.x - GATE_DX + wob, y);
+      ctx.lineTo(g.x - GATE_DX + wob, y - POLE_H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(g.x + GATE_DX + wob, y);
+      ctx.lineTo(g.x + GATE_DX + wob, y - POLE_H); ctx.stroke();
       // flag panel with the numeral
-      const fy = g.y - POLE_H;
+      const fy = y - POLE_H;
       ctx.fillStyle = g.bloom > 0 ? TCOL : '#22303c';
       ctx.globalAlpha = g.bloom > 0 ? 0.5 + 0.5 * g.bloom : 1;
       ctx.fillRect(g.x - GATE_DX, fy + 2 + wob * 0.5, GATE_DX * 2, 18);
@@ -414,8 +420,8 @@
         ctx.fillText(oi + 1, g.x, fy - 7);
       }
       ctx.fillStyle = SNOW;
-      ctx.beginPath(); ctx.ellipse(g.x - GATE_DX, g.y, 6, 2.5, 0, 0, 7); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(g.x + GATE_DX, g.y, 6, 2.5, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(g.x - GATE_DX, y, 6, 2.5, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(g.x + GATE_DX, y, 6, 2.5, 0, 0, 7); ctx.fill();
     }
     function drawWorld(dt) {
       // sky
@@ -649,6 +655,22 @@
       e.preventDefault();
       camTarget = Math.min(SLOPE_H - H, Math.max(0, camTarget + e.deltaY));
     }, { passive: false });
+    /* iPad belt & braces: if pointer events don't stream on this iOS,
+       pan from raw touch events instead (Roger's field report 2026-11-27) */
+    cv.addEventListener('touchstart', e => {
+      if (down) return;
+      const t = e.touches[0], r = cv.getBoundingClientRect();
+      down = { x: t.clientX - r.left, y: t.clientY - r.top + camY,
+               t: performance.now() };
+    }, { passive: true });
+    cv.addEventListener('touchmove', e => {
+      if (stage !== 'plan' || !down) return;
+      e.preventDefault();
+      const t = e.touches[0], r = cv.getBoundingClientRect();
+      const p = { x: t.clientX - r.left, y: t.clientY - r.top + camY };
+      pan = true;
+      camTarget = Math.min(SLOPE_H - H, Math.max(0, camY - (p.y - down.y)));
+    }, { passive: false });
     cv.addEventListener('pointercancel', () => {
       if (carried) {
         const home = itemHome(carried.k);
@@ -703,6 +725,8 @@
           camY = camTarget = Math.min(SLOPE_H - H,
             Math.max(0, run.pos.y - H * 0.38));
         }
+        const cq = +Q.get('cam');                     // depth diagnostic
+        if (cq) camY = camTarget = Math.min(SLOPE_H - H, cq * H);
       }
     }
     window.addEventListener('resize', resize);

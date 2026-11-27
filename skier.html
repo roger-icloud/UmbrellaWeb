@@ -606,7 +606,12 @@
       tapFx.push({ x: p.x, y: p.y, t: 1 });   // a ripple wherever heard
       if (stage !== 'plan') return;
       const s = startPt();
-      if (plan.length && Math.hypot(p.x - s.x, p.y - s.y) < 50) { startRun(); return; }
+      /* launch: tap the skier at the top, or the GO pennant that
+         appears at the screen's edge whenever a route exists — the
+         skier himself may be scrolled out of sight (Roger 2026-11-27) */
+      const go = { x: W - 46, y: H - 46 + camY };
+      if (plan.length && (Math.hypot(p.x - s.x, p.y - s.y) < 50 ||
+          Math.hypot(p.x - go.x, p.y - go.y) < 42)) { startRun(); return; }
       const g = nearGate(p);
       if (g) {
         const oi = plan.indexOf(g);
@@ -830,6 +835,23 @@
             const hop = plan.length ? Math.max(0, Math.sin(glowT * 7)) * 5 : 0;
             drawSkier(s.x, s.y - camY - hop, 1,
               { pose: 'ski', hat: true, goggles: true, skis: true, lean: 0 });
+            /* the GO pennant — rides the screen edge, always visible
+               once a route exists, wherever the camera is */
+            if (plan.length) {
+              const gb = { x: W - 46, y: H - 46 };
+              const pl2 = 0.5 + 0.5 * Math.sin(glowT * 2 * Math.PI / PULSE_S);
+              ctx.fillStyle = 'rgba(16,20,24,.75)';
+              ctx.beginPath(); ctx.arc(gb.x, gb.y, 30, 0, 7); ctx.fill();
+              ctx.strokeStyle = 'rgba(224,165,58,' + (0.35 + 0.45 * pl2) + ')';
+              ctx.lineWidth = 2; ctx.stroke();
+              ctx.strokeStyle = '#cfd8e4'; ctx.lineWidth = 2.5;
+              ctx.beginPath(); ctx.moveTo(gb.x - 8, gb.y + 12);
+              ctx.lineTo(gb.x - 8, gb.y - 14); ctx.stroke();
+              ctx.fillStyle = TCOL;
+              ctx.beginPath(); ctx.moveTo(gb.x - 8, gb.y - 14);
+              ctx.lineTo(gb.x + 13, gb.y - 8);
+              ctx.lineTo(gb.x - 8, gb.y - 2); ctx.fill();
+            }
             /* the slope continues below — a soft chevron says so */
             if (camY < SLOPE_H - H - 10) {
               const a = 0.3 + 0.25 * Math.sin(glowT * 3);
@@ -862,7 +884,7 @@
           ctx.arc(f.x, f.y - camY, 10 + (1 - f.t) * 26, 0, 7); ctx.stroke();
         }
         if (DEBUG) {
-          ctx.fillStyle = 'rgba(207,216,228,.9)';
+          ctx.fillStyle = 'rgba(34,48,60,.95)';   // dark on the snow
           ctx.font = '11px monospace';
           ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           ctx.fillText(stage +

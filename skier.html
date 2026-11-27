@@ -269,6 +269,12 @@
     const dbgN = { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0, te: 0,
                    tap: 0, pan: 0 };
     let dbgLast = '';          // last tap's verdict for the debug line
+    /* probe for headless/field diagnosis — read-only snapshot */
+    window.__dbg = () => ({ stage, n: plan.length, g: gates.length,
+      camY: Math.round(camY), camT: Math.round(camTarget), W, H, DPR,
+      last: dbgLast, counts: Object.assign({}, dbgN),
+      g0: gates[0] ? { x: Math.round(gates[0].x),
+                       y: Math.round(gates[0].y - camY) } : null });
 
     const startPt = () => ({ x: W / 2, y: START_Y * H });
     const driftPt = () => ({ x: W / 2, y: SLOPE_H - 150 });
@@ -621,18 +627,24 @@
         if (Math.abs(sx - g.x) < GATE_DX + 14 &&
             Math.abs(sy - (gy - POLE_H / 2)) < POLE_H / 2 + 14) {
           const oi = plan.indexOf(g);
-          if (oi === plan.length - 1) plan.pop();        // undo last
-          else if (oi >= 0) g.wobble = 0.5;              // mid-plan: refuse
+          /* oi is -1 both for "not in plan" AND would equal
+             plan.length-1 on an empty plan — without the oi>=0 guard
+             every first tap "undid" nothing and the plan never grew */
+          if (oi >= 0 && oi === plan.length - 1) plan.pop();   // undo last
+          else if (oi >= 0) g.wobble = 0.5;                    // mid-plan: refuse
           else { plan.push(g); g.pop = 1; }
           dbgLast = 'hit ' + g.v;
           return;
         }
       }
       if (bg) dbgLast = '(' + Math.round(sx) + ',' + Math.round(sy) +
-        ') miss n' + plan.length +
+        ') miss n' + plan.length + ' g' + gates.length +
+        ' cam' + Math.round(camY) + ' rt' + Math.round(r.top) +
         ' sk@(' + Math.round(s.x) + ',' + Math.round(s.y - camY) + ')' +
         ' go@(' + Math.round(go.x) + ',' + Math.round(go.y) + ')' +
         ' near' + bg.v + ' d' + Math.round(bd);
+      else dbgLast = '(' + Math.round(sx) + ',' + Math.round(sy) +
+        ') miss g' + gates.length + ' cam' + Math.round(camY);
     }
     cv.addEventListener('pointerdown', e => {
       dbgN.pd++;

@@ -75,6 +75,11 @@
       z-index: 38;
       background: #101418;
       display: none;
+      /* border + radius make the growing rectangle legible against the
+         page's own dark (Roger 2026-11-27) */
+      border: 1px solid #3a4a58;
+      border-radius: 8px;
+      box-sizing: border-box;
       /* the window is a rectangle that grows out of the icon's spot;
          clip-path starts at the icon's bounds, opens to inset(0) */
       transition: clip-path .48s cubic-bezier(.4, 0, .2, 1);

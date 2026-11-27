@@ -75,11 +75,22 @@
       z-index: 38;
       background: #101418;
       display: none;
+      /* the window is a rectangle that grows out of the icon's spot;
+         clip-path starts at the icon's bounds, opens to inset(0) */
+      transition: clip-path .48s cubic-bezier(.4, 0, .2, 1);
     }
     #pennantWin.open { display: block; }
     #pennantWin iframe {
       position: absolute; inset: 0;
       width: 100%; height: 100%; border: none;
+      opacity: 0;
+      transition: opacity .45s ease;
+    }
+    #pennantWin.shown iframe { opacity: 1; }
+    /* a new milestone can ping the icon — quiet "something lives here" */
+    #navPennant.ping { animation: penPing .8s ease 3; }
+    @keyframes penPing {
+      50% { border-color: #35c795; box-shadow: 0 0 14px rgba(53,199,149,.55); }
     }
     #navPanel {
       position: fixed;
@@ -159,21 +170,56 @@
   const win = document.createElement('div');
   win.id = 'pennantWin';
   let pennantFrame = null;
-  function togglePennant() {
-    const open = win.classList.toggle('open');
-    pennantBtn.classList.toggle('open', open);
-    if (open && !pennantFrame) {
-      pennantFrame = document.createElement('iframe');
-      pennantFrame.src = PENNANT_URL;
-      win.appendChild(pennantFrame);
+  function pennantRect() {
+    const r = pennantBtn.getBoundingClientRect();
+    return 'inset(' + r.top + 'px ' + (innerWidth - r.right) + 'px ' +
+      (innerHeight - r.bottom) + 'px ' + r.left + 'px)';
+  }
+  function togglePennant(open) {
+    if (open === undefined) open = !win.classList.contains('open');
+    if (open === win.classList.contains('open')) return;
+    if (open) {
+      if (!pennantFrame) {
+        pennantFrame = document.createElement('iframe');
+        pennantFrame.src = PENNANT_URL;
+        /* fade the flagpole up once it has loaded AND the rectangle
+           has had time to cover the screen */
+        pennantFrame.addEventListener('load',
+          () => setTimeout(() => win.classList.add('shown'), 480));
+        setTimeout(() => win.classList.add('shown'), 2500);   // fallback
+        win.appendChild(pennantFrame);
+      } else {
+        setTimeout(() => win.classList.add('shown'), 480);
+      }
+      win.style.clipPath = pennantRect();      // start at the icon
+      win.classList.add('open');
+      pennantBtn.classList.add('open');
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        win.style.clipPath = 'inset(0px 0px 0px 0px)';   // grow to cover
+      }));
+    } else {
+      win.classList.remove('shown');
+      win.style.clipPath = pennantRect();      // shrink back to the icon
+      pennantBtn.classList.remove('open');
+      setTimeout(() => win.classList.remove('open'), 500);
     }
   }
+  /* the window can be summoned from outside — a milestone can open it
+     outright (uwPennant.open()) or just ping the icon (uw-pennant event) */
+  window.uwPennant = {
+    open: () => togglePennant(true),
+    close: () => togglePennant(false),
+  };
+  document.addEventListener('uw-pennant', () => {
+    pennantBtn.classList.add('ping');
+    setTimeout(() => pennantBtn.classList.remove('ping'), 2400);
+  });
   pennantBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     togglePennant();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && win.classList.contains('open')) togglePennant();
+    if (e.key === 'Escape' && win.classList.contains('open')) togglePennant(false);
   });
 
   /* fullscreen is per-page: navigation drops it, so remember the intent
